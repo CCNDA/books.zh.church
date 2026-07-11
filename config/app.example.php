@@ -20,7 +20,7 @@ return [
         // Cloudflare R2(S3 相容)— 書籍封面儲存,公開網址 + 上傳憑證
         'access_key_id'     => 'R2_ACCESS_KEY_ID',
         'secret_access_key' => 'R2_SECRET_ACCESS_KEY',
-        'endpoint'          => 'https://<account_id>.r2.cloudflarestorage.com/<path>',
+        'endpoint'          => 'https://<account_id>.r2.cloudflarestorage.com',
         'bucket'            => 'BUCKET_NAME',
         'public_url'        => 'https://imgr2.example.net',
         'prefix'            => 'books/',
