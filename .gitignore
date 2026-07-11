@@ -18,3 +18,6 @@ cache/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 部署資訊(本地筆記)
+config/deploy.local.md
