@@ -1,0 +1,20 @@
+# 屬靈共同書目 — Apache 路由(cPanel 部署於網站根目錄)
+RewriteEngine On
+
+# 保護內部目錄與檔案
+RewriteRule ^(config|database|\.git)(/|$) - [F,L]
+<FilesMatch "\.(sql|md|local\.php)$">
+  Require all denied
+</FilesMatch>
+
+# API:全部導向前端控制器
+RewriteRule ^api(/.*)?$ api/index.php [L,QSA]
+
+# 每書獨立短網址 /book/{id} → 前端詳情頁
+RewriteRule ^book/(\d+)$ web/book.php?id=$1 [L,QSA]
+
+# 前端靜態與頁面(web/ 作為文件根)
+RewriteCond %{REQUEST_URI} !^/(api|web)/
+RewriteCond %{DOCUMENT_ROOT}/web%{REQUEST_URI} -f
+RewriteRule ^(.*)$ web/$1 [L]
+RewriteRule ^$ web/index.php [L]
