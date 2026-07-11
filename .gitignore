@@ -1,0 +1,20 @@
+# 環境設定(含 DB/SES 憑證,絕不進版控)
+config/app.local.php
+.env
+*.local.php
+
+# 相依套件
+vendor/
+node_modules/
+composer.lock
+
+# 上傳與快取
+media/uploads/
+web/uploads/
+cache/
+*.log
+
+# 系統雜訊
+.DS_Store
+Thumbs.db
+desktop.ini
