@@ -69,11 +69,17 @@ function get_books(): never
     $params = [];
 
     if ($q !== '') {
-        $where[] = '(b.title LIKE :q OR b.subtitle LIKE :q OR b.author LIKE :q
-                     OR b.translator LIKE :q OR b.publisher LIKE :q
-                     OR b.summary LIKE :q OR b.isbn13 = :isbn OR b.isbn10 = :isbn)';
-        $params[':q']    = '%' . $q . '%';
-        $params[':isbn'] = str_replace('-', '', $q);
+        // 注意:原生預備語句不可重複使用同名參數,故逐一編號
+        $like = '%' . $q . '%';
+        $isbn = str_replace('-', '', $q);
+        $where[] = '(b.title LIKE :q1 OR b.subtitle LIKE :q2 OR b.author LIKE :q3
+                     OR b.translator LIKE :q4 OR b.publisher LIKE :q5
+                     OR b.summary LIKE :q6 OR b.isbn13 = :isbn1 OR b.isbn10 = :isbn2)';
+        for ($i = 1; $i <= 6; $i++) {
+            $params[":q$i"] = $like;
+        }
+        $params[':isbn1'] = $isbn;
+        $params[':isbn2'] = $isbn;
     }
     if ($category > 0) {
         $where[] = 'b.category_id = :cat';
