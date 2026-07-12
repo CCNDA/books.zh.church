@@ -12,7 +12,8 @@
   python -X utf8 logos_crawler.py --limit 50          # 試跑 50 本
 
 robots.txt 無限制;公益小站,保守節流。
-(2026-07-12 依 probe 結果修正:標題去站名前綴、封面補協定、出版社取自 keywords、純文字欄位比對)
+(7/12 二修:中文標籤容忍字間空白、probe 加欄位文字診斷;
+ 已證實:標題去站名前綴、封面補協定、出版社取自 keywords、code 即 ISBN13)
 """
 from __future__ import annotations
 
@@ -42,6 +43,11 @@ def fetch(url: str, force: bool = False) -> str:
     return polite_fetch(session, url, CACHE, THROTTLE, force=force)
 
 
+def cjk(label: str) -> str:
+    """中文標籤容忍字間空白。"""
+    return r"\s*".join(map(re.escape, label))
+
+
 # ── 1. 年度列表與分頁 ────────────────────────────────────────
 
 def extract_codes(html: str) -> list[str]:
@@ -51,7 +57,7 @@ def extract_codes(html: str) -> list[str]:
 
 
 def extract_total(html: str) -> int | None:
-    m = re.search(r"找到\s*([\d,]+)\s*項", html)
+    m = re.search(cjk("找到") + r"\s*([\d,]+)\s*" + cjk("項"), html)
     return int(m.group(1).replace(",", "")) if m else None
 
 
@@ -82,7 +88,7 @@ def crawl_year(year: int, page_param: str | None, seen: set[str]) -> tuple[list[
         if page_param is None:
             page_param = detect_page_param(year, html, codes)
             if page_param is None:
-                print(f"  [警告] 找不到分頁參數,{year} 只收到首頁 {len(codes)} 項;請跑 --probe 貼回頁面分頁區 HTML")
+                print(f"  [警告] 找不到分頁參數,{year} 只收到首頁 {len(codes)} 項")
         if page_param:
             per_page = max(len(codes), 1)
             pages = -(-total // per_page)
@@ -142,16 +148,16 @@ def parse_product(code: str) -> dict | None:
         if len(parts) >= 3 and parts[2]:
             rec["publisher"] = parts[2]
 
-    # 標籤欄位在「去標籤純文字」上比對(標籤與值之間常夾 HTML 標記)
+    # 標籤欄位在「去標籤純文字」上比對;中文標籤容忍字間空白
     text = soup.get_text("\n")
     patterns = {
-        "title_en": r"(?:英文書名|English Title)[::]\s*([^\n]+)",
-        "publisher": r"出版[社商]?[::]\s*([^\n]+)",
-        "publish_date": r"出版日期[::]\s*([\d/.\-年月日]+)",
+        "title_en": rf"(?:{cjk('英文書名')}|English\s*Title)[::]\s*([^\n]+)",
+        "publisher": cjk("出版") + r"[社商]?[::]\s*([^\n]+)",
+        "publish_date": cjk("出版日期") + r"[::]\s*([\d/.\-年月日]+)",
         "isbn": r"ISBN[::]\s*([0-9Xx\-]+)",
-        "page_count": r"頁數[::]\s*(\d+)",
-        "binding": r"裝訂[::]\s*([^\n]+)",
-        "stock": r"(?:庫存|供應狀態)[::]\s*([^\n]+)",
+        "page_count": cjk("頁數") + r"[::]\s*(\d+)",
+        "binding": cjk("裝訂") + r"[::]\s*([^\n]+)",
+        "stock": rf"(?:{cjk('庫存')}|{cjk('供應狀態')})[::]\s*([^\n]+)",
     }
     for key, pat in patterns.items():
         if key in rec:
@@ -165,10 +171,10 @@ def parse_product(code: str) -> dict | None:
         rec["isbn"] = code
 
     # 價格:現價/原價(HK$)
-    m = re.search(r"(?:原價|定價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
+    m = re.search(rf"(?:{cjk('原價')}|{cjk('定價')})[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(r"(?:現價|售價|特價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
+    m = re.search(rf"(?:{cjk('現價')}|{cjk('售價')}|{cjk('特價')})[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
     rec.setdefault("currency", "HKD")
@@ -180,7 +186,7 @@ def parse_product(code: str) -> dict | None:
 
 def probe():
     print("=== 探測模式 ===")
-    year = 2021  # 偵察時已知 2021 有 3,795 筆
+    year = 2021  # 偵察時已知 2021 約 3,800 筆
     html = fetch(year_url(year))
     codes = extract_codes(html)
     total = extract_total(html)
@@ -191,6 +197,12 @@ def probe():
         rec = parse_product(codes[0])
         print("商品頁解析結果:")
         print(json.dumps(rec, ensure_ascii=False, indent=2))
+        # 欄位診斷:印出商品頁上與出版/頁數/裝訂/價格相關的原始文字
+        url = f"{BASE}/bf/acms/content.asp?site=logosbf&op=show&type=product&code={quote(codes[0])}"
+        text = BeautifulSoup(fetch(url), "lxml").get_text("\n")
+        hits = [ln.strip() for ln in text.splitlines()
+                if ln.strip() and re.search(r"(出\s*版|頁|ISBN|裝|價|庫\s*存)", ln)]
+        print(f"欄位相關原始文字(前 15 行):{json.dumps(hits[:15], ensure_ascii=False, indent=1)}")
     print("\n請把以上輸出貼回給 Claude 檢查解析是否正確。")
 
 

@@ -3,18 +3,18 @@
 
 流程:
  1. 首頁選單抽分類 → 遞迴走訪分類頁發現下層 → 取葉分類
- 2. 逐分類列舉 ProductsList.aspx 各頁 → 收 ProductID(WebForms postback 分頁)
+ 2. 逐分類列舉 ProductsList.aspx 各頁 → 收 ProductID(postback 或 GET 分頁,自動偵測)
  3. 逐商品抓 ProductDetails.aspx → 解析欄位 → data/campus_books.jsonl
 
 用法(Windows,先 pip install -r requirements.txt):
-  python -X utf8 campus_crawler.py --probe          # 探測:抓 1 分類頁 + 1 商品頁,印解析結果
-  python -X utf8 campus_crawler.py --probe --category 04  # 探測指定(大)分類的分頁機制
-  python -X utf8 campus_crawler.py                  # 全量(可隨時 Ctrl+C,重跑自動續)
-  python -X utf8 campus_crawler.py --category 0402  # 只抓指定分類
-  python -X utf8 campus_crawler.py --limit 50       # 最多抓 50 本(試跑)
+  python -X utf8 campus_crawler.py --probe                # 探測(含分頁診斷)
+  python -X utf8 campus_crawler.py --probe --category 05  # 探測指定分類的分頁機制
+  python -X utf8 campus_crawler.py                        # 全量(可隨時 Ctrl+C,重跑自動續)
+  python -X utf8 campus_crawler.py --category 0402        # 只抓指定分類
+  python -X utf8 campus_crawler.py --limit 50             # 最多抓 50 本(試跑)
 
 robots.txt:允許 ProductsList/ProductDetails;禁 SearchResults(不使用)。
-(2026-07-12 依 probe 結果修正:純文字欄位比對、分類遞迴發現、pager 實體編碼)
+(7/12 二修:中文標籤容忍字間空白「頁 數」、GET 分頁自動偵測、移除誤抓側欄的 breadcrumb)
 """
 from __future__ import annotations
 
@@ -43,6 +43,11 @@ def fetch(url: str, post_data: dict | None = None, force: bool = False) -> str:
     return polite_fetch(session, url, CACHE, THROTTLE, post_data=post_data, force=force)
 
 
+def cjk(label: str) -> str:
+    """中文標籤容忍字間空白:「頁數」→「頁\\s*數」(7/12 probe 證實站方排版夾空白)。"""
+    return r"\s*".join(map(re.escape, label))
+
+
 # ── 1. 分類樹 ────────────────────────────────────────────────
 
 def get_leaf_categories() -> list[str]:
@@ -65,14 +70,14 @@ def get_leaf_categories() -> list[str]:
     return leaves
 
 
-# ── 2. 分類列表頁(WebForms postback 分頁) ──────────────────
+# ── 2. 分類列表頁(postback 或 GET 分頁) ────────────────────
 
 def extract_product_ids(html: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"ProductDetails\.aspx\?ProductID=(\d+)", html, re.I)))
 
 
 def extract_pager(html: str) -> tuple[str | None, int]:
-    """回傳 (postback 控制項名, 最大頁碼)。找不到分頁=單頁。"""
+    """回傳 (postback 控制項名, 最大頁碼)。找不到分頁=單頁或 GET 分頁。"""
     targets = re.findall(r"__doPostBack\('([^']+)','Page\$(\d+)'\)", html)
     # href 內的引號常被編成 &#39; 或 &quot;
     targets += re.findall(r"__doPostBack\(&#39;([^&]+)&#39;,&#39;Page\$(\d+)&#39;\)", html)
@@ -81,8 +86,7 @@ def extract_pager(html: str) -> tuple[str | None, int]:
         return None, 1
     control = targets[0][0]
     max_page = max(int(p) for _, p in targets)
-    # 「...」尾頁連結可能藏更大頁碼;抓頁面上「共 N 頁 / 共 N 筆」佐證
-    m = re.search(r"共\s*(\d+)\s*頁", html)
+    m = re.search(cjk("共") + r"\s*(\d+)\s*" + cjk("頁"), html)
     if m:
         max_page = max(max_page, int(m.group(1)))
     return control, max_page
@@ -100,42 +104,76 @@ def build_postback(html: str, control: str, page: int) -> dict:
     return data
 
 
-def crawl_category(cat_id: str, writer_ids: set[str]) -> list[str]:
+GET_PAGE_PARAMS = ("Page", "page", "PageIndex", "PageNo", "pg")
+MAX_PAGES = 500  # 安全上限
+
+
+def detect_get_page_param(url: str, first_ids: list[str]) -> str | None:
+    """試探 GET 分頁參數:第 2 頁需非空且異於第 1 頁。"""
+    for p in GET_PAGE_PARAMS:
+        ids2 = extract_product_ids(fetch(f"{url}&{p}=2"))
+        if ids2 and set(ids2) != set(first_ids):
+            print(f"  GET 分頁參數偵測成功:&{p}=N")
+            return p
+    return None
+
+
+def crawl_category(cat_id: str, writer_ids: set[str], state: State) -> list[str]:
     """列舉一個分類所有頁,回傳尚未入庫的 product_id。"""
     url = f"{BASE}/ProductsList.aspx?CategoryID={cat_id}"
     html = fetch(url)
     pids = extract_product_ids(html)
     control, max_page = extract_pager(html)
-    page = 2
-    cur_html = html
-    while control and page <= max_page:
-        post = build_postback(cur_html, control, page)
-        cur_html = fetch(url, post_data=post)
-        got = extract_product_ids(cur_html)
-        if not got:
-            break
-        pids.extend(got)
-        nc, nm = extract_pager(cur_html)
-        control = nc or control
-        max_page = max(max_page, nm)
-        page += 1
+    pages_done = 1
+
+    if control:  # WebForms postback 分頁
+        page = 2
+        cur_html = html
+        while page <= max_page and page <= MAX_PAGES:
+            post = build_postback(cur_html, control, page)
+            cur_html = fetch(url, post_data=post)
+            got = extract_product_ids(cur_html)
+            if not got or not set(got) - set(pids):
+                break
+            pids.extend(got)
+            nc, nm = extract_pager(cur_html)
+            control = nc or control
+            max_page = max(max_page, nm)
+            pages_done = page
+            page += 1
+    elif len(pids) >= 24:  # 頁面近滿=可能有下頁 → 試 GET 分頁
+        param = state.data.get("get_page_param") or detect_get_page_param(url, pids)
+        if param:
+            if state.data.get("get_page_param") != param:
+                state.data["get_page_param"] = param
+                state.save()
+            page = 2
+            while page <= MAX_PAGES:
+                got = extract_product_ids(fetch(f"{url}&{param}={page}"))
+                new = [x for x in got if x not in pids]
+                if not new:
+                    break
+                pids.extend(new)
+                pages_done = page
+                page += 1
+
     pids = list(dict.fromkeys(pids))
-    print(f"  分類 {cat_id}:{len(pids)} 本,{page - 1} 頁")
+    print(f"  分類 {cat_id}:{len(pids)} 本,{pages_done} 頁")
     return [p for p in pids if p not in writer_ids]
 
 
 # ── 3. 商品頁解析 ────────────────────────────────────────────
 
-# 在「去標籤純文字」上比對(標籤與值之間常夾 HTML 標記,7/12 probe 證實)
+# 在「去標籤純文字」上比對;中文標籤容忍字間空白
 DETAIL_FIELDS = {
-    "item_no": r"原書號[::]\s*(\S+)",
+    "item_no": cjk("原書號") + r"[::]\s*(\S+)",
     "isbn": r"ISBN[::]\s*([0-9Xx\-]+)",
-    "publish_date": r"出版日期[::]\s*([\d/.\-年月日]+)",
-    "page_count": r"頁數[::]\s*(\d+)",
-    "dimensions": r"尺寸[::]\s*([^\n]+)",
-    "language": r"語言[::]\s*([^\n]+)",
-    "binding": r"裝訂[::]\s*([^\n]+)",
-    "audience": r"適用對象[::]\s*([^\n]+)",
+    "publish_date": cjk("出版日期") + r"[::]\s*([\d/.\-年月日]+)",
+    "page_count": cjk("頁數") + r"[::]\s*(\d+)",
+    "dimensions": cjk("尺寸") + r"[::]\s*([^\n]+)",
+    "language": cjk("語言") + r"[::]\s*([^\n]+)",
+    "binding": cjk("裝訂") + r"[::]\s*([^\n]+)",
+    "audience": cjk("適用對象") + r"[::]\s*([^\n]+)",
 }
 
 
@@ -152,7 +190,7 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    # meta keywords = 商品ID,書名,英文書名,出版社,作者,ISBN,1(name 大小寫不定)
+    # meta keywords = 商品ID,書名,英文書名,出版社,作者,ISBN,1(name 大小寫不定;聖經類常缺)
     mk = soup.find("meta", attrs={"name": re.compile(r"^keywords$", re.I)})
     if mk and mk.get("content"):
         parts = [p.strip() for p in mk["content"].split(",")]
@@ -182,19 +220,16 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
         if m:
             rec[key] = m.group(1).strip()
 
-    # 詳細資料的「分類」與麵包屑(保留原值,映射 CategoryV11 於匯入階段處理)
-    m = re.search(r"分類[::]\s*([^\n]+)", text)
+    # 詳細資料的「分類」(保留原值,映射 CategoryV11 於匯入階段處理)
+    m = re.search(cjk("分類") + r"[::]\s*([^\n]+)", text)
     if m:
         rec["category_text"] = m.group(1).strip()
-    crumbs = re.findall(r"ProductsList\.aspx\?CategoryID=\d+[^>]*>([^<]+)<", html)
-    if crumbs:
-        rec["breadcrumb"] = ">".join(c.strip() for c in crumbs[:5])
 
-    # 價格(頁面常見:定價 NT$xxx / 優惠價)
-    m = re.search(r"定價[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
+    # 價格:定價/優惠價
+    m = re.search(cjk("定價") + r"[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(r"(?:優惠價|特價)[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
+    m = re.search(rf"(?:{cjk('優惠價')}|{cjk('特價')})[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
 
@@ -214,13 +249,23 @@ def probe(cat: str | None = None):
     html = fetch(url)
     pids = extract_product_ids(html)
     control, max_page = extract_pager(html)
-    print(f"分類 {cat}:本頁 {len(pids)} 本;分頁控制項={control!r},最大頁碼={max_page}")
-    if control and max_page > 1:
+    print(f"分類 {cat}:本頁 {len(pids)} 本;postback 分頁控制項={control!r},最大頁碼={max_page}")
+
+    if control is None:
+        # 分頁診斷:列出頁面所有 postback 目標與含「頁/筆+數字」的文字
+        targets = sorted(set(re.findall(r"__doPostBack\('([^']+)'", html)))
+        print(f"頁面 postback 目標({len(targets)} 個):{targets[:15]}")
+        text = BeautifulSoup(html, "lxml").get_text("\n")
+        hits = [ln.strip() for ln in text.splitlines()
+                if re.search(r"\d", ln) and re.search(r"[頁筆]", ln)]
+        print(f"含「頁/筆+數字」的文字:{hits[:10]}")
+        p = detect_get_page_param(url, pids)
+        print(f"GET 分頁參數:{p!r}")
+    elif max_page > 1:
         post = build_postback(html, control, 2)
-        html2 = fetch(url, post_data=post)
-        pids2 = extract_product_ids(html2)
-        same = set(pids2) == set(pids)
-        print(f"第 2 頁 postback 測試:{len(pids2)} 本;與第 1 頁相同={same}")
+        pids2 = extract_product_ids(fetch(url, post_data=post))
+        print(f"第 2 頁 postback 測試:{len(pids2)} 本;與第 1 頁相同={set(pids2) == set(pids)}")
+
     if pids:
         rec = parse_product(pids[0], cat)
         print("商品頁解析結果:")
@@ -249,7 +294,7 @@ def main():
         for cat in cats:
             if state.is_done(f"cat:{cat}") and not args.category:
                 continue
-            todo = crawl_category(cat, writer.seen)
+            todo = crawl_category(cat, writer.seen, state)
             for pid in todo:
                 rec = parse_product(pid, cat)
                 if rec and writer.write(rec):
