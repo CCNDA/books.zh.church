@@ -142,18 +142,18 @@ def crawl_category(cat_id: str, writer_ids: set[str]) -> list[str]:
 
 # 詳細資料實測格式:全形冒號、<br/> 分隔;在「去標籤純文字」上比對,標籤容忍字間空白
 DETAIL_FIELDS = {
-    "item_no": cjk("原書號") + r"[::]\s*(\S+)",
-    "isbn": r"ISBN[::]\s*([0-9Xx\-]+)",
-    "publish_date": cjk("出版日期") + r"[::]\s*([\d/.\-年月日]+)",
-    "page_count": cjk("頁數") + r"[::]\s*(\d+)",
-    "dimensions": cjk("尺寸") + r"[::]\s*([^\n]+)",
-    "weight": cjk("重量") + r"[::]\s*([^\n]+)",
-    "layout": cjk("排版方式") + r"[::]\s*([^\n]+)",
-    "language": cjk("語言") + r"[::]\s*([^\n]+)",
-    "binding": cjk("裝訂方式") + r"[::]\s*([^\n]+)",
-    "printing": cjk("印刷方式") + r"[::]\s*([^\n]+)",
-    "audience": cjk("適用對象") + r"[::]\s*([^\n]+)",
-    "series_text": cjk("書系") + r"[::]\s*([^\n]+)",
+    "item_no": cjk("原書號") + r"[:：]\s*(\S+)",
+    "isbn": r"ISBN[:：]\s*([0-9Xx\-]+)",
+    "publish_date": cjk("出版日期") + r"[:：]\s*([\d/.\-年月日]+)",
+    "page_count": cjk("頁數") + r"[:：]\s*(\d+)",
+    "dimensions": cjk("尺寸") + r"[:：]\s*([^\n]+)",
+    "weight": cjk("重量") + r"[:：]\s*([^\n]+)",
+    "layout": cjk("排版方式") + r"[:：]\s*([^\n]+)",
+    "language": cjk("語言") + r"[:：]\s*([^\n]+)",
+    "binding": cjk("裝訂方式") + r"[:：]\s*([^\n]+)",
+    "printing": cjk("印刷方式") + r"[:：]\s*([^\n]+)",
+    "audience": cjk("適用對象") + r"[:：]\s*([^\n]+)",
+    "series_text": cjk("書系") + r"[:：]\s*([^\n]+)",
 }
 
 
@@ -202,24 +202,24 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
 
     # 作者/出版社後備(meta keywords 缺時,詳細資料區有 作者：/出版社:)
     if not rec.get("authors_raw"):
-        m = re.search(cjk("作者") + r"[::]\s*([^\n]+)", text)
+        m = re.search(cjk("作者") + r"[:：]\s*([^\n]+)", text)
         if m:
             rec["authors_raw"] = m.group(1).strip()
     if not rec.get("publisher"):
-        m = re.search(cjk("出版社") + r"[::]\s*([^\n]+)", text)
+        m = re.search(cjk("出版社") + r"[:：]\s*([^\n]+)", text)
         if m:
             rec["publisher"] = m.group(1).strip()
 
     # 詳細資料的「分類」(保留原值,映射 CategoryV11 於匯入階段處理)
-    m = re.search(cjk("分類") + r"[::]\s*([^\n]+)", text)
+    m = re.search(cjk("分類") + r"[:：]\s*([^\n]+)", text)
     if m:
         rec["category_text"] = m.group(1).strip()
 
     # 價格:定價/特價(頁面顯示「特價 NT 411」+ 刪除線原價)
-    m = re.search(cjk("定價") + r"[::]?\s*(?:NT\$?|\$)?\s*([\d,]+)", text)
+    m = re.search(cjk("定價") + r"[:：]?\s*(?:NT\$?|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(rf"(?:{cjk('優惠價')}|{cjk('特價')})[::]?\s*(?:NT\$?|\$)?\s*([\d,]+)", text)
+    m = re.search(rf"(?:{cjk('優惠價')}|{cjk('特價')})[:：]?\s*(?:NT\$?|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
 
