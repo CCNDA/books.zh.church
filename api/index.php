@@ -5,7 +5,8 @@ declare(strict_types=1);
  * REST API 前端控制器
  * GET /api/categories        分類清單(含各類書數)
  * GET /api/books             書目清單:q(關鍵字)、category(分類id)、page、per_page
- * GET /api/books/{id}        單書完整資訊
+ *                            讀 v_book_list 檢視表(關聯優先、平面後備)
+ * GET /api/books/{id}        單書完整資訊(含 contributors/editions/series/subjects/links)
  */
 
 require __DIR__ . '/lib/db.php';
@@ -65,40 +66,49 @@ function get_books(): never
     $page     = max(1, (int) ($_GET['page'] ?? 1));
     $perPage  = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
 
-    $where  = ['b.is_published = 1'];
+    $where  = ['v.is_published = 1'];
     $params = [];
 
     if ($q !== '') {
         // 注意:原生預備語句不可重複使用同名參數,故逐一編號
         $like = '%' . $q . '%';
         $isbn = str_replace('-', '', $q);
-        $where[] = '(b.title LIKE :q1 OR b.subtitle LIKE :q2 OR b.author LIKE :q3
-                     OR b.translator LIKE :q4 OR b.publisher LIKE :q5
-                     OR b.summary LIKE :q6 OR b.isbn13 = :isbn1 OR b.isbn10 = :isbn2)';
+        $where[] = '(v.title LIKE :q1 OR v.subtitle LIKE :q2 OR v.author LIKE :q3
+                     OR v.translator LIKE :q4 OR v.publisher LIKE :q5
+                     OR v.summary LIKE :q6 OR v.isbn13 = :isbn1 OR b.isbn10 = :isbn2
+                     OR EXISTS (SELECT 1 FROM identifiers i
+                                JOIN editions e ON e.edition_id = i.edition_id
+                                WHERE e.book_id = v.book_id AND i.id_value = :isbn3))';
         for ($i = 1; $i <= 6; $i++) {
             $params[":q$i"] = $like;
         }
         $params[':isbn1'] = $isbn;
         $params[':isbn2'] = $isbn;
+        $params[':isbn3'] = $isbn;
     }
     if ($category > 0) {
-        $where[] = 'b.category_id = :cat';
+        $where[] = 'v.category_id = :cat';
         $params[':cat'] = $category;
     }
     $whereSql = implode(' AND ', $where);
 
-    $stmt = db()->prepare("SELECT COUNT(*) AS total FROM books b WHERE $whereSql");
+    $stmt = db()->prepare(
+        "SELECT COUNT(*) FROM v_book_list v
+         JOIN books b ON b.book_id = v.book_id
+         WHERE $whereSql"
+    );
     $stmt->execute($params);
     $total = (int) $stmt->fetchColumn();
 
     $offset = ($page - 1) * $perPage;
-    $sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.translator,
-                   b.publisher, b.publish_date, b.isbn13, b.cover_url,
-                   b.summary, c.category_id, c.name AS category_name
-            FROM books b
-            LEFT JOIN categories c ON c.category_id = b.category_id
+    $sql = "SELECT v.book_id, v.title, v.subtitle, v.original_title, v.author, v.translator,
+                   v.publisher, v.publish_date, v.isbn13, v.cover_url,
+                   v.summary_short, v.summary, v.category_id, c.name AS category_name
+            FROM v_book_list v
+            JOIN books b ON b.book_id = v.book_id
+            LEFT JOIN categories c ON c.category_id = v.category_id
             WHERE $whereSql
-            ORDER BY b.created_at DESC, b.book_id DESC
+            ORDER BY v.created_at DESC, v.book_id DESC
             LIMIT :limit OFFSET :offset";
     $stmt = db()->prepare($sql);
     foreach ($params as $k => $v) {
@@ -111,33 +121,15 @@ function get_books(): never
     foreach ($rows as &$r) {
         $r['book_id'] = (int) $r['book_id'];
         $r['category_id'] = $r['category_id'] !== null ? (int) $r['category_id'] : null;
+        // 清單頁摘要:優先短書介,退回 summary 截 150 字
+        if ($r['summary_short'] === null && $r['summary'] !== null) {
+            $r['summary_short'] = mb_substr($r['summary'], 0, 150, 'UTF-8');
+        }
+        unset($r['summary']);
     }
 
     json_data([
         'items'    => $rows,
         'total'    => $total,
         'page'     => $page,
-        'per_page' => $perPage,
-        'pages'    => (int) ceil($total / $perPage),
-    ]);
-}
-
-function get_book(int $id): never
-{
-    $stmt = db()->prepare(
-        'SELECT b.*, c.code AS category_code, c.name AS category_name
-         FROM books b
-         LEFT JOIN categories c ON c.category_id = b.category_id
-         WHERE b.book_id = :id AND b.is_published = 1'
-    );
-    $stmt->execute([':id' => $id]);
-    $book = $stmt->fetch();
-    if (!$book) {
-        json_error('找不到此書', 404);
-    }
-    $book['book_id'] = (int) $book['book_id'];
-    $book['category_id'] = $book['category_id'] !== null ? (int) $book['category_id'] : null;
-    $book['is_published'] = (int) $book['is_published'];
-    $book['buy_links'] = $book['buy_links'] ? json_decode($book['buy_links'], true) : [];
-    json_data($book);
-}
+        'per_p

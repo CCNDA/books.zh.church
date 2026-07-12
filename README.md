@@ -11,6 +11,12 @@ config/               app.example.php(範本)→ 複製為 app.local.php(gitigno
 database/migrations/  SQL migration,依編號順序執行
 ```
 
+## 部署(正式站 https://books.zh.church)
+
+- 更新方式:**手動 FTP** 上傳異動檔案(不使用 CI/CD)
+- 首次部署:先在主機建立 MariaDB 資料庫(utf8mb4),依序執行 `database/migrations/` 的 SQL,再上傳程式與建立 `config/app.local.php`
+- `config/app.local.php` 只存在主機上,絕不進版控
+
 ## 本機啟動
 
 ```bash
@@ -18,11 +24,4 @@ composer require aws/aws-sdk-php   # Magic Link 郵件(AWS SES)
 php -S 0.0.0.0:8080 web/router.php
 ```
 
-## 開發規範
-
-- 所有 SQL 一律 PDO prepared statements;前端輸出一律 HTML escape
-- API 回應 JSON_UNESCAPED_UNICODE;寫入端點需驗證 X-Api-Key / Bearer Token
-- 介面文字使用繁體中文
-- 設定集中於 `config/app.local.php`,勿提交憑證
-
-詳細建置說明見專案 docs/php-restapi-setup.md(不在本 repo)。
+## 開發規�

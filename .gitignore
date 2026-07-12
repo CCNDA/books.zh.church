@@ -21,3 +21,7 @@ desktop.ini
 
 # 部署資訊(本地筆記)
 config/deploy.local.md
+
+# 爬蟲產出(原始資料與進度,不進版控)
+crawler/data/
+__pycache__/
