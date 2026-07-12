@@ -60,14 +60,19 @@ def get_leaf_categories() -> list[str]:
     ids = set(re.findall(r"[Pp]roducts[Ll]ist\.aspx\?CategoryID=(\d+)", html))
     if not ids:
         sys.exit("找不到任何 CategoryID —— 首頁結構可能已改,請跑 --probe 檢查")
+    print(f"首頁發現 {len(ids)} 個分類,開始遞迴走訪(每頁 3-5 秒,已抓過的走快取)...", flush=True)
     frontier = sorted(ids)
+    visited = 0
     while frontier:
         cid = frontier.pop(0)
         page = fetch(f"{BASE}/productslist.aspx?CategoryID={cid}")
+        visited += 1
         new = set(re.findall(r"[Pp]roducts[Ll]ist\.aspx\?CategoryID=(\d+)", page)) - ids
         if new:
             ids |= new
             frontier.extend(sorted(new))
+        if visited % 10 == 0:
+            print(f"  已走訪 {visited} 個分類頁,累計發現 {len(ids)} 個分類,待訪 {len(frontier)}", flush=True)
     leaves = sorted(i for i in ids if not any(j != i and j.startswith(i) for j in ids))
     print(f"分類:共 {len(ids)} 個,葉分類 {len(leaves)} 個")
     return leaves
