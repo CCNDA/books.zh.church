@@ -2,7 +2,7 @@
 """基道 BookFinder www.logos.com.hk 爬蟲(單執行緒、節流 2-3 秒、快取續跑)。
 
 流程:
- 1. 逐年檢索(field=year)列舉商品 code;分頁參數自動探測(page/start/offset)
+ 1. 逐年檢索(field=year)列舉商品 code;分頁參數 &page=N(7/12 probe 證實)
  2. 逐商品抓 op=show 頁 → 解析欄位 → data/logos_books.jsonl
 
 用法(Windows):
@@ -12,6 +12,7 @@
   python -X utf8 logos_crawler.py --limit 50          # 試跑 50 本
 
 robots.txt 無限制;公益小站,保守節流。
+(2026-07-12 依 probe 結果修正:標題去站名前綴、封面補協定、出版社取自 keywords、純文字欄位比對)
 """
 from __future__ import annotations
 
@@ -111,7 +112,7 @@ def parse_product(code: str) -> dict | None:
     }
 
     for name, key in (("author", "authors_raw"), ("description", "summary"), ("keywords", "keywords")):
-        el = soup.find("meta", attrs={"name": name})
+        el = soup.find("meta", attrs={"name": re.compile(rf"^{name}$", re.I)})
         if el and el.get("content"):
             rec[key] = el["content"].strip()
 
@@ -123,33 +124,51 @@ def parse_product(code: str) -> dict | None:
     if not rec.get("title"):
         t = soup.find("title")
         if t:
-            rec["title"] = re.sub(r"\s*[-|–].*$", "", t.get_text(strip=True)) or None
+            rec["title"] = t.get_text(strip=True) or None
+    # 去站名前綴「基道 BOOKFINDER - 」(7/12 probe 證實 og:title 帶前綴)
+    if rec.get("title"):
+        rec["title"] = re.sub(r"^基道\s*BOOKFINDER\s*[-–—|]\s*", "", rec["title"]).strip() or None
     if not rec.get("title"):
         print(f"  [略過] {code} 無書名")
         return None
 
-    body = html
+    # 封面:協定相對網址補 https:
+    if rec.get("cover_url", "").startswith("//"):
+        rec["cover_url"] = "https:" + rec["cover_url"]
+
+    # meta keywords = 書名,作者,出版社(7/12 probe 證實)→ 取出版社
+    if rec.get("keywords"):
+        parts = [p.strip() for p in rec["keywords"].split(",")]
+        if len(parts) >= 3 and parts[2]:
+            rec["publisher"] = parts[2]
+
+    # 標籤欄位在「去標籤純文字」上比對(標籤與值之間常夾 HTML 標記)
+    text = soup.get_text("\n")
     patterns = {
-        "title_en": r"(?:英文書名|English Title)[::]\s*([^<]+?)(?:<|$)",
-        "publisher": r"出版[社商]?[::]\s*(?:<[^>]+>\s*)*([^<]+?)(?:<|$)",
+        "title_en": r"(?:英文書名|English Title)[::]\s*([^\n]+)",
+        "publisher": r"出版[社商]?[::]\s*([^\n]+)",
         "publish_date": r"出版日期[::]\s*([\d/.\-年月日]+)",
         "isbn": r"ISBN[::]\s*([0-9Xx\-]+)",
         "page_count": r"頁數[::]\s*(\d+)",
-        "binding": r"裝訂[::]\s*([^<\s]+)",
-        "stock": r"(?:庫存|供應狀態)[::]\s*([^<]+?)(?:<|$)",
+        "binding": r"裝訂[::]\s*([^\n]+)",
+        "stock": r"(?:庫存|供應狀態)[::]\s*([^\n]+)",
     }
     for key, pat in patterns.items():
         if key in rec:
             continue
-        m = re.search(pat, body)
+        m = re.search(pat, text)
         if m:
             rec[key] = m.group(1).strip()
 
+    # 書碼本身常是 ISBN13
+    if "isbn" not in rec and re.fullmatch(r"97[89]\d{10}", code):
+        rec["isbn"] = code
+
     # 價格:現價/原價(HK$)
-    m = re.search(r"(?:原價|定價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", body)
+    m = re.search(r"(?:原價|定價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(r"(?:現價|售價|特價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", body)
+    m = re.search(r"(?:現價|售價|特價)[::]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
     rec.setdefault("currency", "HKD")

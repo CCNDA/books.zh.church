@@ -2,17 +2,19 @@
 """校園書房 shop.campus.org.tw 爬蟲(單執行緒、節流 3-5 秒、快取續跑)。
 
 流程:
- 1. 首頁選單抽完整分類樹 → 取葉分類(最長碼)
+ 1. 首頁選單抽分類 → 遞迴走訪分類頁發現下層 → 取葉分類
  2. 逐分類列舉 ProductsList.aspx 各頁 → 收 ProductID(WebForms postback 分頁)
  3. 逐商品抓 ProductDetails.aspx → 解析欄位 → data/campus_books.jsonl
 
 用法(Windows,先 pip install -r requirements.txt):
   python -X utf8 campus_crawler.py --probe          # 探測:抓 1 分類頁 + 1 商品頁,印解析結果
+  python -X utf8 campus_crawler.py --probe --category 04  # 探測指定(大)分類的分頁機制
   python -X utf8 campus_crawler.py                  # 全量(可隨時 Ctrl+C,重跑自動續)
   python -X utf8 campus_crawler.py --category 0402  # 只抓指定分類
   python -X utf8 campus_crawler.py --limit 50       # 最多抓 50 本(試跑)
 
 robots.txt:允許 ProductsList/ProductDetails;禁 SearchResults(不使用)。
+(2026-07-12 依 probe 結果修正:純文字欄位比對、分類遞迴發現、pager 實體編碼)
 """
 from __future__ import annotations
 
@@ -44,11 +46,20 @@ def fetch(url: str, post_data: dict | None = None, force: bool = False) -> str:
 # ── 1. 分類樹 ────────────────────────────────────────────────
 
 def get_leaf_categories() -> list[str]:
-    """從首頁選單收所有 CategoryID;回傳葉分類(沒有更長前綴延伸者)。"""
+    """首頁 CategoryID 起步,遞迴走訪分類頁發現下層分類(頁面有快取,不浪費)。
+    回傳葉分類(沒有更長前綴延伸者)。"""
     html = fetch(BASE + "/")
     ids = set(re.findall(r"ProductsList\.aspx\?CategoryID=(\d+)", html, re.I))
     if not ids:
         sys.exit("找不到任何 CategoryID —— 首頁結構可能已改,請跑 --probe 檢查")
+    frontier = sorted(ids)
+    while frontier:
+        cid = frontier.pop(0)
+        page = fetch(f"{BASE}/ProductsList.aspx?CategoryID={cid}")
+        new = set(re.findall(r"ProductsList\.aspx\?CategoryID=(\d+)", page, re.I)) - ids
+        if new:
+            ids |= new
+            frontier.extend(sorted(new))
     leaves = sorted(i for i in ids if not any(j != i and j.startswith(i) for j in ids))
     print(f"分類:共 {len(ids)} 個,葉分類 {len(leaves)} 個")
     return leaves
@@ -63,6 +74,9 @@ def extract_product_ids(html: str) -> list[str]:
 def extract_pager(html: str) -> tuple[str | None, int]:
     """回傳 (postback 控制項名, 最大頁碼)。找不到分頁=單頁。"""
     targets = re.findall(r"__doPostBack\('([^']+)','Page\$(\d+)'\)", html)
+    # href 內的引號常被編成 &#39; 或 &quot;
+    targets += re.findall(r"__doPostBack\(&#39;([^&]+)&#39;,&#39;Page\$(\d+)&#39;\)", html)
+    targets += re.findall(r"__doPostBack\(&quot;([^&]+)&quot;,&quot;Page\$(\d+)&quot;\)", html)
     if not targets:
         return None, 1
     control = targets[0][0]
@@ -87,7 +101,7 @@ def build_postback(html: str, control: str, page: int) -> dict:
 
 
 def crawl_category(cat_id: str, writer_ids: set[str]) -> list[str]:
-    """列舉一個分類所有頁,回傳 (product_id, cat_id) 尚未入庫者。"""
+    """列舉一個分類所有頁,回傳尚未入庫的 product_id。"""
     url = f"{BASE}/ProductsList.aspx?CategoryID={cat_id}"
     html = fetch(url)
     pids = extract_product_ids(html)
@@ -112,15 +126,16 @@ def crawl_category(cat_id: str, writer_ids: set[str]) -> list[str]:
 
 # ── 3. 商品頁解析 ────────────────────────────────────────────
 
+# 在「去標籤純文字」上比對(標籤與值之間常夾 HTML 標記,7/12 probe 證實)
 DETAIL_FIELDS = {
-    "item_no": r"原書號[::]\s*([^<\s]+)",
+    "item_no": r"原書號[::]\s*(\S+)",
     "isbn": r"ISBN[::]\s*([0-9Xx\-]+)",
     "publish_date": r"出版日期[::]\s*([\d/.\-年月日]+)",
     "page_count": r"頁數[::]\s*(\d+)",
-    "dimensions": r"尺寸[::]\s*([^<]+?)(?:<|$)",
-    "language": r"語言[::]\s*([^<\s]+)",
-    "binding": r"裝訂[::]\s*([^<\s]+)",
-    "audience": r"適用對象[::]\s*([^<]+?)(?:<|$)",
+    "dimensions": r"尺寸[::]\s*([^\n]+)",
+    "language": r"語言[::]\s*([^\n]+)",
+    "binding": r"裝訂[::]\s*([^\n]+)",
+    "audience": r"適用對象[::]\s*([^\n]+)",
 }
 
 
@@ -137,8 +152,8 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
         "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    # meta keywords = 商品ID,書名,英文書名,出版社,作者,ISBN,1
-    mk = soup.find("meta", attrs={"name": "keywords"})
+    # meta keywords = 商品ID,書名,英文書名,出版社,作者,ISBN,1(name 大小寫不定)
+    mk = soup.find("meta", attrs={"name": re.compile(r"^keywords$", re.I)})
     if mk and mk.get("content"):
         parts = [p.strip() for p in mk["content"].split(",")]
         if len(parts) >= 6:
@@ -161,14 +176,14 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
         print(f"  [略過] {pid} 無書名(可能下架/非書籍)")
         return None
 
-    body = html
+    text = soup.get_text("\n")
     for key, pattern in DETAIL_FIELDS.items():
-        m = re.search(pattern, body)
+        m = re.search(pattern, text)
         if m:
             rec[key] = m.group(1).strip()
 
     # 詳細資料的「分類」與麵包屑(保留原值,映射 CategoryV11 於匯入階段處理)
-    m = re.search(r"分類[::]\s*([^<]+?)(?:<|$)", body)
+    m = re.search(r"分類[::]\s*([^\n]+)", text)
     if m:
         rec["category_text"] = m.group(1).strip()
     crumbs = re.findall(r"ProductsList\.aspx\?CategoryID=\d+[^>]*>([^<]+)<", html)
@@ -176,10 +191,10 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
         rec["breadcrumb"] = ">".join(c.strip() for c in crumbs[:5])
 
     # 價格(頁面常見:定價 NT$xxx / 優惠價)
-    m = re.search(r"定價[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", body)
+    m = re.search(r"定價[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(r"(?:優惠價|特價)[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", body)
+    m = re.search(r"(?:優惠價|特價)[::]?\s*(?:NT\$|NT|\$)?\s*([\d,]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
 
@@ -188,15 +203,24 @@ def parse_product(pid: str, cat_id: str | None) -> dict | None:
 
 # ── 主流程 ───────────────────────────────────────────────────
 
-def probe():
+def probe(cat: str | None = None):
     print("=== 探測模式 ===")
-    leaves = get_leaf_categories()
-    cat = leaves[0]
+    if not cat:
+        html = fetch(BASE + "/")
+        ids = sorted(set(re.findall(r"ProductsList\.aspx\?CategoryID=(\d+)", html, re.I)))
+        print(f"首頁分類 {len(ids)} 個(全量時會再遞迴發現下層)")
+        cat = ids[0]
     url = f"{BASE}/ProductsList.aspx?CategoryID={cat}"
     html = fetch(url)
     pids = extract_product_ids(html)
     control, max_page = extract_pager(html)
     print(f"分類 {cat}:本頁 {len(pids)} 本;分頁控制項={control!r},最大頁碼={max_page}")
+    if control and max_page > 1:
+        post = build_postback(html, control, 2)
+        html2 = fetch(url, post_data=post)
+        pids2 = extract_product_ids(html2)
+        same = set(pids2) == set(pids)
+        print(f"第 2 頁 postback 測試:{len(pids2)} 本;與第 1 頁相同={same}")
     if pids:
         rec = parse_product(pids[0], cat)
         print("商品頁解析結果:")
@@ -207,12 +231,12 @@ def probe():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", action="store_true", help="只探測一頁並印解析結果")
-    ap.add_argument("--category", help="只抓指定 CategoryID")
+    ap.add_argument("--category", help="只抓指定 CategoryID(配 --probe 則探測該分類)")
     ap.add_argument("--limit", type=int, default=0, help="最多抓 N 本(0=不限)")
     args = ap.parse_args()
 
     if args.probe:
-        probe()
+        probe(args.category)
         return
 
     writer = JsonlWriter(DATA / "campus_books.jsonl", "product_id")
