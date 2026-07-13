@@ -45,6 +45,20 @@ MAX_PAGES = 500  # 安全上限
 
 session = make_session()
 
+# 站方 WAF 若擋機器人 UA,以 --browser-ua 換用瀏覽器式 UA(From 標頭仍留聯絡方式)
+BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+def warmup():
+    """強制重抓首頁一次,取得 ASP.NET session cookies(快取命中不會發請求、拿不到 cookie)。"""
+    try:
+        polite_fetch(session, BASE + "/", CACHE, (1.0, 2.0), force=True)
+        ck = list(session.cookies.keys())
+        print(f"暖身完成,cookies:{ck if ck else '無'}", flush=True)
+    except RuntimeError as e:
+        print(f"[暖身失敗,續行] {e}", flush=True)
+
 
 def fetch(url: str, post_data: dict | None = None, force: bool = False) -> str:
     return polite_fetch(session, url, CACHE, THROTTLE, post_data=post_data, force=force)
@@ -280,7 +294,14 @@ def main():
     ap.add_argument("--category", help="只抓指定 CategoryID(配 --probe 則探測該分類)")
     ap.add_argument("--fresh", action="store_true", help="probe 時忽略快取重抓")
     ap.add_argument("--limit", type=int, default=0, help="最多抓 N 本(0=不限)")
+    ap.add_argument("--browser-ua", action="store_true",
+                    help="改用瀏覽器式 UA(站方擋機器人 UA 時用;節流照舊)")
     args = ap.parse_args()
+
+    if args.browser_ua:
+        session.headers["User-Agent"] = BROWSER_UA
+        print("改用瀏覽器式 UA")
+    warmup()
 
     if args.probe:
         probe(args.category, args.fresh)

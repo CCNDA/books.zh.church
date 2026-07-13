@@ -27,7 +27,9 @@ def make_session() -> requests.Session:
     s = requests.Session()
     s.headers.update({
         "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.5",
+        "From": "cowork@ccnda.org",  # 機器人聯絡方式(即使 UA 換成瀏覽器式仍保留)
     })
     return s
 
