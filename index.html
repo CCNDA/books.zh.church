@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>屬靈共同書目|基督徒圖書分享服務</title>
+<meta name="description" content="CCNDA 屬靈共同書目——收錄華文屬靈好書,支援分類瀏覽與關鍵字搜尋,幫助你找到造就生命的下一本書。">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#faf6ee; --card:#fffdf8; --ink:#3d2f23; --ink-soft:#6b5a49;
+  --gold:#a8802f; --gold-soft:#d9c69a; --line:#e8dfcf; --accent:#7a5c3e;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif;line-height:1.6}
+a{color:inherit;text-decoration:none}
+.serif{font-family:"Noto Serif TC","PMingLiU",serif}
+
+/* 頁首 */
+header{border-bottom:3px double var(--gold-soft);background:var(--card)}
+.hd-inner{max-width:1080px;margin:0 auto;padding:26px 20px 18px}
+h1{margin:0;font-size:1.9rem;letter-spacing:.12em}
+h1 a{display:inline-flex;align-items:baseline;gap:.5em}
+.hd-sub{color:var(--ink-soft);font-size:.88rem;margin-top:4px;letter-spacing:.05em}
+
+/* 搜尋列 */
+.search-row{max-width:1080px;margin:22px auto 0;padding:0 20px;display:flex;gap:10px}
+.search-box{flex:1;display:flex;background:var(--card);border:1px solid var(--line);
+  border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(61,47,35,.06)}
+.search-box input{flex:1;border:0;padding:12px 16px;font-size:1rem;background:transparent;
+  color:var(--ink);outline:none;font-family:inherit}
+.search-box button{border:0;background:var(--accent);color:#fff;padding:0 22px;font-size:.95rem;
+  cursor:pointer;font-family:inherit;letter-spacing:.15em}
+.search-box button:hover{background:#5f462e}
+#clearBtn{background:none;border:0;color:var(--ink-soft);cursor:pointer;padding:0 10px;font-size:1.1rem;display:none}
+
+/* 分類 */
+.cats{max-width:1080px;margin:16px auto 0;padding:0 20px;display:flex;flex-wrap:wrap;gap:8px}
+.cat{border:1px solid var(--line);background:var(--card);border-radius:999px;
+  padding:5px 14px;font-size:.88rem;cursor:pointer;color:var(--ink-soft);transition:.15s}
+.cat:hover{border-color:var(--gold);color:var(--ink)}
+.cat.active{background:var(--gold);border-color:var(--gold);color:#fff}
+.cat .n{opacity:.7;font-size:.78rem;margin-left:3px}
+
+/* 狀態列 */
+.status{max-width:1080px;margin:18px auto 0;padding:0 20px;color:var(--ink-soft);font-size:.88rem;
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+
+/* 書卡 */
+.grid{max-width:1080px;margin:14px auto 0;padding:0 20px;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.book{display:flex;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:14px;transition:.15s;box-shadow:0 1px 3px rgba(61,47,35,.05)}
+.book:hover{border-color:var(--gold-soft);box-shadow:0 3px 10px rgba(61,47,35,.12);transform:translateY(-2px)}
+.cover{flex:0 0 84px;height:118px;border-radius:5px;overflow:hidden;position:relative;
+  background:linear-gradient(150deg,#8a6d4b,#5f462e);box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)}
+.cover img{width:100%;height:100%;object-fit:cover;display:block}
+.cover .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#f5ead3;font-size:2rem;font-family:"Noto Serif TC",serif;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+.cover .ph::after{content:"";position:absolute;left:9px;top:0;bottom:0;width:1px;background:rgba(255,255,255,.25)}
+.bi{flex:1;min-width:0;display:flex;flex-direction:column}
+.bt{font-size:1.02rem;font-weight:700;margin:0 0 2px;line-height:1.4}
+.bt a:hover{color:var(--gold)}
+.bmeta{font-size:.82rem;color:var(--ink-soft);margin-bottom:6px}
+.bsum{font-size:.85rem;color:var(--ink-soft);margin:0;flex:1;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.btag{margin-top:8px}
+.btag span{font-size:.75rem;color:var(--gold);border:1px solid var(--gold-soft);
+  border-radius:999px;padding:2px 10px;background:rgba(168,128,47,.06)}
+
+/* 訊息與分頁 */
+.msg{max-width:1080px;margin:60px auto;padding:0 20px;text-align:center;color:var(--ink-soft)}
+.msg .big{font-size:2.2rem;margin-bottom:8px}
+.pager{max-width:1080px;margin:28px auto 0;padding:0 20px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap}
+.pg{min-width:38px;padding:7px 12px;border:1px solid var(--line);background:var(--card);border-radius:7px;
+  cursor:pointer;font-size:.9rem;color:var(--ink-soft);font-family:inherit;text-align:center}
+.pg:hover{border-color:var(--gold)}
+.pg.cur{background:var(--accent);border-color:var(--accent);color:#fff;cursor:default}
+.pg[disabled]{opacity:.4;cursor:default}
+.pg.dots{border:0;background:none;cursor:default}
+
+footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
+.ft{max-width:1080px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
+  display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.ft a{color:var(--gold)}
+@media (max-width:640px){
+  h1{font-size:1.45rem}
+  .grid{grid-template-columns:1fr}
+  .search-box button{padding:0 16px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="hd-inner">
+    <h1 class="serif"><a href="/">屬靈共同書目</a></h1>
+    <div class="hd-sub">基督徒圖書分享服務・幫助你找到造就生命的下一本書</div>
+  </div>
+</header>
+
+<div class="search-row">
+  <div class="search-box">
+    <input id="q" type="search" placeholder="搜尋書名、作者、出版社、ISBN…" aria-label="關鍵字搜尋">
+    <button id="clearBtn" aria-label="清除">✕</button>
+    <button id="goBtn">搜尋</button>
+  </div>
+</div>
+
+<nav class="cats" id="cats" aria-label="分類篩選"></nav>
+<div class="status"><span id="statusText">載入中…</span><span id="pageText"></span></div>
+<main class="grid" id="grid"></main>
+<div class="msg" id="msg" hidden></div>
+<nav class="pager" id="pager" aria-label="分頁"></nav>
+
+<footer><div class="ft">
+  <span>© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
+  <span>資料開放:<a href="/api/books">開放 API</a></span>
+</div></footer>
+
+<script>
+"use strict";
+const API = "/api";
+const state = { q: "", category: "", page: 1, perPage: 20 };
+let cats = [];
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+/* 網址列同步(可分享、可回上一頁) */
+function readUrl(){
+  const p = new URLSearchParams(location.search);
+  state.q = p.get("q") || "";
+  state.category = p.get("category") || "";
+  state.page = Math.max(1, parseInt(p.get("page") || "1", 10) || 1);
+}
+function writeUrl(replace){
+  const p = new URLSearchParams();
+  if (state.q) p.set("q", state.q);
+  if (state.category) p.set("category", state.category);
+  if (state.page > 1) p.set("page", String(state.page));
+  const url = location.pathname + (p.toString() ? "?" + p.toString() : "");
+  history[replace ? "replaceState" : "pushState"](null, "", url);
+}
+
+async function fetchJson(url){
+  const r = await fetch(url);
+  if (!r.ok) throw new Error("HTTP " + r.status);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j.data;
+}
+
+/* 分類列 */
+async function loadCats(){
+  try{
+    cats = await fetchJson(API + "/categories");
+  }catch(e){ cats = []; }
+  renderCats();
+}
+function renderCats(){
+  const total = cats.reduce((s,c) => s + (c.book_count||0), 0);
+  let h = catChip("", "全部", total);
+  for (const c of cats) h += catChip(String(c.category_id), c.name, c.book_count);
+  $("cats").innerHTML = h;
+  $("cats").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => {
+      state.category = b.dataset.id; state.page = 1; writeUrl(); load();
+    }));
+}
+function catChip(id, name, n){
+  const on = String(state.category) === id ? " active" : "";
+  return `<button class="cat${on}" data-id="${esc(id)}">${esc(name)}<span class="n">${n ?? ""}</span></button>`;
+}
+
+/* 書目清單 */
+async function load(){
+  renderCats();
+  $("msg").hidden = true; $("grid").innerHTML = ""; $("pager").innerHTML = "";
+  $("statusText").textContent = "載入中…"; $("pageText").textContent = "";
+  const p = new URLSearchParams({ page: state.page, per_page: state.perPage });
+  if (state.q) p.set("q", state.q);
+  if (state.category) p.set("category", state.category);
+  let d;
+  try{
+    d = await fetchJson(API + "/books?" + p.toString());
+  }catch(e){
+    $("statusText").textContent = "";
+    showMsg("⚠", "資料載入失敗,請稍後再試", true);
+    return;
+  }
+  const { items, total, pages, page } = d;
+  if (!items.length){
+    $("statusText").textContent = "共 0 本";
+    showMsg("📖", state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目");
+    return;
+  }
+  $("statusText").textContent = `共 ${total} 本` + (state.q ? `・關鍵字「${state.q}」` : "");
+  $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
+  $("grid").innerHTML = items.map(card).join("");
+  renderPager(page, pages);
+}
+function card(b){
+  const meta = [b.author, b.translator ? b.translator + " 譯" : "", b.publisher,
+                b.publish_date ? String(b.publish_date).slice(0,4) : ""]
+               .filter(Boolean).map(esc).join("・");
+  const cover = b.cover_url
+    ? `<img src="${esc(b.cover_url)}" alt="${esc(b.title)} 封面" loading="lazy"
+         onerror="this.parentNode.innerHTML='<div class=ph>${esc((b.title||'書').charAt(0))}</div>'">`
+    : `<div class="ph">${esc((b.title || "書").charAt(0))}</div>`;
+  return `<article class="book">
+    <a class="cover" href="/book/${b.book_id}" aria-hidden="true">${cover}</a>
+    <div class="bi">
+      <h2 class="bt serif"><a href="/book/${b.book_id}">${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
+      <div class="bmeta">${meta}</div>
+      <p class="bsum">${esc(b.summary_short || "")}</p>
+      <div class="btag">${b.category_name ? "<span>" + esc(b.category_name) + "</span>" : ""}</div>
+    </div>
+  </article>`;
+}
+function showMsg(icon, text, retry){
+  $("msg").hidden = false;
+  $("msg").innerHTML = `<div class="big">${icon}</div><div>${text}</div>` +
+    (retry ? `<p><button class="pg" onclick="load()">重新載入</button></p>` : "");
+}
+
+/* 分頁(頭尾+當前±2,其餘省略) */
+function renderPager(cur, pages){
+  if (pages <= 1) return;
+  const parts = [];
+  const btn = (label, page, cls, dis) =>
+    `<button class="pg ${cls||""}" ${dis?"disabled":""} data-p="${page}">${label}</button>`;
+  parts.push(btn("‹ 上一頁", cur-1, "", cur<=1));
+  const seen = new Set();
+  for (const n of [1,2,cur-2,cur-1,cur,cur+1,cur+2,pages-1,pages]){
+    if (n < 1 || n > pages || seen.has(n)) continue;
+    const prev = Math.max(...[...seen, 0]);
+    if (n - prev > 1) parts.push(`<span class="pg dots">…</span>`);
+    seen.add(n);
+    parts.push(btn(n, n, n===cur ? "cur" : "", n===cur));
+  }
+  parts.push(btn("下一頁 ›", cur+1, "", cur>=pages));
+  $("pager").innerHTML = parts.join("");
+  $("pager").querySelectorAll("button[data-p]").forEach(b =>
+    b.addEventListener("click", () => {
+      state.page = parseInt(b.dataset.p, 10); writeUrl(); load();
+      window.scrollTo({top:0, behavior:"smooth"});
+    }));
+}
+
+/* 搜尋互動 */
+function doSearch(){
+  state.q = $("q").value.trim(); state.page = 1; writeUrl(); load();
+}
+$("goBtn").addEventListener("click", doSearch);
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("q").addEventListener("input", () => { $("clearBtn").style.display = $("q").value ? "block" : "none"; });
+$("clearBtn").addEventListener("click", () => {
+  $("q").value = ""; $("clearBtn").style.display = "none"; doSearch();
+});
+window.addEventListener("popstate", () => { readUrl(); $("q").value = state.q; load(); });
+
+/* 啟動 */
+readUrl();
+$("q").value = state.q;
+$("clearBtn").style.display = state.q ? "block" : "none";
+writeUrl(true);
+loadCats().then(load);
+</script>
+</body>
+</html>
