@@ -50,9 +50,13 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
 
 
-def warmup():
-    """強制重抓首頁一次,取得 ASP.NET session cookies(快取命中不會發請求、拿不到 cookie)。"""
+def warmup(reset: bool = False):
+    """強制重抓首頁一次,取得 ASP.NET session cookies(快取命中不會發請求、拿不到 cookie)。
+    reset=True 先清空 cookies 換一個全新 session(列表頁被站方 session 級封鎖時用)。"""
     try:
+        if reset:
+            session.cookies.clear()
+            print("清空 cookies,換新 session...", flush=True)
         polite_fetch(session, BASE + "/", CACHE, (1.0, 2.0), force=True)
         ck = list(session.cookies.keys())
         print(f"暖身完成,cookies:{ck if ck else '無'}", flush=True)
@@ -320,10 +324,16 @@ def main():
                 continue
             try:
                 todo = crawl_category(cat, writer.seen)
-            except RuntimeError as e:
-                print(f"  [跳過分類 {cat},下次重跑補抓] {e}")
-                failed_cats.append(cat)
-                continue
+            except RuntimeError:
+                print(f"  [分類 {cat} 失敗] 換新 session 冷卻 120 秒後重試一次...")
+                time.sleep(120)
+                warmup(reset=True)
+                try:
+                    todo = crawl_category(cat, writer.seen)
+                except RuntimeError as e:
+                    print(f"  [跳過分類 {cat},下次重跑補抓] {e}")
+                    failed_cats.append(cat)
+                    continue
             cat_ok = True
             for pid in todo:
                 try:
