@@ -151,13 +151,13 @@ def parse_product(code: str) -> dict | None:
     # 標籤欄位在「去標籤純文字」上比對;中文標籤容忍字間空白
     text = soup.get_text("\n")
     patterns = {
-        "title_en": rf"(?:{cjk('英文書名')}|English\s*Title)[:：]\s*([^\n]+)",
-        "publisher": cjk("出版") + r"[社商]?[:：]\s*([^\n]+)",
-        "publish_date": cjk("出版日期") + r"[:：]\s*([\d/.\-年月日]+)",
-        "isbn": r"ISBN[:：]\s*([0-9Xx\-]+)",
-        "page_count": cjk("頁數") + r"[:：]\s*(\d+)",
-        "binding": cjk("裝訂") + r"[:：]\s*([^\n]+)",
-        "stock": rf"(?:{cjk('庫存')}|{cjk('供應狀態')})[:：]\s*([^\n]+)",
+        "title_en": rf"(?:{cjk('英文書名')}|English\s*Title)[:：][ \t]*([^\n]+)",
+        "publisher": cjk("出版") + r"[社商]?[:：][ \t]*([^\n]+)",
+        "publish_date": cjk("出版日期") + r"[:：][ \t]*([\d/.\-年月日]+)",
+        "isbn": r"ISBN[:：][ \t]*([0-9Xx\-]+)",
+        "page_count": cjk("頁數") + r"[:：][ \t]*(\d+)",
+        "binding": cjk("裝訂") + r"[:：][ \t]*([^\n]+)",
+        "stock": rf"(?:{cjk('庫存')}|{cjk('供應狀態')})[:：][ \t]*([^\n]+)",
     }
     for key, pat in patterns.items():
         if key in rec:
@@ -171,10 +171,10 @@ def parse_product(code: str) -> dict | None:
         rec["isbn"] = code
 
     # 價格:現價/原價(HK$)
-    m = re.search(rf"(?:{cjk('原價')}|{cjk('定價')})[:：]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
+    m = re.search(rf"(?:{cjk('原價')}|{cjk('定價')})[:：]?[ \t]*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_list"] = m.group(1).replace(",", "")
-    m = re.search(rf"(?:{cjk('現價')}|{cjk('售價')}|{cjk('特價')})[:：]?\s*(?:HK\$|\$)?\s*([\d,.]+)", text)
+    m = re.search(rf"(?:{cjk('現價')}|{cjk('售價')}|{cjk('特價')})[:：]?[ \t]*(?:HK\$|\$)?\s*([\d,.]+)", text)
     if m:
         rec["price_sale"] = m.group(1).replace(",", "")
     rec.setdefault("currency", "HKD")
