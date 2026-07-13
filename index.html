@@ -71,6 +71,11 @@ h1 a{display:inline-flex;align-items:baseline;gap:.5em}
 .btag span{font-size:.75rem;color:var(--gold);border:1px solid var(--gold-soft);
   border-radius:999px;padding:2px 10px;background:rgba(168,128,47,.06)}
 
+/* 首頁區塊標題 */
+.sec{max-width:1080px;margin:30px auto 0;padding:0 20px;display:flex;align-items:baseline;gap:10px}
+.sec h2{font-size:1.2rem;margin:0;border-left:4px solid var(--gold);padding-left:10px;letter-spacing:.08em}
+.sec .note{color:var(--ink-soft);font-size:.8rem}
+
 /* 訊息與分頁 */
 .msg{max-width:1080px;margin:60px auto;padding:0 20px;text-align:center;color:var(--ink-soft)}
 .msg .big{font-size:2.2rem;margin-bottom:8px}
@@ -110,6 +115,13 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 </div>
 
 <nav class="cats" id="cats" aria-label="分類篩選"></nav>
+<div id="home" hidden>
+  <div class="sec" id="hotSec" hidden><h2 class="serif">本月熱門</h2><span class="note">依本月讀者點閱次數</span></div>
+  <div class="grid" id="hotGrid"></div>
+  <div class="sec" id="newSec" hidden><h2 class="serif">新進書目</h2></div>
+  <div class="grid" id="newGrid"></div>
+  <div class="sec" id="allSec" hidden><h2 class="serif">全部書目</h2></div>
+</div>
 <div class="status"><span id="statusText">載入中…</span><span id="pageText"></span></div>
 <main class="grid" id="grid"></main>
 <div class="msg" id="msg" hidden></div>
@@ -176,8 +188,42 @@ function catChip(id, name, n){
   return `<button class="cat${on}" data-id="${esc(id)}">${esc(name)}<span class="n">${n ?? ""}</span></button>`;
 }
 
+/* 首頁區塊:本月熱門(無點擊資料自動隱藏)+ 新進書目 */
+function isHome(){ return !state.q && !state.category; }
+async function loadHome(){
+  const home = isHome();
+  $("home").hidden = !home;
+  if (!home) return;
+  const [hot, latest] = await Promise.all([
+    fetchJson(API + "/books/popular?limit=6").catch(() => []),
+    fetchJson(API + "/books/latest?limit=6").catch(() => []),
+  ]);
+  $("hotSec").hidden = !hot.length;
+  $("hotGrid").innerHTML = hot.map(b => card(b, "home_hot")).join("");
+  $("newSec").hidden = !latest.length;
+  $("newGrid").innerHTML = latest.map(b => card(b, "home_new")).join("");
+  $("allSec").hidden = !(hot.length || latest.length);
+}
+
+/* 點擊遙測(sendBeacon,失敗靜默;不記 IP/使用者) */
+document.addEventListener("click", e => {
+  const a = e.target.closest(".book a");
+  if (!a) return;
+  const art = a.closest(".book");
+  if (!art || !art.dataset.id) return;
+  const payload = JSON.stringify({
+    source: art.dataset.src || (state.q ? "search" : "list"),
+    q: state.q || null,
+  });
+  try {
+    navigator.sendBeacon(API + "/books/" + art.dataset.id + "/click",
+      new Blob([payload], { type: "application/json" }));
+  } catch (_) {}
+});
+
 /* 書目清單 */
 async function load(){
+  loadHome();
   renderCats();
   $("msg").hidden = true; $("grid").innerHTML = ""; $("pager").innerHTML = "";
   $("statusText").textContent = "載入中…"; $("pageText").textContent = "";
@@ -203,7 +249,7 @@ async function load(){
   $("grid").innerHTML = items.map(card).join("");
   renderPager(page, pages);
 }
-function card(b){
+function card(b, src){
   const meta = [b.author, b.translator ? b.translator + " 譯" : "", b.publisher,
                 b.publish_date ? String(b.publish_date).slice(0,4) : ""]
                .filter(Boolean).map(esc).join("・");
@@ -211,7 +257,7 @@ function card(b){
     ? `<img src="${esc(b.cover_url)}" alt="${esc(b.title)} 封面" loading="lazy"
          onerror="this.parentNode.innerHTML='<div class=ph>${esc((b.title||'書').charAt(0))}</div>'">`
     : `<div class="ph">${esc((b.title || "書").charAt(0))}</div>`;
-  return `<article class="book">
+  return `<article class="book" data-id="${b.book_id}" data-src="${src || ""}">
     <a class="cover" href="/book/${b.book_id}" aria-hidden="true">${cover}</a>
     <div class="bi">
       <h2 class="bt serif"><a href="/book/${b.book_id}">${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
