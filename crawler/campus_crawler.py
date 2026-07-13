@@ -303,8 +303,19 @@ def main():
     args = ap.parse_args()
 
     if args.browser_ua:
-        session.headers["User-Agent"] = BROWSER_UA
-        print("改用瀏覽器式 UA")
+        session.headers.update({
+            "User-Agent": BROWSER_UA,
+            "Referer": BASE + "/",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-User": "?1",
+            "sec-ch-ua": '"Not/A)Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+        })
+        print("改用完整瀏覽器身分(UA/Referer/Sec-Fetch;From 聯絡標頭保留)")
     warmup()
 
     if args.probe:
