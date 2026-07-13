@@ -142,9 +142,11 @@ def build_postback(html: str, target: str, argument: str = "") -> dict:
 
 
 def crawl_category(cat_id: str, writer_ids: set[str]) -> list[str]:
-    """列舉一個分類所有頁,回傳尚未入庫的 product_id。"""
+    """列舉一個分類所有頁,回傳尚未入庫的 product_id。
+    第 1 頁強制重抓:快取版的 __VIEWSTATE/__EVENTVALIDATION 綁舊 session,
+    拿去 postback 會被 ASP.NET 驗證打 500(7/13 病根)。"""
     url = f"{BASE}/productslist.aspx?CategoryID={cat_id}"
-    html = fetch(url)
+    html = fetch(url, force=True)
     pids = extract_product_ids(html)
     mapping, total_pages, total_items = extract_counter_pager(html)
     pages_done = 1
