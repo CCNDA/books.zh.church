@@ -45,10 +45,13 @@ def polite_fetch(
     throttle: tuple[float, float] = (3.0, 5.0),
     post_data: dict | None = None,
     encoding: str | None = None,
-    max_retries: int = 3,
+    max_retries: int = 5,
     force: bool = False,
 ) -> str:
-    """抓取一頁(GET 或 POST),命中快取則不發請求、不延遲。"""
+    """抓取一頁(GET 或 POST),命中快取則不發請求、不延遲。
+
+    429/500/502/503/504 視為主機忙碌/暫時故障:等 60 秒×次數再試
+    (校園主機較弱,500 多為過載,給足喘息時間通常可過)。"""
     cp = _cache_path(cache_dir, url, post_data)
     if cp.exists() and not force:
         return gzip.decompress(cp.read_bytes()).decode("utf-8", errors="replace")
@@ -58,12 +61,14 @@ def polite_fetch(
         time.sleep(random.uniform(*throttle) * attempt)  # 重試時加倍退避
         try:
             if post_data is None:
-                resp = session.get(url, timeout=30)
+                resp = session.get(url, timeout=60)
             else:
-                resp = session.post(url, data=post_data, timeout=30)
-            if resp.status_code in (429, 503):
-                print(f"  [{resp.status_code}] 伺服器忙,退避重試 {attempt}/{max_retries}")
-                time.sleep(30 * attempt)
+                resp = session.post(url, data=post_data, timeout=60)
+            if resp.status_code in (429, 500, 502, 503, 504):
+                last_err = RuntimeError(f"HTTP {resp.status_code}")
+                wait = 60 * attempt
+                print(f"  [{resp.status_code}] 主機忙碌/暫時故障,等 {wait} 秒後重試 {attempt}/{max_retries}")
+                time.sleep(wait)
                 continue
             resp.raise_for_status()
             if encoding:

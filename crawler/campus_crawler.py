@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""校園書房 shop.campus.org.tw 爬蟲(單執行緒、節流 3-5 秒、快取續跑)。
+"""校園書房 shop.campus.org.tw 爬蟲(單執行緒、節流 5-8 秒、快取續跑)。
 
 流程:
  1. 首頁選單抽分類 → 遞迴走訪分類頁發現下層 → 取葉分類
@@ -9,6 +9,10 @@
  3. 逐商品抓 ProductDetails.aspx → 解析欄位 → data/campus_books.jsonl
     詳細資料格式(7/12 原始 HTML 實測):原書號：A1091<br/>ISBN：9789575878580<br/>
     出版日期：20040819<br/>頁數：400<br/>尺寸：14.8 x 21cm<br/>重量：440克<br/>...全形冒號
+
+容錯(7/13):校園主機較弱、偶發 500——
+ - 重試中 500/503 視為過載,等 60 秒×次數再試(common.polite_fetch)
+ - 單一分類/商品重試耗盡僅跳過並記錄,不中斷全量;未完成分類不標 done,重跑自動補
 
 用法(Windows,先 pip install -r requirements.txt):
   python -X utf8 campus_crawler.py --probe --category 0501  # 探測(0501=47 本 2 頁,可驗分頁)
@@ -36,7 +40,7 @@ BASE = "https://shop.campus.org.tw"
 HERE = Path(__file__).parent
 CACHE = HERE / "cache" / "campus"
 DATA = HERE / "data"
-THROTTLE = (3.0, 5.0)
+THROTTLE = (5.0, 8.0)  # 校園主機較弱,放慢(7/13 前為 3-5 秒仍見 500)
 MAX_PAGES = 500  # 安全上限
 
 session = make_session()
@@ -55,17 +59,24 @@ def cjk(label: str) -> str:
 
 def get_leaf_categories() -> list[str]:
     """首頁 CategoryID 起步,遞迴走訪分類頁發現下層分類(頁面有快取,不浪費)。
-    回傳葉分類(沒有更長前綴延伸者);大分類櫥窗頁不列舉商品。"""
+    回傳葉分類(沒有更長前綴延伸者);大分類櫥窗頁不列舉商品。
+    走訪失敗的分類頁只警告跳過(其下層可能因此漏抓,重跑可補)。"""
     html = fetch(BASE + "/")
     ids = set(re.findall(r"[Pp]roducts[Ll]ist\.aspx\?CategoryID=(\d+)", html))
     if not ids:
         sys.exit("找不到任何 CategoryID —— 首頁結構可能已改,請跑 --probe 檢查")
-    print(f"首頁發現 {len(ids)} 個分類,開始遞迴走訪(每頁 3-5 秒,已抓過的走快取)...", flush=True)
+    print(f"首頁發現 {len(ids)} 個分類,開始遞迴走訪(每頁 5-8 秒,已抓過的走快取)...", flush=True)
     frontier = sorted(ids)
     visited = 0
+    failed = 0
     while frontier:
         cid = frontier.pop(0)
-        page = fetch(f"{BASE}/productslist.aspx?CategoryID={cid}")
+        try:
+            page = fetch(f"{BASE}/productslist.aspx?CategoryID={cid}")
+        except RuntimeError as e:
+            failed += 1
+            print(f"  [跳過分類頁 {cid}] {e}", flush=True)
+            continue
         visited += 1
         new = set(re.findall(r"[Pp]roducts[Ll]ist\.aspx\?CategoryID=(\d+)", page)) - ids
         if new:
@@ -74,7 +85,8 @@ def get_leaf_categories() -> list[str]:
         if visited % 10 == 0:
             print(f"  已走訪 {visited} 個分類頁,累計發現 {len(ids)} 個分類,待訪 {len(frontier)}", flush=True)
     leaves = sorted(i for i in ids if not any(j != i and j.startswith(i) for j in ids))
-    print(f"分類:共 {len(ids)} 個,葉分類 {len(leaves)} 個")
+    note = f"(走訪失敗 {failed} 頁,重跑可補)" if failed else ""
+    print(f"分類:共 {len(ids)} 個,葉分類 {len(leaves)} 個{note}")
     return leaves
 
 
@@ -205,7 +217,7 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
         if m:
             rec[key] = m.group(1).strip()
 
-    # 作者/出版社後備(meta keywords 缺時,詳細資料區有 作者：/出版社:)
+    # 作者/出版社後備(meta keywords 缺時,詳細資料區有 作者：/出版社：)
     if not rec.get("authors_raw"):
         m = re.search(cjk("作者") + r"[:：]\s*([^\n]+)", text)
         if m:
@@ -279,14 +291,26 @@ def main():
     cats = [args.category] if args.category else get_leaf_categories()
 
     total_new = 0
+    failed_cats: list[str] = []
     start = time.time()
     try:
         for cat in cats:
             if state.is_done(f"cat:{cat}") and not args.category:
                 continue
-            todo = crawl_category(cat, writer.seen)
+            try:
+                todo = crawl_category(cat, writer.seen)
+            except RuntimeError as e:
+                print(f"  [跳過分類 {cat},下次重跑補抓] {e}")
+                failed_cats.append(cat)
+                continue
+            cat_ok = True
             for pid in todo:
-                rec = parse_product(pid, cat)
+                try:
+                    rec = parse_product(pid, cat)
+                except RuntimeError as e:
+                    print(f"  [跳過商品 {pid},下次重跑補抓] {e}")
+                    cat_ok = False
+                    continue
                 if rec and writer.write(rec):
                     total_new += 1
                     if total_new % 20 == 0:
@@ -295,12 +319,18 @@ def main():
                 if args.limit and total_new >= args.limit:
                     print(f"達 --limit {args.limit},停止")
                     return
-            state.mark_done(f"cat:{cat}")
+            if cat_ok:
+                state.mark_done(f"cat:{cat}")
+            else:
+                failed_cats.append(cat)
     except KeyboardInterrupt:
         print("\n[中斷] 進度已保存,重跑同指令即續抓")
     finally:
         writer.close()
         print(f"本次新增 {total_new} 本;campus_books.jsonl 累計 {len(writer.seen)} 本")
+        if failed_cats:
+            print(f"[注意] {len(failed_cats)} 個分類未完抓(未標記完成,重跑同指令會自動補):"
+                  f"{', '.join(failed_cats)}")
 
 
 if __name__ == "__main__":
