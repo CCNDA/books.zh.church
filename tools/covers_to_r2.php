@@ -120,13 +120,15 @@ function fetch_image(string $url): ?array
 // ── 主流程 ───────────────────────────────────────────────
 
 $pdo = db();
-$sql = "SELECT b.book_id, m.media_id, m.url_or_path AS src
-        FROM books b
-        JOIN editions e ON e.book_id = b.book_id
-        JOIN media m ON m.edition_id = e.edition_id AND m.media_type = 'cover'
-        WHERE b.cover_url IS NULL AND m.url_or_path LIKE 'http%'
-        GROUP BY b.book_id
-        ORDER BY b.book_id";
+$sql = "SELECT t.book_id, t.media_id, m2.url_or_path AS src
+        FROM (SELECT b.book_id, MIN(m.media_id) AS media_id
+              FROM books b
+              JOIN editions e ON e.book_id = b.book_id
+              JOIN media m ON m.edition_id = e.edition_id AND m.media_type = 'cover'
+              WHERE b.cover_url IS NULL AND m.url_or_path LIKE 'http%'
+              GROUP BY b.book_id) t
+        JOIN media m2 ON m2.media_id = t.media_id
+        ORDER BY t.book_id";
 $rows = $pdo->query($sql)->fetchAll();
 echo "待轉存:" . count($rows) . " 本\n";
 
