@@ -246,14 +246,14 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
         rec["authors_raw"] = None
     if _label_junk(rec.get("publisher")):
         rec["publisher"] = None
-    if not rec.get("authors_raw"):
-        m = re.search(cjk("作者") + r"[:：][ \t]*([^\n]+)", text)
-        if m:
-            rec["authors_raw"] = m.group(1).strip()
-    if not rec.get("publisher"):
-        m = re.search(cjk("出版社") + r"[:：][ \t]*([^\n]+)", text)
-        if m:
-            rec["publisher"] = m.group(1).strip()
+    # 詳細資料區的 作者：/出版社： 比 meta keywords 可靠(聖經類 meta 欄位錯置:
+    # 作者欄放出版社、出版社欄是英文書名尾段)→ 詳細資料「優先」,meta 僅後備
+    m = re.search(cjk("作者") + r"[:：][ \t]*([^\n]+)", text)
+    if m and m.group(1).strip():
+        rec["authors_raw"] = m.group(1).strip()
+    m = re.search(cjk("出版社") + r"[:：][ \t]*([^\n]+)", text)
+    if m and m.group(1).strip():
+        rec["publisher"] = m.group(1).strip()
 
     # 詳細資料的「分類」(保留原值,映射 CategoryV11 於匯入階段處理)
     m = re.search(cjk("分類") + r"[:：][ \t]*([^\n]+)", text)
