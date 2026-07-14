@@ -1,23 +1,33 @@
 # -*- coding: utf-8 -*-
 """基道 BookFinder www.logos.com.hk 爬蟲(單執行緒、節流 2-3 秒、快取續跑)。
 
-流程:
- 1. 逐年檢索(field=year)列舉商品 code;分頁參數 &page=N(7/12 probe 證實)
- 2. 逐商品抓 op=show 頁 → 解析欄位 → data/logos_books.jsonl
+7/14 三修 —— 檢查 7/12 快取後的重要發現:
+ 1. 年份檢索 field=year&text=Y 並非「只列該年」,而是「Y 年(含)以後」的
+    累積結果、按日期倒序:各年首頁都是同一批最新書;宣稱總數隨年份遞減而
+    遞增(2001→21115、1968→24298≈全站),相鄰年份差值才是該年出版量。
+    → 逐年迴圈完全多餘,改以最早錨定年(--anchor,預設 1950)單次檢索
+      列舉全站,分頁走到底(約 24,300 項 ÷ 20/頁 ≈ 1,215 頁)。
+ 2. 伺服器偶發以 HTTP 200 回「空殼頁」(僅網站框架、無檢索結果)且被永久
+    快取,造成「首頁 0 項,宣稱共 None 項」→ 列表頁與商品頁現在都驗證
+    內容,無效即 force 重抓一次。
+ 3. 啟動時先從既有快取離線收割書碼(18,000+ 頁是先前逐年重走留下的),
+    不浪費已抓流量。
+ 4. 不再使用 logos_state.json(舊檔已因非原子寫入損毀;斷點續跑由頁面
+    快取 + jsonl 既有 code 天然達成)。
 
 用法(Windows):
-  python -X utf8 logos_crawler.py --probe             # 探測:抓 1 年列表 + 1 商品頁
-  python -X utf8 logos_crawler.py                     # 全量 1950-2026(可 Ctrl+C 續跑)
-  python -X utf8 logos_crawler.py --years 2024,2025   # 只抓指定年份
-  python -X utf8 logos_crawler.py --limit 50          # 試跑 50 本
+  python -X utf8 logos_crawler.py --probe        # 驗證累積假設 + 解析 1 本
+  python -X utf8 logos_crawler.py                # 全量(可 Ctrl+C 續跑)
+  python -X utf8 logos_crawler.py --limit 50     # 試跑 50 本
+  python -X utf8 logos_crawler.py --anchor 1900  # 若 probe 顯示 1950 非最大總數
 
 robots.txt 無限制;公益小站,保守節流。
-(7/12 二修:中文標籤容忍字間空白、probe 加欄位文字診斷;
- 已證實:標題去站名前綴、封面補協定、出版社取自 keywords、code 即 ISBN13)
+(7/12 已證實:標題去站名前綴、封面補協定、出版社取自 keywords、code 即 ISBN13)
 """
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import re
 import time
@@ -27,7 +37,7 @@ from urllib.parse import quote
 
 from bs4 import BeautifulSoup
 
-from common import JsonlWriter, State, make_session, polite_fetch
+from common import JsonlWriter, make_session, polite_fetch
 
 BASE = "https://www.logos.com.hk"
 SEARCH = BASE + "/bf/acms/content.asp?site=logosbf&op=search&type=product&match=like"
@@ -35,6 +45,7 @@ HERE = Path(__file__).parent
 CACHE = HERE / "cache" / "logos"
 DATA = HERE / "data"
 THROTTLE = (2.0, 3.0)
+PAGE_PARAM = "page"  # 7/12 probe 證實
 
 session = make_session()
 
@@ -48,7 +59,7 @@ def cjk(label: str) -> str:
     return r"\s*".join(map(re.escape, label))
 
 
-# ── 1. 年度列表與分頁 ────────────────────────────────────────
+# ── 1. 列表頁(累積檢索)──────────────────────────────────────
 
 def extract_codes(html: str) -> list[str]:
     codes = re.findall(r"op=show&(?:amp;)?type=product&(?:amp;)?code=([A-Za-z0-9\-]+)", html)
@@ -61,53 +72,34 @@ def extract_total(html: str) -> int | None:
     return int(m.group(1).replace(",", "")) if m else None
 
 
-def year_url(year: int) -> str:
-    return f"{SEARCH}&field=year&text={year}"
+def year_url(year: int, page: int = 1) -> str:
+    url = f"{SEARCH}&field=year&text={year}"
+    return url if page == 1 else f"{url}&{PAGE_PARAM}={page}"
 
 
-PAGE_PARAM_CANDIDATES = ("page", "pageno", "start", "offset", "curpage")
+def is_valid_list_page(html: str) -> bool:
+    """空殼頁 = 只有網站框架、無檢索結果區塊(7/12 快取中 1998/1994 等即此)。"""
+    return bool(extract_total(html) or extract_codes(html))
 
 
-def detect_page_param(year: int, first_html: str, first_codes: list[str]) -> str | None:
-    """探測分頁參數:第 2 頁 code 集合需非空且異於第 1 頁。"""
-    for param in PAGE_PARAM_CANDIDATES:
-        html2 = fetch(year_url(year) + f"&{param}=2")
-        codes2 = extract_codes(html2)
-        if codes2 and codes2 != first_codes:
-            print(f"  分頁參數偵測成功:&{param}=N")
-            return param
-    return None
-
-
-def crawl_year(year: int, page_param: str | None, seen: set[str]) -> tuple[list[str], str | None]:
-    html = fetch(year_url(year))
-    codes = extract_codes(html)
-    total = extract_total(html)
-    print(f"年份 {year}:首頁 {len(codes)} 項,宣稱共 {total} 項")
-    if total and total > len(codes):
-        if page_param is None:
-            page_param = detect_page_param(year, html, codes)
-            if page_param is None:
-                print(f"  [警告] 找不到分頁參數,{year} 只收到首頁 {len(codes)} 項")
-        if page_param:
-            per_page = max(len(codes), 1)
-            pages = -(-total // per_page)
-            for p in range(2, pages + 1):
-                got = extract_codes(fetch(year_url(year) + f"&{page_param}={p}"))
-                if not got:
-                    break
-                before = len(codes)
-                codes = list(dict.fromkeys(codes + got))
-                if len(codes) == before:  # 重複頁=到底了
-                    break
-    return [c for c in codes if c not in seen], page_param
+def fetch_list(url: str) -> str | None:
+    """抓列表頁;快取到空殼頁則 force 重抓一次,仍無效回 None(不信任壞快取)。"""
+    try:
+        html = fetch(url)
+        if not is_valid_list_page(html):
+            print(f"  [空殼頁] 重抓 {url}")
+            html = fetch(url, force=True)
+        return html if is_valid_list_page(html) else None
+    except RuntimeError as e:
+        print(f"  [失敗] {e}")
+        return None
 
 
 # ── 2. 商品頁解析 ────────────────────────────────────────────
 
-def parse_product(code: str) -> dict | None:
+def parse_product(code: str, retried: bool = False) -> dict | None:
     url = f"{BASE}/bf/acms/content.asp?site=logosbf&op=show&type=product&code={quote(code)}"
-    html = fetch(url)
+    html = fetch(url, force=retried)
     soup = BeautifulSoup(html, "lxml")
 
     rec: dict = {
@@ -135,6 +127,8 @@ def parse_product(code: str) -> dict | None:
     if rec.get("title"):
         rec["title"] = re.sub(r"^基道\s*BOOKFINDER\s*[-–—|]\s*", "", rec["title"]).strip() or None
     if not rec.get("title"):
+        if not retried:  # 可能是快取到的空殼頁 → force 重抓一次
+            return parse_product(code, retried=True)
         print(f"  [略過] {code} 無書名")
         return None
 
@@ -182,70 +176,114 @@ def parse_product(code: str) -> dict | None:
     return rec
 
 
+# ── 3. 快取離線收割 ──────────────────────────────────────────
+
+def harvest_cached_codes() -> list[str]:
+    """從既有快取頁離線抽出所有書碼(先前逐年重走留下 18,000+ 頁,不浪費)。"""
+    codes: dict[str, None] = {}
+    n = 0
+    for gz in CACHE.rglob("*.html.gz"):
+        try:
+            html = gzip.decompress(gz.read_bytes()).decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        n += 1
+        for c in extract_codes(html):
+            codes.setdefault(c)
+    print(f"快取收割:掃描 {n} 頁,得 {len(codes)} 個不重複書碼")
+    return list(codes)
+
+
 # ── 主流程 ───────────────────────────────────────────────────
 
-def probe():
-    print("=== 探測模式 ===")
-    year = 2021  # 偵察時已知 2021 約 3,800 筆
-    html = fetch(year_url(year))
-    codes = extract_codes(html)
-    total = extract_total(html)
-    print(f"年份 {year}:首頁 {len(codes)} 項,宣稱共 {total} 項")
-    param = detect_page_param(year, html, codes) if codes else None
-    print(f"分頁參數:{param!r}")
-    if codes:
-        rec = parse_product(codes[0])
+def probe(anchor: int):
+    print("=== 探測模式:驗證『年份檢索=該年以後累積』假設 ===")
+    results = {}
+    for y in (2021, 2001, anchor):
+        html = fetch_list(year_url(y))
+        total = extract_total(html) if html else None
+        first = extract_codes(html)[:3] if html else []
+        results[y] = (total, first)
+        print(f"text={y}:宣稱總數 {total},首頁前 3 code {first}")
+    print("判讀:若三者首頁 code 幾乎相同、總數隨年份遞減而遞增,即證實累積;")
+    print(f"錨定年 {anchor} 總數應為最大(≈全站量)。若否,改 --anchor 更早年份。")
+    _, first = results[anchor]
+    if first:
+        rec = parse_product(first[0])
         print("商品頁解析結果:")
         print(json.dumps(rec, ensure_ascii=False, indent=2))
-        # 欄位診斷:印出商品頁上與出版/頁數/裝訂/價格相關的原始文字
-        url = f"{BASE}/bf/acms/content.asp?site=logosbf&op=show&type=product&code={quote(codes[0])}"
-        text = BeautifulSoup(fetch(url), "lxml").get_text("\n")
-        hits = [ln.strip() for ln in text.splitlines()
-                if ln.strip() and re.search(r"(出\s*版|頁|ISBN|裝|價|庫\s*存)", ln)]
-        print(f"欄位相關原始文字(前 15 行):{json.dumps(hits[:15], ensure_ascii=False, indent=1)}")
-    print("\n請把以上輸出貼回給 Claude 檢查解析是否正確。")
+    print("\n請把以上輸出貼回給 Claude 檢查。")
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", action="store_true")
-    ap.add_argument("--years", help="逗號分隔年份,如 2024,2025;預設 2026 倒抓到 1950")
+    ap.add_argument("--anchor", type=int, default=1950,
+                    help="錨定年:檢索『該年以後』應涵蓋全站(預設 1950)")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--no-harvest", action="store_true", help="跳過快取離線收割")
     args = ap.parse_args()
 
     if args.probe:
-        probe()
+        probe(args.anchor)
         return
 
     writer = JsonlWriter(DATA / "logos_books.jsonl", "code")
-    state = State(DATA / "logos_state.json")
-    years = ([int(y) for y in args.years.split(",")] if args.years
-             else list(range(2026, 1949, -1)))
-    page_param = state.data.get("page_param")
-
     total_new = 0
     start = time.time()
+
+    def do(code: str) -> bool:
+        """解析一本;達 --limit 回 True。"""
+        nonlocal total_new
+        rec = parse_product(code)
+        if rec and writer.write(rec):
+            total_new += 1
+            if total_new % 20 == 0:
+                rate = total_new / max(time.time() - start, 1) * 3600
+                print(f"  進度:+{total_new} 本(約 {rate:.0f} 本/小時),累計 {len(writer.seen)}")
+        return bool(args.limit and total_new >= args.limit)
+
     try:
-        for year in years:
-            if state.is_done(f"year:{year}") and not args.years:
-                continue
-            todo, page_param = crawl_year(year, page_param, writer.seen)
-            if page_param and state.data.get("page_param") != page_param:
-                state.data["page_param"] = page_param
-                state.save()
-            for code in todo:
-                rec = parse_product(code)
-                if rec and writer.write(rec):
-                    total_new += 1
-                    if total_new % 20 == 0:
-                        rate = total_new / max(time.time() - start, 1) * 3600
-                        print(f"  進度:+{total_new} 本(約 {rate:.0f} 本/小時),累計 {len(writer.seen)}")
-                if args.limit and total_new >= args.limit:
+        # 第一步:離線收割既有快取的書碼
+        if not args.no_harvest:
+            for code in harvest_cached_codes():
+                if code not in writer.seen and do(code):
                     print(f"達 --limit {args.limit},停止")
                     return
-            state.mark_done(f"year:{year}")
+
+        # 第二步:錨定年單次全站掃描
+        html = fetch_list(year_url(args.anchor))
+        if html is None:
+            print("錨定年首頁抓取失敗,中止(重跑即續)")
+            return
+        total = extract_total(html)
+        per_page = max(len(extract_codes(html)), 1)
+        if not total:
+            print("讀不到宣稱總數,中止")
+            return
+        pages = -(-total // per_page)
+        print(f"錨定年 {args.anchor}:宣稱共 {total} 項(≈全站),每頁 {per_page} 項,約 {pages} 頁")
+
+        bad_streak = 0
+        for p in range(1, pages + 1):
+            page_html = html if p == 1 else fetch_list(year_url(args.anchor, p))
+            got = extract_codes(page_html) if page_html else []
+            if not got:
+                bad_streak += 1
+                print(f"  [警告] 第 {p} 頁無資料({bad_streak}/3)")
+                if bad_streak >= 3:
+                    print("連續 3 頁無資料,視為到底")
+                    break
+                continue
+            bad_streak = 0
+            for code in got:
+                if code not in writer.seen and do(code):
+                    print(f"達 --limit {args.limit},停止")
+                    return
+            if p % 25 == 0:
+                print(f"  列表頁 {p}/{pages},累計 {len(writer.seen)} 本")
     except KeyboardInterrupt:
-        print("\n[中斷] 進度已保存,重跑同指令即續抓")
+        print("\n[中斷] 已寫入的資料與頁面快取都在,重跑同指令即續抓")
     finally:
         writer.close()
         print(f"本次新增 {total_new} 本;logos_books.jsonl 累計 {len(writer.seen)} 本")

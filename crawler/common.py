@@ -130,7 +130,12 @@ class State:
         self.path = path
         self.data: dict = {}
         if path.exists():
-            self.data = json.loads(path.read_text(encoding="utf-8"))
+            try:
+                self.data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                bak = path.with_suffix(".corrupt.bak")
+                path.replace(bak)
+                print(f"[警告] 狀態檔 JSON 損毀,已改名為 {bak.name},狀態重新開始")
 
     def is_done(self, unit: str) -> bool:
         return unit in self.data.get("done", [])
@@ -142,7 +147,10 @@ class State:
         self.save()
 
     def save(self):
+        """原子寫入:先寫 .tmp 再 replace,避免中斷時截斷 JSON(7/12 事故)。"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(
             json.dumps(self.data, ensure_ascii=False, indent=1), encoding="utf-8"
         )
+        tmp.replace(self.path)
