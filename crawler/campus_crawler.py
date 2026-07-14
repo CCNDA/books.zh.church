@@ -208,16 +208,18 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
     }
 
     # meta keywords = 商品ID,書名,英文書名,出版社,作者,ISBN,1(聖經類常缺,og 後備)
+    # 英文書名可能含逗號使欄位位移 → 從尾端錨定解析(尾固定:出版社,作者,ISBN[,1])
     mk = soup.find("meta", attrs={"name": re.compile(r"^keywords$", re.I)})
     if mk and mk.get("content"):
         parts = [p.strip() for p in mk["content"].split(",")]
         if len(parts) >= 6:
+            k = -2 if re.fullmatch(r"[01]", parts[-1] or "") else -1  # 尾端可能有 ",1"
             rec.update({
                 "title": parts[1] or None,
-                "title_en": parts[2] or None,
-                "publisher": parts[3] or None,
-                "authors_raw": parts[4] or None,
-                "isbn_meta": parts[5] or None,
+                "title_en": ",".join(parts[2:k - 2]).strip() or None,
+                "publisher": parts[k - 2] or None,
+                "authors_raw": parts[k - 1] or None,
+                "isbn_meta": parts[k] or None,
             })
 
     for prop, key in (("og:title", "og_title"), ("og:description", "summary"), ("og:image", "cover_url")):
@@ -238,6 +240,12 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
             rec[key] = m.group(1).strip()
 
     # 作者/出版社後備(meta keywords 缺時,詳細資料區有 作者：/出版社：)
+    def _label_junk(v):  # 舊 bug 殘值(如「出版社：」)或純標籤
+        return v and re.fullmatch(r"[^:：]{0,8}[:：]", v.strip())
+    if _label_junk(rec.get("authors_raw")):
+        rec["authors_raw"] = None
+    if _label_junk(rec.get("publisher")):
+        rec["publisher"] = None
     if not rec.get("authors_raw"):
         m = re.search(cjk("作者") + r"[:：][ \t]*([^\n]+)", text)
         if m:
