@@ -5,8 +5,11 @@
  1. 年份檢索 field=year&text=Y 並非「只列該年」,而是「Y 年(含)以後」的
     累積結果、按日期倒序:各年首頁都是同一批最新書;宣稱總數隨年份遞減而
     遞增(2001→21115、1968→24298≈全站),相鄰年份差值才是該年出版量。
-    → 逐年迴圈完全多餘,改以最早錨定年(--anchor,預設 1950)單次檢索
-      列舉全站,分頁走到底(約 24,300 項 ÷ 20/頁 ≈ 1,215 頁)。
+    → 逐年迴圈完全多餘,改以最早錨定年(--anchor,預設 1)單次檢索
+      列舉全站,分頁走到底。7/14 probe 實測:總數隨 anchor 遞減而遞增,
+      至 anchor 1 = 1900 = 24,609 飽和(≈全站量;1950=24,359 仍未到底,
+      推測含年份空值/預設值書),故預設壓到 1 確保無漏。
+      約 24,609 項 ÷ 20/頁 ≈ 1,231 頁。
  2. 伺服器偶發以 HTTP 200 回「空殼頁」(僅網站框架、無檢索結果)且被永久
     快取,造成「首頁 0 項,宣稱共 None 項」→ 列表頁與商品頁現在都驗證
     內容,無效即 force 重抓一次。
@@ -17,9 +20,9 @@
 
 用法(Windows):
   python -X utf8 logos_crawler.py --probe        # 驗證累積假設 + 解析 1 本
-  python -X utf8 logos_crawler.py                # 全量(可 Ctrl+C 續跑)
+  python -X utf8 logos_crawler.py                # 全量 anchor 1(可 Ctrl+C 續跑)
   python -X utf8 logos_crawler.py --limit 50     # 試跑 50 本
-  python -X utf8 logos_crawler.py --anchor 1900  # 若 probe 顯示 1950 非最大總數
+  python -X utf8 logos_crawler.py --anchor 2020  # 只補近年新書(增量)
 
 robots.txt 無限制;公益小站,保守節流。
 (7/12 已證實:標題去站名前綴、封面補協定、出版社取自 keywords、code 即 ISBN13)
@@ -57,6 +60,14 @@ def fetch(url: str, force: bool = False) -> str:
 def cjk(label: str) -> str:
     """中文標籤容忍字間空白。"""
     return r"\s*".join(map(re.escape, label))
+
+
+def tidy(s: str) -> str:
+    """收斂 meta 文字裡的跳格/多重空白為可讀段落(不破壞內容,僅正規化空白)。"""
+    s = re.sub(r"[ \t　]*\t[ \t　]*", "\n", s)  # 跳格區塊 → 段落換行
+    s = re.sub(r"\n{2,}", "\n", s)                        # 收斂多重換行
+    s = re.sub(r"[ 　]{2,}", " ", s)                  # 收斂多重空白
+    return s.strip()
 
 
 # ── 1. 列表頁(累積檢索)──────────────────────────────────────
@@ -112,7 +123,7 @@ def parse_product(code: str, retried: bool = False) -> dict | None:
     for name, key in (("author", "authors_raw"), ("description", "summary"), ("keywords", "keywords")):
         el = soup.find("meta", attrs={"name": re.compile(rf"^{name}$", re.I)})
         if el and el.get("content"):
-            rec[key] = el["content"].strip()
+            rec[key] = tidy(el["content"]) if key == "summary" else el["content"].strip()
 
     for prop, key in (("og:title", "title"), ("og:image", "cover_url")):
         el = soup.find("meta", attrs={"property": prop})
@@ -218,8 +229,9 @@ def probe(anchor: int):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--probe", action="store_true")
-    ap.add_argument("--anchor", type=int, default=1950,
-                    help="錨定年:檢索『該年以後』應涵蓋全站(預設 1950)")
+    ap.add_argument("--anchor", type=int, default=1,
+                    help="錨定年:檢索『該年以後』;越低涵蓋越全。7/14 probe 實測 "
+                         "anchor 1 = 1900 = 24,609 已飽和(全站量),故預設 1")
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--no-harvest", action="store_true", help="跳過快取離線收割")
     args = ap.parse_args()
