@@ -67,13 +67,13 @@ $ogUrl = 'https://books.zh.church/book/' . $id;
 <link rel="shortcut icon" href="/assets/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
 <link rel="manifest" href="/assets/site.webmanifest">
-<meta name="theme-color" content="#a8802f">
+<meta name="theme-color" content="#177da8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --paper:#faf6ee; --card:#fffdf8; --ink:#3d2f23; --ink-soft:#6b5a49;
-  --gold:#a8802f; --gold-soft:#d9c69a; --line:#e8dfcf; --accent:#7a5c3e;
+  --paper:#f2f6f9; --card:#ffffff; --ink:#14303c; --ink-soft:#5c7482;
+  --gold:#0e6d94; --gold-soft:#f0c04a; --line:#e2e8ee; --accent:#177da8;
 }
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -96,10 +96,10 @@ header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 
 .wrap{max-width:1080px;margin:18px auto 0;padding:0 20px;display:flex;gap:32px;align-items:flex-start}
 .cover{flex:0 0 200px;height:280px;border-radius:8px;overflow:hidden;position:relative;
-  background:linear-gradient(150deg,#8a6d4b,#5f462e);box-shadow:0 6px 18px rgba(61,47,35,.25)}
+  background:linear-gradient(150deg,#2f8fb8,#14617f);box-shadow:0 6px 18px rgba(20,48,60,.25)}
 .cover img{width:100%;height:100%;object-fit:cover;display:block}
 .cover .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
-  color:#f5ead3;font-size:4rem;font-family:"Noto Serif TC",serif;text-shadow:0 1px 3px rgba(0,0,0,.3)}
+  color:#e9f4fa;font-size:4rem;font-family:"Noto Serif TC",serif;text-shadow:0 1px 3px rgba(0,0,0,.3)}
 .cover .ph::after{content:"";position:absolute;left:18px;top:0;bottom:0;width:1px;background:rgba(255,255,255,.25)}
 
 .info{flex:1;min-width:0}
@@ -113,13 +113,13 @@ h1{margin:0 0 4px;font-size:1.7rem;line-height:1.4}
 .meta a{color:var(--gold);border-bottom:1px dotted var(--gold-soft)}
 .tagrow{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
 .tag{font-size:.8rem;color:var(--gold);border:1px solid var(--gold-soft);
-  border-radius:999px;padding:3px 12px;background:rgba(168,128,47,.06)}
+  border-radius:999px;padding:3px 12px;background:rgba(240,192,74,.06)}
 .btns{margin-top:18px;display:flex;gap:10px;flex-wrap:wrap}
 .btn{display:inline-block;padding:9px 20px;border-radius:8px;font-size:.92rem;cursor:pointer;
   border:1px solid var(--gold);color:var(--gold);background:none;font-family:inherit}
-.btn:hover{background:rgba(168,128,47,.08)}
+.btn:hover{background:rgba(240,192,74,.08)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.btn.primary:hover{background:#5f462e}
+.btn.primary:hover{background:#14617f}
 
 .sec{max-width:1080px;margin:34px auto 0;padding:0 20px}
 .sec h2{font-size:1.15rem;margin:0 0 12px;border-left:4px solid var(--gold);padding-left:10px;letter-spacing:.08em}
