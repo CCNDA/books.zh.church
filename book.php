@@ -197,6 +197,7 @@ function metaRow(label, value, html){
 /* 貢獻者:正規化 contributors 優先,平面欄位後備 */
 const ROLE_NAMES = { author:"作者", editor:"編者", translator:"譯者", illustrator:"繪者",
   foreword:"序文", advisor:"顧問", proofreader:"校對", contributor:"合著" };
+const PLATFORM_NAMES = { campus:"校園書房", logos:"基道 BookFinder" };
 function contributorRows(b){
   if (b.contributors){
     return Object.entries(b.contributors).map(([role, ps]) =>
@@ -247,7 +248,7 @@ function render(b){
   for (const l of (Array.isArray(b.buy_links) ? b.buy_links : [])){
     const url = typeof l === "string" ? l : (l.url || "");
     if (!url) continue;
-    const label = typeof l === "string" ? "購書連結" : (l.label || l.platform || l.name || "購書連結");
+    const label = typeof l === "string" ? "購書連結" : (l.label || PLATFORM_NAMES[l.platform] || l.platform || l.name || "購書連結");
     btns.push(`<a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener nofollow">🛒 ${esc(label)}</a>`);
   }
   btns.push(`<button class="btn" id="copyBtn">🔗 複製本頁連結</button>`);
@@ -262,7 +263,7 @@ function render(b){
 
   // 延伸連結(推薦影音/文章 + 版本層連結)
   const links = (b.links || []).map(l =>
-    `<li><a href="${esc(l.url)}" target="_blank" rel="noopener nofollow">${esc(l.platform || l.link_type || l.url)}</a>` +
+    `<li><a href="${esc(l.url)}" target="_blank" rel="noopener nofollow">${esc(PLATFORM_NAMES[l.platform] || l.platform || l.link_type || l.url)}</a>` +
     (l.note ? `<span class="note">${esc(l.note)}</span>` : "") + `</li>`).join("");
   if (links){ $("bLinks").innerHTML = links; show("secLinks", true); }
 
