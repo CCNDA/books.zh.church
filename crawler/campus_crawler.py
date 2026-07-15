@@ -212,15 +212,22 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
     mk = soup.find("meta", attrs={"name": re.compile(r"^keywords$", re.I)})
     if mk and mk.get("content"):
         parts = [p.strip() for p in mk["content"].split(",")]
-        if len(parts) >= 6:
-            k = -2 if re.fullmatch(r"[01]", parts[-1] or "") else -1  # 尾端可能有 ",1"
-            rec.update({
-                "title": parts[1] or None,
-                "title_en": ",".join(parts[2:k - 2]).strip() or None,
-                "publisher": parts[k - 2] or None,
-                "authors_raw": parts[k - 1] or None,
-                "isbn_meta": parts[k] or None,
-            })
+        if len(parts) >= 4:
+            rec["title"] = parts[1] or None
+            # 以 keywords 內最後一個 ISBN 元素為錨(尾端可能有讀者對象/1,不能靠固定位置);
+            # 書名與 ISBN 之間 = [英文書名*, 出版社, 作者?]:含 ASCII 者為英文書名(可能被逗號拆多段),
+            # 其餘 CJK 依序為 出版社、作者(作者常缺)。取代舊「固定尾端」法(台灣出版社批次會位移致作者=ISBN)
+            isbn_i = next((i for i in range(len(parts) - 1, 1, -1)
+                           if re.fullmatch(r"(97[89]\d{10}|\d{9}[\dXx])",
+                                           (parts[i] or "").replace("-", ""))), None)
+            if isbn_i is not None:
+                seg = [p for p in parts[2:isbn_i] if p]
+                en = [p for p in seg if re.search(r"[A-Za-z]", p)]
+                cj = [p for p in seg if not re.search(r"[A-Za-z]", p)]
+                rec["title_en"] = ",".join(en) or None
+                rec["publisher"] = cj[0] if cj else None
+                rec["authors_raw"] = cj[1] if len(cj) >= 2 else None
+                rec["isbn_meta"] = parts[isbn_i] or None
 
     for prop, key in (("og:title", "og_title"), ("og:description", "summary"), ("og:image", "cover_url")):
         el = soup.find("meta", attrs={"property": prop})
@@ -239,21 +246,43 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
         if m:
             rec[key] = m.group(1).strip()
 
-    # 作者/出版社後備(meta keywords 缺時,詳細資料區有 作者：/出版社：)
-    def _label_junk(v):  # 舊 bug 殘值(如「出版社：」)或純標籤
-        return v and re.fullmatch(r"[^:：]{0,8}[:：]", v.strip())
-    if _label_junk(rec.get("authors_raw")):
-        rec["authors_raw"] = None
-    if _label_junk(rec.get("publisher")):
-        rec["publisher"] = None
-    # 詳細資料區的 作者：/出版社： 比 meta keywords 可靠(聖經類 meta 欄位錯置:
-    # 作者欄放出版社、出版社欄是英文書名尾段)→ 詳細資料「優先」,meta 僅後備
-    m = re.search(cjk("作者") + r"[:：][ \t]*([^\n]+)", text)
-    if m and m.group(1).strip():
-        rec["authors_raw"] = m.group(1).strip()
-    m = re.search(cjk("出版社") + r"[:：][ \t]*([^\n]+)", text)
-    if m and m.group(1).strip():
-        rec["publisher"] = m.group(1).strip()
+    # 詳細資料區的 作者：/出版社：(值可能在「同一行」或「下一行」)比 meta keywords 可靠 → 有值時優先。
+    _dlines = [ln.strip() for ln in text.split("\n")]
+    _LABELS = ("作者", "繪者", "譯者", "編者", "主編", "出版社", "出版商", "原書號", "ISBN",
+               "出版日期", "頁數", "尺寸", "重量", "裝訂", "版式", "語言", "印刷",
+               "適用", "分類", "定價", "特價", "系列", "開數", "國際條碼", "冊數")
+    def _is_label(sv):
+        return any(re.match(cjk(lb) + r"[:：]", sv) for lb in _LABELS)
+    def _detail_value(label):
+        pat = re.compile("^" + cjk(label) + r"[:：][ \t]*(.*)$")
+        for i, ln in enumerate(_dlines):
+            mm = pat.match(ln)
+            if not mm:
+                continue
+            v = mm.group(1).strip()
+            if v:
+                return v
+            for nx in _dlines[i + 1:]:  # 值在下一行:取後續第一個非空行,且該行不得是另一個標籤
+                if not nx:
+                    continue
+                return None if _is_label(nx) else nx
+            return None
+        return None
+    dv_a = _detail_value("作者")
+    dv_p = _detail_value("出版社") or _detail_value("出版商")
+    if dv_a:
+        rec["authors_raw"] = dv_a
+    if dv_p:
+        rec["publisher"] = dv_p
+    # 位移/殘值保險:author、publisher 若為 ISBN 或純標籤殘值 → 清空;isbn_meta 非 ISBN → 清空
+    def _is_isbn(v):
+        return bool(v and re.fullmatch(r"(97[89]\d{10}|\d{9}[\dXx])", str(v).replace("-", "").strip()))
+    for _f in ("authors_raw", "publisher"):
+        v = rec.get(_f)
+        if _is_isbn(v) or (v and re.fullmatch(r"[^:：]{0,8}[:：]", v.strip())):
+            rec[_f] = None
+    if rec.get("isbn_meta") and not _is_isbn(rec["isbn_meta"]):
+        rec["isbn_meta"] = None
 
     # 詳細資料的「分類」(保留原值,映射 CategoryV11 於匯入階段處理)
     m = re.search(cjk("分類") + r"[:：][ \t]*([^\n]+)", text)
