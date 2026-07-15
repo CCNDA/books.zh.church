@@ -125,7 +125,7 @@ $sql = "SELECT t.book_id, t.media_id, m2.url_or_path AS src
               FROM books b
               JOIN editions e ON e.book_id = b.book_id
               JOIN media m ON m.edition_id = e.edition_id AND m.media_type = 'cover'
-              WHERE b.cover_url IS NULL AND m.url_or_path LIKE 'http%'
+              WHERE b.is_published = 1 AND b.cover_url IS NULL AND m.url_or_path LIKE 'http%'
               GROUP BY b.book_id) t
         JOIN media m2 ON m2.media_id = t.media_id
         ORDER BY t.book_id";
