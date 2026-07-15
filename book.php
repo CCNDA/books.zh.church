@@ -56,8 +56,18 @@ $ogUrl = 'https://books.zh.church/book/' . $id;
 <meta property="og:url" content="<?= e($ogUrl) ?>">
 <?php if ($book && $book['cover_url']): ?>
 <meta property="og:image" content="<?= e($book['cover_url']) ?>">
+<?php else: ?>
+<meta property="og:image" content="https://books.zh.church/assets/og-image.png">
 <?php endif; ?>
 <meta name="twitter:card" content="summary">
+<link rel="canonical" href="<?= e($ogUrl) ?>">
+<link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="shortcut icon" href="/assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="theme-color" content="#a8802f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -76,6 +86,8 @@ header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .hd-inner{max-width:1080px;margin:0 auto;padding:20px 20px 14px;
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 .hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em}
+.hd-title a{display:inline-flex;align-items:center;gap:.4em;color:var(--ink)}
+.brand-logo{height:34px;width:34px;flex:0 0 auto}
 .hd-nav{font-size:.88rem;color:var(--ink-soft)}
 .hd-nav a:hover{color:var(--gold)}
 
@@ -127,6 +139,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:1080px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
   display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .ft a{color:var(--gold)}
+.ft-logo{width:26px;height:26px;border-radius:4px;flex:0 0 auto}
 
 @media (max-width:680px){
   .wrap{flex-direction:column;align-items:center}
@@ -138,7 +151,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <body>
 <header>
   <div class="hd-inner">
-    <h1 class="hd-title serif"><a href="/">屬靈共同書目</a></h1>
+    <h1 class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a></nav>
   </div>
 </header>
@@ -161,7 +174,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <div class="msg" id="msg" hidden></div>
 
 <footer><div class="ft">
-  <span>© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
+  <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
   <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a></span>
 </div></footer>
 

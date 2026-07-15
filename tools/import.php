@@ -85,6 +85,17 @@ function tidy(?string $s): ?string
     return $s;
 }
 
+/**
+ * 截斷至欄位長度(以字元計,保留完整多位元組)。
+ * MySQL VARCHAR(n) 對 utf8mb4 以「字元」計長,故 mb_substr 至 n 字元即安全。
+ * 完整原文另整包存於 books.extra,截斷僅影響平面後備欄的顯示,不損資料。
+ */
+function cap(?string $s, int $n): ?string
+{
+    if ($s === null) return null;
+    return mb_strlen($s, 'UTF-8') > $n ? mb_substr($s, 0, $n, 'UTF-8') : $s;
+}
+
 /** 多人名拆分(;、頓號);保留「等」尾註於 credit_text */
 function split_names(?string $raw): array
 {
@@ -96,7 +107,7 @@ function split_names(?string $raw): array
         $p = trim($p);
         if ($p === '' || $p === '等') continue;
         $name = preg_replace('/\s*等$/u', '', $p);
-        $out[] = ['name' => $name, 'credit' => $p];
+        $out[] = ['name' => cap($name, 150), 'credit' => cap($p, 255)]; // persons.name(150)/credit_text(255)
     }
     return $out;
 }
@@ -123,31 +134,31 @@ function map_record(string $source, array $r): array
     [$isbn13, $isbn10] = isbn_pair($r['isbn'] ?? ($r['isbn_meta'] ?? null));
     [$bDate, $eDate]   = parse_date($r['publish_date'] ?? null);
     $m = [
-        'title'          => tidy($r['title'] ?? null),
-        'original_title' => tidy($r['title_en'] ?? null),
+        'title'          => cap(tidy($r['title'] ?? null), 255),
+        'original_title' => cap(tidy($r['title_en'] ?? null), 255),
         'authors'        => split_names($r['authors_raw'] ?? null),
-        'authors_raw'    => tidy($r['authors_raw'] ?? null),
-        'publisher'      => tidy($r['publisher'] ?? null),
+        'authors_raw'    => cap(tidy($r['authors_raw'] ?? null), 255),
+        'publisher'      => cap(tidy($r['publisher'] ?? null), 100), // books.publisher(100)、publishers.name_zh(150) 取小者
         'book_date'      => $bDate,
         'edition_date'   => $eDate,
         'isbn13'         => $isbn13,
         'isbn10'         => $isbn10,
         'page_count'     => isset($r['page_count']) ? (int) $r['page_count'] : null,
-        'binding'        => tidy($r['binding'] ?? null),
-        'language'       => tidy($r['language'] ?? null),
-        'series'         => tidy($r['series_text'] ?? ($r['series'] ?? null)),
+        'binding'        => cap(tidy($r['binding'] ?? null), 50),
+        'language'       => cap(tidy($r['language'] ?? null), 50),
+        'series'         => cap(tidy($r['series_text'] ?? ($r['series'] ?? null)), 255),
         'summary'        => str_replace("\t", "\n", trim((string) ($r['summary'] ?? ''))) ?: null,
-        'keywords'       => tidy($r['keywords'] ?? null),
-        'dimensions'     => tidy($r['dimensions'] ?? null),
+        'keywords'       => cap(tidy($r['keywords'] ?? null), 500),
+        'dimensions'     => cap(tidy($r['dimensions'] ?? null), 50),
         'weight_g'       => weight_g($r['weight'] ?? null),
-        'store_code'     => tidy($r['item_no'] ?? ($r['code'] ?? null)),
+        'store_code'     => cap(tidy($r['item_no'] ?? ($r['code'] ?? null)), 30),
         'price'          => isset($r['price_list']) && $r['price_list'] !== '' ? $r['price_list']
                             : ($r['price_sale'] ?? null),
         'currency'       => $source === 'campus' ? 'TWD' : (tidy($r['currency'] ?? null) ?: 'HKD'),
         'cover_url'      => tidy($r['cover_url'] ?? null),
         'source_url'     => $r['source_url'] ?? null,
-        'subject_code'   => tidy($r['category_source'] ?? null),
-        'subject_label'  => tidy($r['category_text'] ?? null),
+        'subject_code'   => cap(tidy($r['category_source'] ?? null), 20),
+        'subject_label'  => cap(tidy($r['category_text'] ?? null), 150),
         'skip'           => $isJunkTitle,
     ];
     return $m;
@@ -311,7 +322,11 @@ while (($line = fgets($fh)) !== false) {
     $pubId = null;
     if ($m['publisher']) {
         if (!isset($pubMap[$m['publisher']])) {
-            $st = $pdo->prepare("INSERT INTO publishers (name_zh) VALUES (:n)");
+            // uq_name_zh 為 utf8mb4_unicode_ci(不分大小寫/全半形),PHP 陣列鍵卻區分大小寫;
+            // 以 upsert 取回既有 id,避免大小寫/全半形變體撞唯一鍵而 1062。
+            $st = $pdo->prepare(
+                "INSERT INTO publishers (name_zh) VALUES (:n)
+                 ON DUPLICATE KEY UPDATE publisher_id = LAST_INSERT_ID(publisher_id)");
             $st->execute([':n' => $m['publisher']]);
             $pubMap[$m['publisher']] = (int) $pdo->lastInsertId();
         }
@@ -372,7 +387,10 @@ while (($line = fgets($fh)) !== false) {
         $label = $m['subject_label'] ?: $m['subject_code'];
         $key = "$source|{$m['subject_code']}|$label";
         if (!isset($subjMap[$key])) {
-            $st = $pdo->prepare("INSERT INTO subjects (scheme, code, label) VALUES (:s, :c, :l)");
+            // uq_scheme_code_label 同為 unicode_ci;upsert 取回既有 id 防變體撞鍵 1062。
+            $st = $pdo->prepare(
+                "INSERT INTO subjects (scheme, code, label) VALUES (:s, :c, :l)
+                 ON DUPLICATE KEY UPDATE subject_id = LAST_INSERT_ID(subject_id)");
             $st->execute([':s' => $source, ':c' => $m['subject_code'], ':l' => $label]);
             $subjMap[$key] = (int) $pdo->lastInsertId();
         }

@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>屬靈共同書目|基督徒圖書分享服務</title>
 <meta name="description" content="CCNDA 屬靈共同書目——收錄華文屬靈好書,支援分類瀏覽與關鍵字搜尋,幫助你找到造就生命的下一本書。">
+<link rel="canonical" href="https://books.zh.church/">
+<link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="shortcut icon" href="/assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="theme-color" content="#a8802f">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="屬靈共同書目">
+<meta property="og:title" content="屬靈共同書目|基督徒圖書分享服務">
+<meta property="og:description" content="CCNDA 屬靈共同書目——收錄華文屬靈好書,支援分類瀏覽與關鍵字搜尋。">
+<meta property="og:url" content="https://books.zh.church/">
+<meta property="og:image" content="https://books.zh.church/assets/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://books.zh.church/#org","name":"中華基督教網路發展協會 CCNDA","url":"https://www.ccnda.org","logo":"https://books.zh.church/assets/android-chrome-512x512.png"},{"@type":"WebSite","@id":"https://books.zh.church/#website","name":"屬靈共同書目","alternateName":"基督徒圖書分享服務","url":"https://books.zh.church/","inLanguage":"zh-Hant","publisher":{"@id":"https://books.zh.church/#org"},"potentialAction":{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https://books.zh.church/?q={search_term_string}"},"query-input":"required name=search_term_string"}}]}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -23,7 +41,9 @@ a{color:inherit;text-decoration:none}
 header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .hd-inner{max-width:1080px;margin:0 auto;padding:26px 20px 18px}
 h1{margin:0;font-size:1.9rem;letter-spacing:.12em}
-h1 a{display:inline-flex;align-items:baseline;gap:.5em}
+h1 a{display:inline-flex;align-items:center;gap:.45em}
+.brand-logo{height:42px;width:42px;flex:0 0 auto}
+.ft-logo{width:26px;height:26px;border-radius:4px;flex:0 0 auto}
 .hd-sub{color:var(--ink-soft);font-size:.88rem;margin-top:4px;letter-spacing:.05em}
 
 /* 搜尋列 */
@@ -103,7 +123,7 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 <header>
   <div class="hd-inner">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
-      <h1 class="serif"><a href="/">屬靈共同書目</a></h1>
+      <h1 class="serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
       <nav style="font-size:.88rem;color:var(--ink-soft)"><span>書目瀏覽</span> ・ <a href="/about.html" style="color:inherit">關於本站</a></nav>
     </div>
     <div class="hd-sub">基督徒圖書分享服務・幫助你找到造就生命的下一本書</div>
@@ -132,7 +152,7 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 <nav class="pager" id="pager" aria-label="分頁"></nav>
 
 <footer><div class="ft">
-  <span>© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
+  <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
   <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a></span>
 </div></footer>
 

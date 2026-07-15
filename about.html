@@ -5,6 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>關於本站|屬靈共同書目</title>
 <meta name="description" content="屬靈共同書目是 CCNDA 中華基督教網路發展協會提供的基督徒圖書分享服務,彙整華文屬靈書籍資訊,支援分類瀏覽、關鍵字搜尋與開放 API。">
+<link rel="canonical" href="https://books.zh.church/about.html">
+<link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="shortcut icon" href="/assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="theme-color" content="#a8802f">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="屬靈共同書目">
+<meta property="og:title" content="關於本站|屬靈共同書目">
+<meta property="og:description" content="屬靈共同書目是 CCNDA 提供的基督徒圖書分享服務,彙整華文屬靈書籍資訊。">
+<meta property="og:url" content="https://books.zh.church/about.html">
+<meta property="og:image" content="https://books.zh.church/assets/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://books.zh.church/#org","name":"中華基督教網路發展協會 CCNDA","url":"https://www.ccnda.org","logo":"https://books.zh.church/assets/android-chrome-512x512.png"},{"@type":"WebSite","@id":"https://books.zh.church/#website","name":"屬靈共同書目","alternateName":"基督徒圖書分享服務","url":"https://books.zh.church/","inLanguage":"zh-Hant","publisher":{"@id":"https://books.zh.church/#org"}}]}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -21,7 +39,9 @@ header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .hd-inner{max-width:860px;margin:0 auto;padding:20px 20px 14px;
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
 .hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em}
-.hd-title a{color:var(--ink)}
+.hd-title a{color:var(--ink);display:inline-flex;align-items:center;gap:.4em}
+.brand-logo{height:34px;width:34px;flex:0 0 auto}
+.ft-logo{width:26px;height:26px;border-radius:4px;flex:0 0 auto}
 .hd-nav{font-size:.88rem}
 main{max-width:860px;margin:36px auto 0;padding:0 20px}
 h1{font-size:1.6rem;letter-spacing:.1em;margin:0 0 24px}
@@ -38,7 +58,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <body>
 <header>
   <div class="hd-inner">
-    <h1 class="hd-title serif"><a href="/">屬靈共同書目</a></h1>
+    <h1 class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <span style="color:var(--ink-soft)">關於本站</span></nav>
   </div>
 </header>
@@ -61,7 +81,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   <p>事工的發展與長期維護,需要弟兄姊妹共同支持,歡迎<a href="https://devote.ccnda.org" target="_blank" rel="noopener">奉獻支持</a>我們。</p>
 </main>
 <footer><div class="ft">
-  <span>© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
+  <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
   <span><a href="/api/books">開放 API</a></span>
 </div></footer>
 </body>
