@@ -120,16 +120,20 @@ function get_publishers(): never
     $where  = '';
     $params = [];
     if ($q !== '') {
-        $where = 'WHERE pub.name_zh LIKE :q1';
+        $where = 'WHERE cano.name_zh LIKE :q1';
         $params[':q1'] = '%' . $q . '%';
     }
-    $sql = "SELECT pub.publisher_id, pub.name_zh, COUNT(DISTINCT e.book_id) AS book_count
+    // 依 canonical 合併同社變體:群組鍵 = COALESCE(canonical_id, publisher_id),顯示正規列名稱
+    $sql = "SELECT COALESCE(pub.canonical_id, pub.publisher_id) AS publisher_id,
+                   cano.name_zh AS name_zh,
+                   COUNT(DISTINCT e.book_id) AS book_count
             FROM publishers pub
+            JOIN publishers cano ON cano.publisher_id = COALESCE(pub.canonical_id, pub.publisher_id)
             JOIN editions e ON e.publisher_id = pub.publisher_id
             JOIN books b ON b.book_id = e.book_id AND b.is_published = 1
             $where
-            GROUP BY pub.publisher_id, pub.name_zh
-            ORDER BY book_count DESC, pub.name_zh
+            GROUP BY publisher_id, name_zh
+            ORDER BY book_count DESC, name_zh
             LIMIT :limit";
     $stmt = db()->prepare($sql);
     foreach ($params as $k => $v) {
@@ -184,9 +188,16 @@ function get_books(): never
         $params[':person'] = $person;
     }
     if ($publisher > 0) {
-        $where[] = 'EXISTS (SELECT 1 FROM editions e2
-                            WHERE e2.book_id = v.book_id AND e2.publisher_id = :publisher)';
-        $params[':publisher'] = $publisher;
+        // 展開同一正規群組的所有 publisher_id(含變體),以便點任一名稱都涵蓋整社
+        $pst = db()->prepare(
+            "SELECT publisher_id FROM publishers
+             WHERE COALESCE(canonical_id, publisher_id) =
+                   (SELECT COALESCE(canonical_id, publisher_id) FROM publishers WHERE publisher_id = :pid)");
+        $pst->execute([':pid' => $publisher]);
+        $pubIds = array_map('intval', $pst->fetchAll(PDO::FETCH_COLUMN));
+        $inList = $pubIds ? implode(',', $pubIds) : (string) (int) $publisher;  // 皆為整數,無注入風險
+        $where[] = "EXISTS (SELECT 1 FROM editions e2
+                            WHERE e2.book_id = v.book_id AND e2.publisher_id IN ($inList))";
     }
     $whereSql = implode(' AND ', $where);
 
@@ -227,7 +238,10 @@ function get_books(): never
                        'name' => $row['name'], 'name_en' => $row['name_en']];
         }
     } elseif ($publisher > 0) {
-        $st = db()->prepare('SELECT name_zh FROM publishers WHERE publisher_id = :id');
+        $st = db()->prepare(
+            'SELECT c.name_zh FROM publishers p
+             JOIN publishers c ON c.publisher_id = COALESCE(p.canonical_id, p.publisher_id)
+             WHERE p.publisher_id = :id');
         $st->execute([':id' => $publisher]);
         if (($nm = $st->fetchColumn()) !== false) {
             $filter = ['type' => 'publisher', 'id' => $publisher, 'name' => $nm];
@@ -332,27 +346,4 @@ function get_book(int $id): never
                 v.isbn13   AS v_isbn13,   v.cover_url    AS v_cover_url,
                 c.code AS category_code, c.name AS category_name
          FROM books b
-         JOIN v_book_list v ON v.book_id = b.book_id
-         LEFT JOIN categories c ON c.category_id = b.category_id
-         WHERE b.book_id = :id AND b.is_published = 1'
-    );
-    $stmt->execute([':id' => $id]);
-    $book = $stmt->fetch();
-    if (!$book) {
-        json_error('找不到此書', 404);
-    }
-
-    // 關聯優先欄位覆蓋平面欄位
-    foreach (['author', 'translator', 'publisher', 'publish_date', 'isbn13', 'cover_url'] as $f) {
-        if ($book['v_' . $f] !== null) {
-            $book[$f] = $book['v_' . $f];
-        }
-        unset($book['v_' . $f]);
-    }
-
-    $book['book_id']      = (int) $book['book_id'];
-    $book['category_id']  = $book['category_id'] !== null ? (int) $book['category_id'] : null;
-    $book['page_count']   = $book['page_count'] !== null ? (int) $book['page_count'] : null;
-    $book['is_published'] = (int) $book['is_published'];
-    $book['buy_links']    = $book['buy_links'] ? json_decode($book['buy_links'], true) : [];
-    $book['extra']        = $book
+         JOIN v_book_list v ON v.book_id = b.book_i
