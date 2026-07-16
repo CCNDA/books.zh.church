@@ -97,7 +97,7 @@ header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .wrap{max-width:1080px;margin:18px auto 0;padding:0 20px;display:flex;gap:32px;align-items:flex-start}
 .cover{flex:0 0 200px;height:280px;border-radius:8px;overflow:hidden;position:relative;
   background:linear-gradient(150deg,#2f8fb8,#14617f);box-shadow:0 6px 18px rgba(20,48,60,.25)}
-.cover img{width:100%;height:100%;object-fit:cover;display:block}
+.cover img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
 .cover .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   color:#e9f4fa;font-size:4rem;font-family:"Noto Serif TC",serif;text-shadow:0 1px 3px rgba(0,0,0,.3)}
 .cover .ph::after{content:"";position:absolute;left:18px;top:0;bottom:0;width:1px;background:rgba(255,255,255,.25)}
@@ -302,5 +302,4 @@ async function main(){
   let r;
   try { r = await fetch(API + "/books/" + bookId); } catch(_){ return fail(); }
   if (!r.ok) return fail(r.status === 404);
-  const j = await r.json();
-  if
+  const j = aw
