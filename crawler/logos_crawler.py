@@ -174,9 +174,13 @@ def parse_product(code: str, retried: bool = False) -> dict | None:
         if m:
             rec[key] = m.group(1).strip()
 
-    # 書碼本身常是 ISBN13
-    if "isbn" not in rec and re.fullmatch(r"97[89]\d{10}", code):
-        rec["isbn"] = code
+    # 書碼本身常是 ISBN(13 或 10):兩者都認,交給 import 轉 ISBN13 再跨站配對,
+    # 提高與校園同書的合併命中率(如 981004044X 這類 ISBN-10 商品碼)。
+    # 去連字號後比對;非 ISBN 的產品碼(如 LP719-6、CGM301-2)不會誤判。
+    if "isbn" not in rec:
+        code_norm = code.replace("-", "").upper()
+        if re.fullmatch(r"(97[89]\d{10}|\d{9}[\dX])", code_norm):
+            rec["isbn"] = code_norm
 
     # 價格:現價/原價(HK$)
     m = re.search(rf"(?:{cjk('原價')}|{cjk('定價')})[:：]?[ \t]*(?:HK\$|\$)?\s*([\d,.]+)", text)
@@ -290,12 +294,4 @@ def main():
                     print("連續 3 頁無資料,視為到底")
                     break
                 continue
-            bad_streak = 0
-            for code in got:
-                if code not in writer.seen and do(code):
-                    print(f"達 --limit {args.limit},停止")
-                    return
-            if p % 25 == 0:
-                print(f"  列表頁 {p}/{pages},累計 {len(writer.seen)} 本")
-    except KeyboardInterrupt:
-   
+            bad
