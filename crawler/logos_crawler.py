@@ -163,6 +163,9 @@ def parse_product(code: str, retried: bool = False) -> dict | None:
         "page_count": cjk("頁數") + r"[:：][ \t]*(\d+)",
         "binding": cjk("裝訂") + r"[:：][ \t]*([^\n]+)",
         "stock": rf"(?:{cjk('庫存')}|{cjk('供應狀態')})[:：][ \t]*([^\n]+)",
+        "translators_raw": rf"(?:{cjk('譯者')}|{cjk('翻譯')})[:：][ \t]*([^\n]+)",
+        "editors_raw": rf"(?:{cjk('編者')}|{cjk('主編')})[:：][ \t]*([^\n]+)",
+        "illustrators_raw": rf"(?:{cjk('繪者')}|{cjk('插畫')})[:：][ \t]*([^\n]+)",
     }
     for key, pat in patterns.items():
         if key in rec:
@@ -295,11 +298,4 @@ def main():
             if p % 25 == 0:
                 print(f"  列表頁 {p}/{pages},累計 {len(writer.seen)} 本")
     except KeyboardInterrupt:
-        print("\n[中斷] 已寫入的資料與頁面快取都在,重跑同指令即續抓")
-    finally:
-        writer.close()
-        print(f"本次新增 {total_new} 本;logos_books.jsonl 累計 {len(writer.seen)} 本")
-
-
-if __name__ == "__main__":
-    main()
+   

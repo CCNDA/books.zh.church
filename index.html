@@ -66,6 +66,24 @@ h1 a{display:inline-flex;align-items:center;gap:.45em}
 .cat.active{background:var(--gold);border-color:var(--gold);color:#fff}
 .cat .n{opacity:.7;font-size:.78rem;margin-left:3px}
 
+/* 探索:作者/出版社 */
+.discover{max-width:1080px;margin:10px auto 0;padding:0 20px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.discover .lbl{color:var(--ink-soft);font-size:.85rem}
+.dbtn{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:5px 14px;
+  font-size:.88rem;cursor:pointer;color:var(--ink-soft);font-family:inherit}
+.dbtn:hover,.dbtn.on{border-color:var(--gold);color:var(--ink)}
+.dpanel{max-width:1080px;margin:10px auto 0;padding:0 20px}
+.dpanel .box{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.dpanel input{width:100%;border:1px solid var(--line);border-radius:7px;padding:9px 12px;font-size:.95rem;
+  font-family:inherit;color:var(--ink);outline:none;background:var(--paper)}
+.dpanel input:focus{border-color:var(--gold)}
+.dchips{margin-top:10px;display:flex;flex-wrap:wrap;gap:7px;max-height:190px;overflow:auto}
+.dchip{border:1px solid var(--gold-soft);background:rgba(240,192,74,.06);color:var(--gold);
+  border-radius:999px;padding:4px 12px;font-size:.85rem;cursor:pointer;font-family:inherit}
+.dchip:hover{background:rgba(240,192,74,.16)}
+.dchip .n{opacity:.7;font-size:.76rem;margin-left:4px}
+.dhint{color:var(--ink-soft);font-size:.82rem;margin-top:8px}
+
 /* 狀態列 */
 .status{max-width:1080px;margin:18px auto 0;padding:0 20px;color:var(--ink-soft);font-size:.88rem;
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
@@ -139,6 +157,16 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 </div>
 
 <nav class="cats" id="cats" aria-label="分類篩選"></nav>
+<div class="discover">
+  <span class="lbl">瀏覽:</span>
+  <button class="dbtn" id="dbPerson" data-kind="person">👤 作者</button>
+  <button class="dbtn" id="dbPublisher" data-kind="publisher">🏢 出版社</button>
+</div>
+<div class="dpanel" id="dpanel" hidden><div class="box">
+  <input id="dq" type="search" autocomplete="off" placeholder="輸入名稱即時搜尋…" aria-label="搜尋作者或出版社">
+  <div class="dchips" id="dchips"></div>
+  <div class="dhint" id="dhint"></div>
+</div></div>
 <div id="home" hidden>
   <div class="sec" id="newSec" hidden><h2 class="serif">新進書目</h2></div>
   <div class="grid" id="newGrid"></div>
@@ -217,6 +245,48 @@ function catChip(id, name, n){
   return `<button class="cat${on}" data-id="${esc(id)}">${esc(name)}<span class="n">${n ?? ""}</span></button>`;
 }
 
+/* 探索面板:作者/出版社(自動完成 + 熱門清單,共用一組 UI) */
+let discoverKind = null, discoverTimer = null;
+function toggleDiscover(kind){
+  if (discoverKind === kind){ closeDiscover(); return; }
+  discoverKind = kind;
+  $("dbPerson").classList.toggle("on", kind === "person");
+  $("dbPublisher").classList.toggle("on", kind === "publisher");
+  $("dpanel").hidden = false;
+  $("dq").placeholder = kind === "person" ? "輸入作者名即時搜尋…" : "輸入出版社名即時搜尋…";
+  $("dq").value = "";
+  $("dhint").textContent = "熱門" + (kind === "person" ? "作者" : "出版社") + "(依收錄書數)";
+  loadDiscover("");
+  $("dq").focus();
+}
+function closeDiscover(){
+  discoverKind = null; $("dpanel").hidden = true;
+  $("dbPerson").classList.remove("on"); $("dbPublisher").classList.remove("on");
+}
+async function loadDiscover(q){
+  if (!discoverKind) return;
+  const kind = discoverKind;
+  const ep = kind === "person" ? "/persons" : "/publishers";
+  let rows = [];
+  try { rows = await fetchJson(API + ep + (q ? "?q=" + encodeURIComponent(q) + "&limit=30" : "?limit=20")); }
+  catch(_){ rows = []; }
+  if (discoverKind !== kind) return; // 期間已切換,放棄本次結果
+  const idKey = kind === "person" ? "person_id" : "publisher_id";
+  const nameKey = kind === "person" ? "name" : "name_zh";
+  $("dchips").innerHTML = rows.map(r =>
+    `<button class="dchip" data-id="${r[idKey]}">${esc(r[nameKey])}<span class="n">${r.book_count}</span></button>`
+  ).join("") || `<span class="dhint">找不到符合的${kind === "person" ? "作者" : "出版社"}</span>`;
+  $("dchips").querySelectorAll("button").forEach(b =>
+    b.addEventListener("click", () => {
+      state[kind] = b.dataset.id;
+      state[kind === "person" ? "publisher" : "person"] = "";
+      state.q = ""; state.category = ""; state.page = 1;
+      $("q").value = ""; $("clearBtn").style.display = "none";
+      closeDiscover(); writeUrl(); load();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }));
+}
+
 /* 首頁區塊:本月熱門(無點擊資料自動隱藏)+ 新進書目 */
 function isHome(){ return !state.q && !state.category && !state.person && !state.publisher; }
 async function loadHome(){
@@ -250,83 +320,4 @@ document.addEventListener("click", e => {
   } catch (_) {}
 });
 
-/* 書目清單 */
-async function load(){
-  loadHome();
-  renderCats();
-  $("msg").hidden = true; $("grid").innerHTML = ""; $("pager").innerHTML = "";
-  $("statusText").textContent = "載入中…"; $("pageText").textContent = "";
-  const p = new URLSearchParams({ page: state.page, per_page: state.perPage });
-  if (state.q) p.set("q", state.q);
-  if (state.category) p.set("category", state.category);
-  if (state.person) p.set("person", state.person);
-  if (state.publisher) p.set("publisher", state.publisher);
-  let d;
-  try{
-    d = await fetchJson(API + "/books?" + p.toString());
-  }catch(e){
-    $("statusText").textContent = "";
-    showMsg("⚠", "資料載入失敗,請稍後再試", true);
-    return;
-  }
-  const { items, total, pages, page, filter } = d;
-  const fLabel = filter ? (filter.type === "person" ? "作者" : "出版社") + `「${esc(filter.name)}」的書` : "";
-  if (!items.length){
-    $("statusText").textContent = "共 0 本";
-    showMsg("📖", fLabel ? `${fLabel}目前沒有書目`
-                        : (state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目"));
-    return;
-  }
-  $("statusText").innerHTML = (fLabel ? fLabel + "・" : "") + `共 ${total} 本`
-    + (state.q ? `・關鍵字「${esc(state.q)}」` : "")
-    + (filter ? ` <a href="/" style="color:var(--gold)">✕ 清除篩選</a>` : "");
-  $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
-  $("grid").innerHTML = items.map(card).join("");
-  renderPager(page, pages);
-}
-function card(b, src){
-  const meta = [b.author, b.translator ? b.translator + " 譯" : "", b.publisher,
-                b.publish_date ? String(b.publish_date).slice(0,4) : ""]
-               .filter(Boolean).map(esc).join("・");
-  const cover = b.cover_url
-    ? `<img src="${esc(b.cover_url)}" alt="${esc(b.title)} 封面" loading="lazy"
-         onerror="this.parentNode.innerHTML='<div class=ph>${esc((b.title||'書').charAt(0))}</div>'">`
-    : `<div class="ph">${esc((b.title || "書").charAt(0))}</div>`;
-  return `<article class="book" data-id="${b.book_id}" data-src="${src || ""}">
-    <a class="cover" href="/book/${b.book_id}" aria-hidden="true">${cover}</a>
-    <div class="bi">
-      <h2 class="bt serif"><a href="/book/${b.book_id}">${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
-      <div class="bmeta">${meta}</div>
-      <p class="bsum">${esc(b.summary_short || "")}</p>
-      <div class="btag">${b.category_name ? "<span>" + esc(b.category_name) + "</span>" : ""}</div>
-    </div>
-  </article>`;
-}
-function showMsg(icon, text, retry){
-  $("msg").hidden = false;
-  $("msg").innerHTML = `<div class="big">${icon}</div><div>${text}</div>` +
-    (retry ? `<p><button class="pg" onclick="load()">重新載入</button></p>` : "");
-}
-
-/* 分頁(頭尾+當前±2,其餘省略) */
-function renderPager(cur, pages){
-  if (pages <= 1) return;
-  const parts = [];
-  const btn = (label, page, cls, dis) =>
-    `<button class="pg ${cls||""}" ${dis?"disabled":""} data-p="${page}">${label}</button>`;
-  parts.push(btn("‹ 上一頁", cur-1, "", cur<=1));
-  const seen = new Set();
-  for (const n of [1,2,cur-2,cur-1,cur,cur+1,cur+2,pages-1,pages]){
-    if (n < 1 || n > pages || seen.has(n)) continue;
-    const prev = Math.max(...[...seen, 0]);
-    if (n - prev > 1) parts.push(`<span class="pg dots">…</span>`);
-    seen.add(n);
-    parts.push(btn(n, n, n===cur ? "cur" : "", n===cur));
-  }
-  parts.push(btn("下一頁 ›", cur+1, "", cur>=pages));
-  $("pager").innerHTML = parts.join("");
-  $("pager").querySelectorAll("button[data-p]").forEach(b =>
-    b.addEventListener("click", () => {
-      state.page = parseInt(b.dataset.p, 10); writeUrl(); load();
-      window.scrollTo({top:0, behavior:"smooth"});
-    }));
+/* 

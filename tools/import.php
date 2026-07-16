@@ -137,6 +137,9 @@ function map_record(string $source, array $r): array
         'title'          => cap(tidy($r['title'] ?? null), 255),
         'original_title' => cap(tidy($r['title_en'] ?? null), 255),
         'authors'        => split_names($r['authors_raw'] ?? null),
+        'translators'    => split_names($r['translators_raw'] ?? null),
+        'illustrators'   => split_names($r['illustrators_raw'] ?? null),
+        'editors'        => split_names($r['editors_raw'] ?? null),
         'authors_raw'    => cap(tidy($r['authors_raw'] ?? null), 255),
         'publisher'      => cap(tidy($r['publisher'] ?? null), 100), // books.publisher(100)、publishers.name_zh(150) 取小者
         'book_date'      => $bDate,
@@ -303,19 +306,27 @@ while (($line = fgets($fh)) !== false) {
         $stats['merged']++;
     }
 
-    // 2. persons + book_persons(作者;credit_text 保留原樣)
-    $order = 0;
-    foreach ($m['authors'] as $a) {
-        if (!isset($personMap[$a['name']])) {
-            $st = $pdo->prepare("INSERT INTO persons (name) VALUES (:n)");
-            $st->execute([':n' => $a['name']]);
-            $personMap[$a['name']] = (int) $pdo->lastInsertId();
+    // 2. persons + book_persons(多角色:作者/譯者/繪者/編者;credit_text 保留原樣)
+    foreach ([
+        'author'      => $m['authors'],
+        'translator'  => $m['translators'],
+        'illustrator' => $m['illustrators'],
+        'editor'      => $m['editors'],
+    ] as $role => $people) {
+        $order = 0;
+        foreach ($people as $a) {
+            if (!isset($personMap[$a['name']])) {
+                $st = $pdo->prepare("INSERT INTO persons (name) VALUES (:n)");
+                $st->execute([':n' => $a['name']]);
+                $personMap[$a['name']] = (int) $pdo->lastInsertId();
+            }
+            $st = $pdo->prepare(
+                "INSERT IGNORE INTO book_persons (book_id, person_id, role, role_order, credit_text)
+                 VALUES (:b, :p, :role, :o, :c)"
+            );
+            $st->execute([':b' => $bookId, ':p' => $personMap[$a['name']], ':role' => $role,
+                          ':o' => $order++, ':c' => $a['credit']]);
         }
-        $st = $pdo->prepare(
-            "INSERT IGNORE INTO book_persons (book_id, person_id, role, role_order, credit_text)
-             VALUES (:b, :p, 'author', :o, :c)"
-        );
-        $st->execute([':b' => $bookId, ':p' => $personMap[$a['name']], ':o' => $order++, ':c' => $a['credit']]);
     }
 
     // 3. publisher
@@ -395,18 +406,4 @@ while (($line = fgets($fh)) !== false) {
             $subjMap[$key] = (int) $pdo->lastInsertId();
         }
         $st = $pdo->prepare("INSERT IGNORE INTO book_subjects (book_id, subject_id) VALUES (:b, :s)");
-        $st->execute([':b' => $bookId, ':s' => $subjMap[$key]]);
-    }
-
-    if (++$batch % 500 === 0) {
-        $pdo->commit();
-        $pdo->beginTransaction();
-        echo "  已處理 {$stats['read']}(新書 {$stats['new_book']}、合併 {$stats['merged']})\n";
-    }
-}
-if (!$dry && $pdo->inTransaction()) $pdo->commit();
-fclose($fh);
-
-echo ($dry ? "[dry-run 模擬] " : "") . "完成:讀 {$stats['read']}、新書 {$stats['new_book']}、"
-   . "合併 {$stats['merged']}、版本 {$stats['edition']}、已存在跳過 {$stats['skip_done']}、"
-   . "無效跳過 {$stats['skip_bad']}\n";
+        $st->execute([':b' => $bookId, ':s'

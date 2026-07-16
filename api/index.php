@@ -43,6 +43,12 @@ try {
     if ($method === 'GET' && $path === '/books/popular') {
         get_books_popular();
     }
+    if ($method === 'GET' && $path === '/persons') {
+        get_persons();
+    }
+    if ($method === 'GET' && $path === '/publishers') {
+        get_publishers();
+    }
     if ($method === 'POST' && preg_match('#^/books/(\d+)/click$#', $path, $m)) {
         post_book_click((int) $m[1]);
     }
@@ -68,6 +74,73 @@ function get_categories(): never
         $r['category_id'] = (int) $r['category_id'];
         $r['sort_order']  = (int) $r['sort_order'];
         $r['book_count']  = (int) $r['book_count'];
+    }
+    json_data($rows);
+}
+
+/** 作者/貢獻者:關鍵字搜尋(q)或熱門(依著作數);供探索面板自動完成 */
+function get_persons(): never
+{
+    $q     = trim((string) ($_GET['q'] ?? ''));
+    $limit = min(50, max(1, (int) ($_GET['limit'] ?? 15)));
+    $where  = '';
+    $params = [];
+    if ($q !== '') {
+        $where = 'WHERE p.name LIKE :q1 OR p.name_en LIKE :q2';
+        $params[':q1'] = '%' . $q . '%';
+        $params[':q2'] = '%' . $q . '%';
+    }
+    $sql = "SELECT p.person_id, p.name, p.name_en, COUNT(DISTINCT bp.book_id) AS book_count
+            FROM persons p
+            JOIN book_persons bp ON bp.person_id = p.person_id
+            JOIN books b ON b.book_id = bp.book_id AND b.is_published = 1
+            $where
+            GROUP BY p.person_id, p.name, p.name_en
+            ORDER BY book_count DESC, p.name
+            LIMIT :limit";
+    $stmt = db()->prepare($sql);
+    foreach ($params as $k => $v) {
+        $stmt->bindValue($k, $v);
+    }
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$r) {
+        $r['person_id']  = (int) $r['person_id'];
+        $r['book_count'] = (int) $r['book_count'];
+    }
+    json_data($rows);
+}
+
+/** 出版社:關鍵字搜尋(q)或熱門(依出版書數) */
+function get_publishers(): never
+{
+    $q     = trim((string) ($_GET['q'] ?? ''));
+    $limit = min(50, max(1, (int) ($_GET['limit'] ?? 15)));
+    $where  = '';
+    $params = [];
+    if ($q !== '') {
+        $where = 'WHERE pub.name_zh LIKE :q1';
+        $params[':q1'] = '%' . $q . '%';
+    }
+    $sql = "SELECT pub.publisher_id, pub.name_zh, COUNT(DISTINCT e.book_id) AS book_count
+            FROM publishers pub
+            JOIN editions e ON e.publisher_id = pub.publisher_id
+            JOIN books b ON b.book_id = e.book_id AND b.is_published = 1
+            $where
+            GROUP BY pub.publisher_id, pub.name_zh
+            ORDER BY book_count DESC, pub.name_zh
+            LIMIT :limit";
+    $stmt = db()->prepare($sql);
+    foreach ($params as $k => $v) {
+        $stmt->bindValue($k, $v);
+    }
+    $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$r) {
+        $r['publisher_id'] = (int) $r['publisher_id'];
+        $r['book_count']   = (int) $r['book_count'];
     }
     json_data($rows);
 }
@@ -282,58 +355,4 @@ function get_book(int $id): never
     $book['page_count']   = $book['page_count'] !== null ? (int) $book['page_count'] : null;
     $book['is_published'] = (int) $book['is_published'];
     $book['buy_links']    = $book['buy_links'] ? json_decode($book['buy_links'], true) : [];
-    $book['extra']        = $book['extra'] ? json_decode($book['extra'], true) : null;
-
-    // 貢獻者(多人多角色,含署名原文)
-    $stmt = db()->prepare(
-        'SELECT bp.role, bp.role_order, bp.credit_text, p.person_id, p.name, p.name_en
-         FROM book_persons bp JOIN persons p ON p.person_id = bp.person_id
-         WHERE bp.book_id = :id
-         ORDER BY FIELD(bp.role, \'author\',\'editor\',\'translator\',\'illustrator\',
-                        \'foreword\',\'advisor\',\'proofreader\',\'contributor\'), bp.role_order'
-    );
-    $stmt->execute([':id' => $id]);
-    $contributors = [];
-    foreach ($stmt->fetchAll() as $r) {
-        $contributors[$r['role']][] = [
-            'person_id'   => (int) $r['person_id'],
-            'name'        => $r['name'],
-            'name_en'     => $r['name_en'],
-            'credit_text' => $r['credit_text'],
-        ];
-    }
-    $book['contributors'] = $contributors ?: null;
-
-    // 版本(含出版者、識別碼、格式/價格)
-    $stmt = db()->prepare(
-        'SELECT e.edition_id, e.edition_statement, e.publish_date, e.place_of_publication,
-                e.page_count, e.binding, e.dimensions, e.source, e.source_url,
-                e.publisher_id, pub.name_zh AS publisher_name
-         FROM editions e LEFT JOIN publishers pub ON pub.publisher_id = e.publisher_id
-         WHERE e.book_id = :id ORDER BY e.publish_date DESC, e.edition_id ASC'
-    );
-    $stmt->execute([':id' => $id]);
-    $editions = $stmt->fetchAll();
-    if ($editions) {
-        $eids = array_column($editions, 'edition_id');
-        $ph = implode(',', array_fill(0, count($eids), '?'));
-
-        $st = db()->prepare("SELECT edition_id, id_type, id_value, note FROM identifiers WHERE edition_id IN ($ph)");
-        $st->execute($eids);
-        $idsByEd = [];
-        foreach ($st->fetchAll() as $r) {
-            $idsByEd[$r['edition_id']][] = ['type' => $r['id_type'], 'value' => $r['id_value'], 'note' => $r['note']];
-        }
-
-        $st = db()->prepare("SELECT edition_id, media_type, file_format, price, currency, availability FROM formats_prices WHERE edition_id IN ($ph)");
-        $st->execute($eids);
-        $fpByEd = [];
-        foreach ($st->fetchAll() as $r) {
-            $fpByEd[$r['edition_id']][] = [
-                'media_type' => $r['media_type'], 'file_format' => $r['file_format'],
-                'price' => $r['price'] !== null ? (float) $r['price'] : null,
-                'currency' => $r['currency'], 'availability' => $r['availability'],
-            ];
-        }
-
-        foreach ($edition
+    $book['extra']        = $book

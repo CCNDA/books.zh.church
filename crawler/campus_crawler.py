@@ -274,10 +274,20 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
         rec["authors_raw"] = dv_a
     if dv_p:
         rec["publisher"] = dv_p
+    # 其他貢獻者角色(值同樣可能在同行或下一行;缺則略)
+    dv_t = _detail_value("譯者") or _detail_value("翻譯")
+    dv_i = _detail_value("繪者") or _detail_value("插畫") or _detail_value("繪圖")
+    dv_e = _detail_value("編者") or _detail_value("主編")
+    if dv_t:
+        rec["translators_raw"] = dv_t
+    if dv_i:
+        rec["illustrators_raw"] = dv_i
+    if dv_e:
+        rec["editors_raw"] = dv_e
     # 位移/殘值保險:author、publisher 若為 ISBN 或純標籤殘值 → 清空;isbn_meta 非 ISBN → 清空
     def _is_isbn(v):
         return bool(v and re.fullmatch(r"(97[89]\d{10}|\d{9}[\dXx])", str(v).replace("-", "").strip()))
-    for _f in ("authors_raw", "publisher"):
+    for _f in ("authors_raw", "publisher", "translators_raw", "illustrators_raw", "editors_raw"):
         v = rec.get(_f)
         if _is_isbn(v) or (v and re.fullmatch(r"[^:：]{0,8}[:：]", v.strip())):
             rec[_f] = None
@@ -403,16 +413,4 @@ def main():
             if cat_ok:
                 state.mark_done(f"cat:{cat}")
             else:
-                failed_cats.append(cat)
-    except KeyboardInterrupt:
-        print("\n[中斷] 進度已保存,重跑同指令即續抓")
-    finally:
-        writer.close()
-        print(f"本次新增 {total_new} 本;campus_books.jsonl 累計 {len(writer.seen)} 本")
-        if failed_cats:
-            print(f"[注意] {len(failed_cats)} 個分類未完抓(未標記完成,重跑同指令會自動補):"
-                  f"{', '.join(failed_cats)}")
-
-
-if __name__ == "__main__":
-    main()
+   
