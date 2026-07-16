@@ -25,3 +25,7 @@ config/deploy.local.md
 # 爬蟲產出(原始資料與進度,不進版控)
 crawler/data/
 __pycache__/
+
+# Python venv 與日誌(不進版控)
+crawler/venv/
+crawler/logs/

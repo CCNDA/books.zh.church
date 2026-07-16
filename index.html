@@ -159,7 +159,7 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 <script>
 "use strict";
 const API = "/api";
-const state = { q: "", category: "", page: 1, perPage: 20 };
+const state = { q: "", category: "", person: "", publisher: "", page: 1, perPage: 20 };
 let cats = [];
 
 const $ = id => document.getElementById(id);
@@ -171,12 +171,16 @@ function readUrl(){
   const p = new URLSearchParams(location.search);
   state.q = p.get("q") || "";
   state.category = p.get("category") || "";
+  state.person = p.get("person") || "";
+  state.publisher = p.get("publisher") || "";
   state.page = Math.max(1, parseInt(p.get("page") || "1", 10) || 1);
 }
 function writeUrl(replace){
   const p = new URLSearchParams();
   if (state.q) p.set("q", state.q);
   if (state.category) p.set("category", state.category);
+  if (state.person) p.set("person", state.person);
+  if (state.publisher) p.set("publisher", state.publisher);
   if (state.page > 1) p.set("page", String(state.page));
   const url = location.pathname + (p.toString() ? "?" + p.toString() : "");
   history[replace ? "replaceState" : "pushState"](null, "", url);
@@ -204,7 +208,8 @@ function renderCats(){
   $("cats").innerHTML = h;
   $("cats").querySelectorAll("button").forEach(b =>
     b.addEventListener("click", () => {
-      state.category = b.dataset.id; state.page = 1; writeUrl(); load();
+      state.category = b.dataset.id; state.person = ""; state.publisher = "";
+      state.page = 1; writeUrl(); load();
     }));
 }
 function catChip(id, name, n){
@@ -213,7 +218,7 @@ function catChip(id, name, n){
 }
 
 /* 首頁區塊:本月熱門(無點擊資料自動隱藏)+ 新進書目 */
-function isHome(){ return !state.q && !state.category; }
+function isHome(){ return !state.q && !state.category && !state.person && !state.publisher; }
 async function loadHome(){
   const home = isHome();
   $("home").hidden = !home;
@@ -254,6 +259,8 @@ async function load(){
   const p = new URLSearchParams({ page: state.page, per_page: state.perPage });
   if (state.q) p.set("q", state.q);
   if (state.category) p.set("category", state.category);
+  if (state.person) p.set("person", state.person);
+  if (state.publisher) p.set("publisher", state.publisher);
   let d;
   try{
     d = await fetchJson(API + "/books?" + p.toString());
@@ -262,13 +269,17 @@ async function load(){
     showMsg("⚠", "資料載入失敗,請稍後再試", true);
     return;
   }
-  const { items, total, pages, page } = d;
+  const { items, total, pages, page, filter } = d;
+  const fLabel = filter ? (filter.type === "person" ? "作者" : "出版社") + `「${esc(filter.name)}」的書` : "";
   if (!items.length){
     $("statusText").textContent = "共 0 本";
-    showMsg("📖", state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目");
+    showMsg("📖", fLabel ? `${fLabel}目前沒有書目`
+                        : (state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目"));
     return;
   }
-  $("statusText").textContent = `共 ${total} 本` + (state.q ? `・關鍵字「${state.q}」` : "");
+  $("statusText").innerHTML = (fLabel ? fLabel + "・" : "") + `共 ${total} 本`
+    + (state.q ? `・關鍵字「${esc(state.q)}」` : "")
+    + (filter ? ` <a href="/" style="color:var(--gold)">✕ 清除篩選</a>` : "");
   $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
   $("grid").innerHTML = items.map(card).join("");
   renderPager(page, pages);
@@ -319,26 +330,3 @@ function renderPager(cur, pages){
       state.page = parseInt(b.dataset.p, 10); writeUrl(); load();
       window.scrollTo({top:0, behavior:"smooth"});
     }));
-}
-
-/* 搜尋互動 */
-function doSearch(){
-  state.q = $("q").value.trim(); state.page = 1; writeUrl(); load();
-}
-$("goBtn").addEventListener("click", doSearch);
-$("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
-$("q").addEventListener("input", () => { $("clearBtn").style.display = $("q").value ? "block" : "none"; });
-$("clearBtn").addEventListener("click", () => {
-  $("q").value = ""; $("clearBtn").style.display = "none"; doSearch();
-});
-window.addEventListener("popstate", () => { readUrl(); $("q").value = state.q; load(); });
-
-/* 啟動 */
-readUrl();
-$("q").value = state.q;
-$("clearBtn").style.display = state.q ? "block" : "none";
-writeUrl(true);
-loadCats().then(load);
-</script>
-</body>
-</html>

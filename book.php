@@ -202,10 +202,27 @@ function contributorRows(b){
   if (b.contributors){
     return Object.entries(b.contributors).map(([role, ps]) =>
       metaRow(ROLE_NAMES[role] || role,
-        ps.map(p => p.name + (p.credit_text && p.credit_text !== p.name ? "(" + p.credit_text + ")" : "")).join("、"))
+        ps.map(p => {
+          const label = esc(p.name) + (p.credit_text && p.credit_text !== p.name ? "(" + esc(p.credit_text) + ")" : "");
+          return p.person_id ? `<a href="/?person=${encodeURIComponent(p.person_id)}">${label}</a>` : label;
+        }).join("、"),
+        true)  // html:名稱已逐一 esc
     ).join("");
   }
   return metaRow("作者", b.author) + metaRow("譯者", b.translator) + metaRow("編者", b.editors);
+}
+
+/* 出版社:有 publisher_id 則做連結(可多版本多出版社),否則純文字後備 */
+function publisherLinks(b){
+  const seen = new Map();
+  for (const ed of (b.editions || [])){
+    if (ed.publisher_id && ed.publisher_name && !seen.has(ed.publisher_id))
+      seen.set(ed.publisher_id, ed.publisher_name);
+  }
+  if (seen.size)
+    return [...seen].map(([pid, name]) =>
+      `<a href="/?publisher=${encodeURIComponent(pid)}">${esc(name)}</a>`).join("、");
+  return b.publisher ? esc(b.publisher) : "";
 }
 
 function render(b){
@@ -229,7 +246,7 @@ function render(b){
     || b.series || "";
   $("bMeta").innerHTML =
     contributorRows(b) +
-    metaRow("出版社", b.publisher) +
+    metaRow("出版社", publisherLinks(b), true) +
     metaRow("出版日期", b.publish_date) +
     metaRow("系列", series) +
     metaRow("頁數", b.page_count) +
@@ -286,23 +303,4 @@ async function main(){
   try { r = await fetch(API + "/books/" + bookId); } catch(_){ return fail(); }
   if (!r.ok) return fail(r.status === 404);
   const j = await r.json();
-  if (!j.data) return fail();
-  render(j.data);
-
-  // 點閱遙測:僅站外直達/分享進入時記(站內卡片點擊已在清單頁記過)
-  const ref = document.referrer;
-  if (!ref || new URL(ref).host !== location.host){
-    try { navigator.sendBeacon(API + "/books/" + bookId + "/click",
-      new Blob([JSON.stringify({source:"detail"})], {type:"application/json"})); } catch(_){}
-  }
-}
-function fail(notFound){
-  $("msg").innerHTML = `<div class="big">📖</div>` +
-    (notFound !== false ? `<div>找不到這本書,可能已下架或網址有誤。</div>` : `<div>資料載入失敗,請稍後再試。</div>`) +
-    `<p><a href="/">← 回書目瀏覽</a></p>`;
-  show("msg", true);
-}
-main();
-</script>
-</body>
-</html>
+  if

@@ -74,10 +74,12 @@ function get_categories(): never
 
 function get_books(): never
 {
-    $q        = trim((string) ($_GET['q'] ?? ''));
-    $category = (int) ($_GET['category'] ?? 0);
-    $page     = max(1, (int) ($_GET['page'] ?? 1));
-    $perPage  = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
+    $q         = trim((string) ($_GET['q'] ?? ''));
+    $category  = (int) ($_GET['category'] ?? 0);
+    $person    = (int) ($_GET['person'] ?? 0);     // 作者/貢獻者 person_id 篩選
+    $publisher = (int) ($_GET['publisher'] ?? 0);  // 出版社 publisher_id 篩選
+    $page      = max(1, (int) ($_GET['page'] ?? 1));
+    $perPage   = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
 
     $where  = ['v.is_published = 1'];
     $params = [];
@@ -102,6 +104,16 @@ function get_books(): never
     if ($category > 0) {
         $where[] = 'v.category_id = :cat';
         $params[':cat'] = $category;
+    }
+    if ($person > 0) {
+        $where[] = 'EXISTS (SELECT 1 FROM book_persons bp
+                            WHERE bp.book_id = v.book_id AND bp.person_id = :person)';
+        $params[':person'] = $person;
+    }
+    if ($publisher > 0) {
+        $where[] = 'EXISTS (SELECT 1 FROM editions e2
+                            WHERE e2.book_id = v.book_id AND e2.publisher_id = :publisher)';
+        $params[':publisher'] = $publisher;
     }
     $whereSql = implode(' AND ', $where);
 
@@ -132,12 +144,30 @@ function get_books(): never
     $stmt->execute();
     $rows = finish_cards($stmt->fetchAll());
 
+    // 篩選標籤(供前端顯示「作者/出版社:XXX 的書」標題)
+    $filter = null;
+    if ($person > 0) {
+        $st = db()->prepare('SELECT name, name_en FROM persons WHERE person_id = :id');
+        $st->execute([':id' => $person]);
+        if ($row = $st->fetch()) {
+            $filter = ['type' => 'person', 'id' => $person,
+                       'name' => $row['name'], 'name_en' => $row['name_en']];
+        }
+    } elseif ($publisher > 0) {
+        $st = db()->prepare('SELECT name_zh FROM publishers WHERE publisher_id = :id');
+        $st->execute([':id' => $publisher]);
+        if (($nm = $st->fetchColumn()) !== false) {
+            $filter = ['type' => 'publisher', 'id' => $publisher, 'name' => $nm];
+        }
+    }
+
     json_data([
         'items'    => $rows,
         'total'    => $total,
         'page'     => $page,
         'per_page' => $perPage,
         'pages'    => (int) ceil($total / $perPage),
+        'filter'   => $filter,
     ]);
 }
 
@@ -278,7 +308,7 @@ function get_book(int $id): never
     $stmt = db()->prepare(
         'SELECT e.edition_id, e.edition_statement, e.publish_date, e.place_of_publication,
                 e.page_count, e.binding, e.dimensions, e.source, e.source_url,
-                pub.name_zh AS publisher_name
+                e.publisher_id, pub.name_zh AS publisher_name
          FROM editions e LEFT JOIN publishers pub ON pub.publisher_id = e.publisher_id
          WHERE e.book_id = :id ORDER BY e.publish_date DESC, e.edition_id ASC'
     );
@@ -306,45 +336,4 @@ function get_book(int $id): never
             ];
         }
 
-        foreach ($editions as &$e) {
-            $eid = $e['edition_id'];
-            $e['edition_id']  = (int) $eid;
-            $e['page_count']  = $e['page_count'] !== null ? (int) $e['page_count'] : null;
-            $e['identifiers'] = $idsByEd[$eid] ?? [];
-            $e['formats']     = $fpByEd[$eid] ?? [];
-        }
-        unset($e);
-    }
-    $book['editions'] = $editions;
-
-    // 系列
-    $stmt = db()->prepare(
-        'SELECT s.series_name, bs.series_number
-         FROM book_series bs JOIN series s ON s.series_id = bs.series_id
-         WHERE bs.book_id = :id'
-    );
-    $stmt->execute([':id' => $id]);
-    $book['series_list'] = $stmt->fetchAll();
-
-    // 主題分類(多套系統)
-    $stmt = db()->prepare(
-        'SELECT s.scheme, s.code, s.label
-         FROM book_subjects bsub JOIN subjects s ON s.subject_id = bsub.subject_id
-         WHERE bsub.book_id = :id ORDER BY bsub.weight DESC'
-    );
-    $stmt->execute([':id' => $id]);
-    $book['subjects'] = $stmt->fetchAll();
-
-    // 連結(作品層 + 版本層)
-    $stmt = db()->prepare(
-        'SELECT l.link_type, l.platform, l.url, l.note
-         FROM links l
-         WHERE l.book_id = :id1
-            OR l.edition_id IN (SELECT edition_id FROM editions WHERE book_id = :id2)
-         ORDER BY l.link_type, l.link_id'
-    );
-    $stmt->execute([':id1' => $id, ':id2' => $id]);
-    $book['links'] = $stmt->fetchAll();
-
-    json_data($book);
-}
+        foreach ($edition
