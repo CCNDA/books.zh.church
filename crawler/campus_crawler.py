@@ -222,9 +222,16 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
                                            (parts[i] or "").replace("-", ""))), None)
             if isbn_i is not None:
                 seg = [p for p in parts[2:isbn_i] if p]
-                en = [p for p in seg if re.search(r"[A-Za-z]", p)]
+                # 英文書名只取「緊接中文書名之後」的連續純英文段(遇到第一個含中文的段即停)。
+                # 台灣書 meta 常為 [出版社, 作者中文, 作者英文],英文段是作者英文名、位在 CJK 之後,
+                # 不可當書名(否則如 000621861 會把「Dr. Rev. Herbert Wu」誤標 original_title)。
+                en_lead = []
+                for p in seg:
+                    if re.search(r"[一-鿿]", p):
+                        break
+                    en_lead.append(p)
                 cj = [p for p in seg if not re.search(r"[A-Za-z]", p)]
-                rec["title_en"] = ",".join(en) or None
+                rec["title_en"] = ", ".join(en_lead) if en_lead else None
                 rec["publisher"] = cj[0] if cj else None
                 rec["authors_raw"] = cj[1] if len(cj) >= 2 else None
                 rec["isbn_meta"] = parts[isbn_i] or None
@@ -397,17 +404,4 @@ def main():
                     todo = crawl_category(cat, writer.seen)
                 except RuntimeError as e:
                     print(f"  [跳過分類 {cat},下次重跑補抓] {e}")
-                    failed_cats.append(cat)
-                    continue
-            cat_ok = True
-            for pid in todo:
-                try:
-                    rec = parse_product(pid, cat)
-                except RuntimeError as e:
-                    print(f"  [跳過商品 {pid},下次重跑補抓] {e}")
-                    cat_ok = False
-                    continue
-                if rec and writer.write(rec):
-                    total_new += 1
-                    if total_new % 20 == 0:
-                        
+                    failed_cats
