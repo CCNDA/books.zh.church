@@ -293,6 +293,11 @@ def parse_product(pid: str, cat_id: str | None, force: bool = False) -> dict | N
             rec[_f] = None
     if rec.get("isbn_meta") and not _is_isbn(rec["isbn_meta"]):
         rec["isbn_meta"] = None
+    # title_en 保險:台灣書 meta 的 ASCII 段常是「作者英文名」而非英文書名
+    # (如 000621861:作者「吳炳偉 (Dr. Rev. Herbert Wu)」被誤標 original_title)。
+    # 若 title_en 其實出現在作者署名中,清掉,避免誤標為原文書名。
+    if rec.get("title_en") and rec.get("authors_raw") and rec["title_en"] in rec["authors_raw"]:
+        rec["title_en"] = None
 
     # 詳細資料的「分類」(保留原值,映射 CategoryV11 於匯入階段處理)
     m = re.search(cjk("分類") + r"[:：][ \t]*([^\n]+)", text)
@@ -405,12 +410,4 @@ def main():
                 if rec and writer.write(rec):
                     total_new += 1
                     if total_new % 20 == 0:
-                        rate = total_new / max(time.time() - start, 1) * 3600
-                        print(f"  進度:+{total_new} 本(約 {rate:.0f} 本/小時),累計 {len(writer.seen)}")
-                if args.limit and total_new >= args.limit:
-                    print(f"達 --limit {args.limit},停止")
-                    return
-            if cat_ok:
-                state.mark_done(f"cat:{cat}")
-            else:
-   
+                        
