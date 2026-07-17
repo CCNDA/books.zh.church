@@ -302,4 +302,24 @@ async function main(){
   let r;
   try { r = await fetch(API + "/books/" + bookId); } catch(_){ return fail(); }
   if (!r.ok) return fail(r.status === 404);
-  const j = aw
+  const j = await r.json();
+  if (!j.data) return fail();
+  render(j.data);
+
+  // 點閱遙測:僅站外直達/分享進入時記(站內卡片點擊已在清單頁記過)
+  const ref = document.referrer;
+  if (!ref || new URL(ref).host !== location.host){
+    try { navigator.sendBeacon(API + "/books/" + bookId + "/click",
+      new Blob([JSON.stringify({source:"detail"})], {type:"application/json"})); } catch(_){}
+  }
+}
+function fail(notFound){
+  $("msg").innerHTML = `<div class="big">📖</div>` +
+    (notFound !== false ? `<div>找不到這本書,可能已下架或網址有誤。</div>` : `<div>資料載入失敗,請稍後再試。</div>`) +
+    `<p><a href="/">← 回書目瀏覽</a></p>`;
+  show("msg", true);
+}
+main();
+</script>
+</body>
+</html>

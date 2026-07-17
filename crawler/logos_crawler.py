@@ -294,4 +294,19 @@ def main():
                     print("連續 3 頁無資料,視為到底")
                     break
                 continue
-            bad
+            bad_streak = 0
+            for code in got:
+                if code not in writer.seen and do(code):
+                    print(f"達 --limit {args.limit},停止")
+                    return
+            if p % 25 == 0:
+                print(f"  列表頁 {p}/{pages},累計 {len(writer.seen)} 本")
+    except KeyboardInterrupt:
+        print("\n[中斷] 已寫入的資料與頁面快取都在,重跑同指令即續抓")
+    finally:
+        writer.close()
+        print(f"本次新增 {total_new} 本;logos_books.jsonl 累計 {len(writer.seen)} 本")
+
+
+if __name__ == "__main__":
+    main()

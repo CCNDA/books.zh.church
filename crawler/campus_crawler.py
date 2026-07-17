@@ -404,4 +404,37 @@ def main():
                     todo = crawl_category(cat, writer.seen)
                 except RuntimeError as e:
                     print(f"  [跳過分類 {cat},下次重跑補抓] {e}")
-                    failed_cats
+                    failed_cats.append(cat)
+                    continue
+            cat_ok = True
+            for pid in todo:
+                try:
+                    rec = parse_product(pid, cat)
+                except RuntimeError as e:
+                    print(f"  [跳過商品 {pid},下次重跑補抓] {e}")
+                    cat_ok = False
+                    continue
+                if rec and writer.write(rec):
+                    total_new += 1
+                    if total_new % 20 == 0:
+                        rate = total_new / max(time.time() - start, 1) * 3600
+                        print(f"  進度:+{total_new} 本(約 {rate:.0f} 本/小時),累計 {len(writer.seen)}")
+                if args.limit and total_new >= args.limit:
+                    print(f"達 --limit {args.limit},停止")
+                    return
+            if cat_ok:
+                state.mark_done(f"cat:{cat}")
+            else:
+                failed_cats.append(cat)
+    except KeyboardInterrupt:
+        print("\n[中斷] 進度已保存,重跑同指令即續抓")
+    finally:
+        writer.close()
+        print(f"本次新增 {total_new} 本;campus_books.jsonl 累計 {len(writer.seen)} 本")
+        if failed_cats:
+            print(f"[注意] {len(failed_cats)} 個分類未完抓(未標記完成,重跑同指令會自動補):"
+                  f"{', '.join(failed_cats)}")
+
+
+if __name__ == "__main__":
+    main()

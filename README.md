@@ -24,4 +24,11 @@ composer require aws/aws-sdk-php   # Magic Link 郵件(AWS SES)
 php -S 0.0.0.0:8080 web/router.php
 ```
 
-## 開發規�
+## 開發規範
+
+- 所有 SQL 一律 PDO prepared statements;前端輸出一律 HTML escape
+- API 回應 JSON_UNESCAPED_UNICODE;寫入端點需驗證 X-Api-Key / Bearer Token
+- 介面文字使用繁體中文
+- 設定集中於 `config/app.local.php`,勿提交憑證
+
+詳細建置說明見專案 docs/php-restapi-setup.md(不在本 repo)。

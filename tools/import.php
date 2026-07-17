@@ -406,4 +406,18 @@ while (($line = fgets($fh)) !== false) {
             $subjMap[$key] = (int) $pdo->lastInsertId();
         }
         $st = $pdo->prepare("INSERT IGNORE INTO book_subjects (book_id, subject_id) VALUES (:b, :s)");
-        $st->execute([':b' => $bookId, ':s'
+        $st->execute([':b' => $bookId, ':s' => $subjMap[$key]]);
+    }
+
+    if (++$batch % 500 === 0) {
+        $pdo->commit();
+        $pdo->beginTransaction();
+        echo "  已處理 {$stats['read']}(新書 {$stats['new_book']}、合併 {$stats['merged']})\n";
+    }
+}
+if (!$dry && $pdo->inTransaction()) $pdo->commit();
+fclose($fh);
+
+echo ($dry ? "[dry-run 模擬] " : "") . "完成:讀 {$stats['read']}、新書 {$stats['new_book']}、"
+   . "合併 {$stats['merged']}、版本 {$stats['edition']}、已存在跳過 {$stats['skip_done']}、"
+   . "無效跳過 {$stats['skip_bad']}\n";

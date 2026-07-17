@@ -320,4 +320,114 @@ document.addEventListener("click", e => {
   } catch (_) {}
 });
 
-/* 
+/* 書目清單 */
+async function load(){
+  loadHome();
+  renderCats();
+  $("msg").hidden = true; $("grid").innerHTML = ""; $("pager").innerHTML = "";
+  $("statusText").textContent = "載入中…"; $("pageText").textContent = "";
+  const p = new URLSearchParams({ page: state.page, per_page: state.perPage });
+  if (state.q) p.set("q", state.q);
+  if (state.category) p.set("category", state.category);
+  if (state.person) p.set("person", state.person);
+  if (state.publisher) p.set("publisher", state.publisher);
+  let d;
+  try{
+    d = await fetchJson(API + "/books?" + p.toString());
+  }catch(e){
+    $("statusText").textContent = "";
+    showMsg("⚠", "資料載入失敗,請稍後再試", true);
+    return;
+  }
+  const { items, total, pages, page, filter } = d;
+  const fLabel = filter ? (filter.type === "person" ? "作者" : "出版社") + `「${esc(filter.name)}」的書` : "";
+  if (!items.length){
+    $("statusText").textContent = "共 0 本";
+    showMsg("📖", fLabel ? `${fLabel}目前沒有書目`
+                        : (state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目"));
+    return;
+  }
+  $("statusText").innerHTML = (fLabel ? fLabel + "・" : "") + `共 ${total} 本`
+    + (state.q ? `・關鍵字「${esc(state.q)}」` : "")
+    + (filter ? ` <a href="/" style="color:var(--gold)">✕ 清除篩選</a>` : "");
+  $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
+  $("grid").innerHTML = items.map(card).join("");
+  renderPager(page, pages);
+}
+function card(b, src){
+  const meta = [b.author, b.translator ? b.translator + " 譯" : "", b.publisher,
+                b.publish_date ? String(b.publish_date).slice(0,4) : ""]
+               .filter(Boolean).map(esc).join("・");
+  const cover = b.cover_url
+    ? `<img src="${esc(b.cover_url)}" alt="${esc(b.title)} 封面" loading="lazy"
+         onerror="this.parentNode.innerHTML='<div class=ph>${esc((b.title||'書').charAt(0))}</div>'">`
+    : `<div class="ph">${esc((b.title || "書").charAt(0))}</div>`;
+  return `<article class="book" data-id="${b.book_id}" data-src="${src || ""}">
+    <a class="cover" href="/book/${b.book_id}" aria-hidden="true">${cover}</a>
+    <div class="bi">
+      <h2 class="bt serif"><a href="/book/${b.book_id}">${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
+      <div class="bmeta">${meta}</div>
+      <p class="bsum">${esc(b.summary_short || "")}</p>
+      <div class="btag">${b.category_name ? "<span>" + esc(b.category_name) + "</span>" : ""}</div>
+    </div>
+  </article>`;
+}
+function showMsg(icon, text, retry){
+  $("msg").hidden = false;
+  $("msg").innerHTML = `<div class="big">${icon}</div><div>${text}</div>` +
+    (retry ? `<p><button class="pg" onclick="load()">重新載入</button></p>` : "");
+}
+
+/* 分頁(頭尾+當前±2,其餘省略) */
+function renderPager(cur, pages){
+  if (pages <= 1) return;
+  const parts = [];
+  const btn = (label, page, cls, dis) =>
+    `<button class="pg ${cls||""}" ${dis?"disabled":""} data-p="${page}">${label}</button>`;
+  parts.push(btn("‹ 上一頁", cur-1, "", cur<=1));
+  const seen = new Set();
+  for (const n of [1,2,cur-2,cur-1,cur,cur+1,cur+2,pages-1,pages]){
+    if (n < 1 || n > pages || seen.has(n)) continue;
+    const prev = Math.max(...[...seen, 0]);
+    if (n - prev > 1) parts.push(`<span class="pg dots">…</span>`);
+    seen.add(n);
+    parts.push(btn(n, n, n===cur ? "cur" : "", n===cur));
+  }
+  parts.push(btn("下一頁 ›", cur+1, "", cur>=pages));
+  $("pager").innerHTML = parts.join("");
+  $("pager").querySelectorAll("button[data-p]").forEach(b =>
+    b.addEventListener("click", () => {
+      state.page = parseInt(b.dataset.p, 10); writeUrl(); load();
+      window.scrollTo({top:0, behavior:"smooth"});
+    }));
+}
+
+/* 搜尋互動 */
+function doSearch(){
+  state.q = $("q").value.trim(); state.person = ""; state.publisher = "";
+  state.page = 1; writeUrl(); load();
+}
+$("goBtn").addEventListener("click", doSearch);
+$("q").addEventListener("keydown", e => { if (e.key === "Enter") doSearch(); });
+$("q").addEventListener("input", () => { $("clearBtn").style.display = $("q").value ? "block" : "none"; });
+$("clearBtn").addEventListener("click", () => {
+  $("q").value = ""; $("clearBtn").style.display = "none"; doSearch();
+});
+$("dbPerson").addEventListener("click", () => toggleDiscover("person"));
+$("dbPublisher").addEventListener("click", () => toggleDiscover("publisher"));
+$("dq").addEventListener("input", () => {
+  clearTimeout(discoverTimer);
+  const val = $("dq").value.trim();
+  discoverTimer = setTimeout(() => loadDiscover(val), 250);
+});
+window.addEventListener("popstate", () => { readUrl(); $("q").value = state.q; load(); });
+
+/* 啟動 */
+readUrl();
+$("q").value = state.q;
+$("clearBtn").style.display = state.q ? "block" : "none";
+writeUrl(true);
+loadCats().then(load);
+</script>
+</body>
+</html>

@@ -346,4 +346,123 @@ function get_book(int $id): never
                 v.isbn13   AS v_isbn13,   v.cover_url    AS v_cover_url,
                 c.code AS category_code, c.name AS category_name
          FROM books b
-         JOIN v_book_list v ON v.book_id = b.book_i
+         JOIN v_book_list v ON v.book_id = b.book_id
+         LEFT JOIN categories c ON c.category_id = b.category_id
+         WHERE b.book_id = :id AND b.is_published = 1'
+    );
+    $stmt->execute([':id' => $id]);
+    $book = $stmt->fetch();
+    if (!$book) {
+        json_error('找不到此書', 404);
+    }
+
+    // 關聯優先欄位覆蓋平面欄位
+    foreach (['author', 'translator', 'publisher', 'publish_date', 'isbn13', 'cover_url'] as $f) {
+        if ($book['v_' . $f] !== null) {
+            $book[$f] = $book['v_' . $f];
+        }
+        unset($book['v_' . $f]);
+    }
+
+    $book['book_id']      = (int) $book['book_id'];
+    $book['category_id']  = $book['category_id'] !== null ? (int) $book['category_id'] : null;
+    $book['page_count']   = $book['page_count'] !== null ? (int) $book['page_count'] : null;
+    $book['is_published'] = (int) $book['is_published'];
+    $book['buy_links']    = $book['buy_links'] ? json_decode($book['buy_links'], true) : [];
+    $book['extra']        = $book['extra'] ? json_decode($book['extra'], true) : null;
+
+    // 貢獻者(多人多角色,含署名原文)
+    $stmt = db()->prepare(
+        'SELECT bp.role, bp.role_order, bp.credit_text, p.person_id, p.name, p.name_en
+         FROM book_persons bp JOIN persons p ON p.person_id = bp.person_id
+         WHERE bp.book_id = :id
+         ORDER BY FIELD(bp.role, \'author\',\'editor\',\'translator\',\'illustrator\',
+                        \'foreword\',\'advisor\',\'proofreader\',\'contributor\'), bp.role_order'
+    );
+    $stmt->execute([':id' => $id]);
+    $contributors = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $contributors[$r['role']][] = [
+            'person_id'   => (int) $r['person_id'],
+            'name'        => $r['name'],
+            'name_en'     => $r['name_en'],
+            'credit_text' => $r['credit_text'],
+        ];
+    }
+    $book['contributors'] = $contributors ?: null;
+
+    // 版本(含出版者、識別碼、格式/價格)
+    $stmt = db()->prepare(
+        'SELECT e.edition_id, e.edition_statement, e.publish_date, e.place_of_publication,
+                e.page_count, e.binding, e.dimensions, e.source, e.source_url,
+                e.publisher_id, pub.name_zh AS publisher_name
+         FROM editions e LEFT JOIN publishers pub ON pub.publisher_id = e.publisher_id
+         WHERE e.book_id = :id ORDER BY e.publish_date DESC, e.edition_id ASC'
+    );
+    $stmt->execute([':id' => $id]);
+    $editions = $stmt->fetchAll();
+    if ($editions) {
+        $eids = array_column($editions, 'edition_id');
+        $ph = implode(',', array_fill(0, count($eids), '?'));
+
+        $st = db()->prepare("SELECT edition_id, id_type, id_value, note FROM identifiers WHERE edition_id IN ($ph)");
+        $st->execute($eids);
+        $idsByEd = [];
+        foreach ($st->fetchAll() as $r) {
+            $idsByEd[$r['edition_id']][] = ['type' => $r['id_type'], 'value' => $r['id_value'], 'note' => $r['note']];
+        }
+
+        $st = db()->prepare("SELECT edition_id, media_type, file_format, price, currency, availability FROM formats_prices WHERE edition_id IN ($ph)");
+        $st->execute($eids);
+        $fpByEd = [];
+        foreach ($st->fetchAll() as $r) {
+            $fpByEd[$r['edition_id']][] = [
+                'media_type' => $r['media_type'], 'file_format' => $r['file_format'],
+                'price' => $r['price'] !== null ? (float) $r['price'] : null,
+                'currency' => $r['currency'], 'availability' => $r['availability'],
+            ];
+        }
+
+        foreach ($editions as &$e) {
+            $eid = $e['edition_id'];
+            $e['edition_id']    = (int) $eid;
+            $e['publisher_id']  = $e['publisher_id'] !== null ? (int) $e['publisher_id'] : null;
+            $e['page_count']    = $e['page_count'] !== null ? (int) $e['page_count'] : null;
+            $e['identifiers']   = $idsByEd[$eid] ?? [];
+            $e['formats']     = $fpByEd[$eid] ?? [];
+        }
+        unset($e);
+    }
+    $book['editions'] = $editions;
+
+    // 系列
+    $stmt = db()->prepare(
+        'SELECT s.series_name, bs.series_number
+         FROM book_series bs JOIN series s ON s.series_id = bs.series_id
+         WHERE bs.book_id = :id'
+    );
+    $stmt->execute([':id' => $id]);
+    $book['series_list'] = $stmt->fetchAll();
+
+    // 主題分類(多套系統)
+    $stmt = db()->prepare(
+        'SELECT s.scheme, s.code, s.label
+         FROM book_subjects bsub JOIN subjects s ON s.subject_id = bsub.subject_id
+         WHERE bsub.book_id = :id ORDER BY bsub.weight DESC'
+    );
+    $stmt->execute([':id' => $id]);
+    $book['subjects'] = $stmt->fetchAll();
+
+    // 連結(作品層 + 版本層)
+    $stmt = db()->prepare(
+        'SELECT l.link_type, l.platform, l.url, l.note
+         FROM links l
+         WHERE l.book_id = :id1
+            OR l.edition_id IN (SELECT edition_id FROM editions WHERE book_id = :id2)
+         ORDER BY l.link_type, l.link_id'
+    );
+    $stmt->execute([':id1' => $id, ':id2' => $id]);
+    $book['links'] = $stmt->fetchAll();
+
+    json_data($book);
+}
