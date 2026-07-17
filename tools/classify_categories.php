@@ -94,7 +94,7 @@ if (!$dry) {
 
 // ── 取書 ──────────────────────────────────────────────
 $where = 'b.is_published = 1' . ($all ? '' : ' AND b.category_id IS NULL');
-$sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.publisher, b.keywords, b.summary_short
+$sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.publisher, b.keywords, b.summary_short, b.summary
         FROM books b WHERE $where ORDER BY b.book_id" . ($limit ? " LIMIT $limit" : '');
 $rows = db()->query($sql)->fetchAll();
 echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($all ? "(--all 全部上架)" : "(僅未分類)") . "\n";
@@ -114,7 +114,7 @@ $catchSample = [];
 if (!$dry) db()->beginTransaction();
 foreach ($rows as $b) {
     $hay = implode(' ', array_filter([
-        $b['title'], $b['subtitle'], $b['author'], $b['publisher'], $b['keywords'], $b['summary_short'],
+        $b['title'], $b['subtitle'], $b['author'], $b['publisher'], $b['keywords'], $b['summary_short'], $b['summary'],
     ]));
 
     $matched = [];
