@@ -50,20 +50,5 @@ run_source campus --browser-ua
 # 基道:年份錨 2021 起、日期倒序;增量翻頁見到既有書即停
 run_source logos --year 2021
 
-# ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
-# classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),
-# 校園照來源代碼、基道/新品照關鍵字;不動既有已分類書。
-CLASSIFY="$ROOT/tools/classify_categories.php"
-if [ -f "$CLASSIFY" ]; then
-  log "--- 分類回填:未分類新書 ---"
-  if php "$CLASSIFY" >>"$LOG" 2>&1; then
-    log "分類回填完成"
-  else
-    log "[錯誤] 分類回填失敗(新書仍為未分類,可手動重跑 php tools/classify_categories.php)"
-  fi
-else
-  log "[警告] 找不到 $CLASSIFY,略過分類回填"
-fi
-
 log "=== 每日新品檢查結束 ==="
-# 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書複核見 runbook 待辦。
+# 註:匯入的新書預設 is_published=1、封面仍指來源站;分類回填與非書複核見 runbook 待辦。

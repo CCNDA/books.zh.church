@@ -17,6 +17,7 @@ declare(strict_types=1);
  *   php tools/classify_categories.php --dry-run
  *   php tools/classify_categories.php --dry-run --dump-catchall=80
  *   php tools/classify_categories.php --all          # 重分所有已上架書(校園來源 + 基道關鍵字)
+ *   php tools/classify_categories.php --campus-only  # 只重分校園來源書(照來源歸位,不動基道官方分類)
  *   php tools/classify_categories.php --limit=500 --dry-run
  *
  *   注意:校園分類先前被舊版關鍵字 --all 覆蓋,務必用 --all 重跑一次才能照來源歸位。
@@ -25,9 +26,10 @@ declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
 require dirname(__DIR__) . '/api/lib/db.php';
 
-$opt   = getopt('', ['dry-run', 'all', 'limit::', 'dump-catchall::']);
+$opt   = getopt('', ['dry-run', 'all', 'campus-only', 'limit::', 'dump-catchall::']);
 $dry   = array_key_exists('dry-run', $opt);
 $all   = array_key_exists('all', $opt);
+$campusOnly = array_key_exists('campus-only', $opt);
 $limit = (int) ($opt['limit'] ?? 0);
 $dumpN = array_key_exists('dump-catchall', $opt) ? (int) ($opt['dump-catchall'] ?: 50) : 0;
 
@@ -36,7 +38,7 @@ $dumpN = array_key_exists('dump-catchall', $opt) ? (int) ($opt['dump-catchall'] 
 $RULES = [
     '詩本樂譜'   => ['詩本','樂譜','聖詩','讚美詩','詩歌集','琴譜','五線譜','簡譜','敬拜詩歌','詩歌本','頌讚','聖歌','合唱','聖樂','婚禮用詩','合唱譜','讚美操','聖徒詩歌','生命聖詩','教會聖詩','頌主聖歌','世紀讚美','萬民頌揚','兒童詩歌','敬拜讚美'],
     '兒童主日學' => ['主日學','兒童崇拜','兒童聚會','兒童營','兒童事工','兒童牧養','幼兒主日學'],
-    '兒童教材'   => ['繪本','童書','圖畫書','幼兒','兒童','小朋友','注音','漫畫','兒童聖經','兒童故事','著色','貼紙','立體書','兒歌','童話','小小','寶寶','奇遇','冒險','歷險','奇遇記'],
+    '兒童教材'   => ['繪本','童書','圖畫書','幼兒','兒童','小朋友','注音','漫畫','兒童聖經','兒童故事','著色本','著色','貼紙書','立體書','兒歌','童話','幼稚','學齡前'],
     '青少年家庭' => ['親子','教養','婚姻','夫妻','家庭','父母','青少年','子女','兩性','戀愛','婚前','管教','青年','單親','育兒','孩子','母親','父親','爸爸','媽媽','家教','恩愛','溝通','擇偶','性教育','青春期','世代','教子','為人父母','家庭祭壇'],
     '見證'       => ['見證','傳記','生命故事','回憶錄','自傳','口述','蒙恩','神蹟','醫治見證','走過','走出','抗癌','戒毒','生命轉化','更新生命','傳奇','足跡','歲月'],
     '福音'       => ['福音','佈道','慕道','決志','傳福音','未信','佈道會','福音預工','歸主','信主','得救','領人歸主','四律'],
@@ -137,7 +139,14 @@ if (!$dry) {
 }
 
 // ── 取書(含校園來源碼 / 標籤)──
-$where = 'b.is_published = 1' . ($all ? '' : ' AND b.category_id IS NULL');
+// --campus-only:只重分「有校園來源分類(scheme='campus')」的書,照來源代碼歸位,
+//   不動基道官方分類(apply_logos_categories.php 的成果)。修正校園書被舊版關鍵字覆蓋。
+if ($campusOnly) {
+    $where = "b.is_published = 1 AND EXISTS (SELECT 1 FROM book_subjects bs JOIN subjects s "
+           . "ON s.subject_id = bs.subject_id WHERE bs.book_id = b.book_id AND s.scheme = 'campus')";
+} else {
+    $where = 'b.is_published = 1' . ($all ? '' : ' AND b.category_id IS NULL');
+}
 $sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.publisher, b.keywords, b.summary_short, b.summary,
         (SELECT s.code  FROM book_subjects bs JOIN subjects s ON s.subject_id=bs.subject_id
          WHERE bs.book_id=b.book_id AND s.scheme='campus' ORDER BY s.code LIMIT 1) AS campus_code,
@@ -145,7 +154,7 @@ $sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.publisher, b.keywords
          WHERE bs.book_id=b.book_id AND s.scheme='campus' ORDER BY s.code LIMIT 1) AS campus_label
         FROM books b WHERE $where ORDER BY b.book_id" . ($limit ? " LIMIT $limit" : '');
 $rows = db()->query($sql)->fetchAll();
-echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($all ? "(--all 全部上架)" : "(僅未分類)") . "\n";
+echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($campusOnly ? "(--campus-only 校園來源書)" : ($all ? "(--all 全部上架)" : "(僅未分類)")) . "\n";
 
 if (!$dry) {
     $updBook = db()->prepare('UPDATE books SET category_id = :cid WHERE book_id = :bid');
