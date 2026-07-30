@@ -21,7 +21,8 @@ require __DIR__ . '/lib/response.php';
  * links.platform / books.buy_links[].platform,未列入者以 platform 原值當顯示名)
  */
 const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder'];
-const BUY_PLATFORM_ORDER  = ['campus' => 1, 'logos' => 2];
+// 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
+const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');

@@ -69,6 +69,14 @@ $TITLE_ONLY = [
 ];
 $CATCH_ALL = '綜合其他';
 
+// 非書商品下架判定(v1.1.1,熊哥 7/30 決議):月曆/賀卡等紙品、禮品非書籍,
+// 一律 is_published=0(沿 7/15「非書籍商品資料層下架、留庫可還原」原則)。
+// 新品詳情頁常無分類代碼但有來源標籤 category_text(如「訓練材料/紙品」),
+// 故於分類前先比對:來源標籤(較廣)+ 書名/關鍵字(較嚴,避免誤殺真書)。
+$NONBOOK_LABEL_KWS = ['紙品', '禮品', '文具', '禮品百貨'];
+$NONBOOK_TITLE_KWS = ['月曆', '桌曆', '年曆', '日曆', '掛曆', '週曆', '三角曆',
+                      '賀卡', '金句卡', '經文卡', '書籤', '紅包袋', '信紙', '信封', '獎勵卡', '拼圖'];
+
 /**
  * 校園來源代碼 → 站上分類(權威)。
  * $code = 校園 category_source(如 0410);$label = 來源標籤(如「實踐神學／輔導」)。
@@ -104,7 +112,7 @@ function campus_category(string $code, string $label): string {
             if ($has(['研經','歸納法']))     return '聖經研究';
             if ($has(['兒童','幼稚','幼兒'])) return '兒童教材';
             if ($has(['主日學']))            return '兒童主日學';
-            if ($has(['紙品']))              return '綜合其他';
+            if ($has(['紙品']))              return '綜合其他'; // 正常到不了:紙品已在主迴圈下架
             return '門徒造就'; // 小組材料 / 工作訓練 / 青少年教材 / 成人教材
         case '11': // 文藝類
             if ($has(['畫冊']))            return '藝術';
@@ -165,6 +173,7 @@ $rows = db()->query($sql)->fetchAll();
 echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($campusOnly ? "(--campus-only 校園來源書)" : ($all ? "(--all 全部上架)" : "(僅未分類)")) . "\n";
 
 if (!$dry) {
+    $unpubBook = db()->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid');
     $updBook = db()->prepare('UPDATE books SET category_id = :cid WHERE book_id = :bid');
     $delBS   = db()->prepare("DELETE bs FROM book_subjects bs JOIN subjects s ON s.subject_id=bs.subject_id
                               WHERE bs.book_id = :b AND s.scheme='cat'");
@@ -173,9 +182,34 @@ if (!$dry) {
 }
 
 $stats = []; $multi = 0; $catchN = 0; $done = 0; $catchSample = []; $srcN = 0; $kwN = 0;
+$unpubN = 0; $unpubSample = [];
 
 if (!$dry) db()->beginTransaction();
 foreach ($rows as $b) {
+    // 非書商品(紙品/禮品)先下架,不進分類
+    $lblHay = (string) ($b['campus_label'] ?? '');
+    $ttlHay = implode(' ', array_filter([$b['title'], $b['subtitle'], $b['keywords']]));
+    $nonbook = false;
+    foreach ($NONBOOK_LABEL_KWS as $kw) {
+        if ($lblHay !== '' && mb_strpos($lblHay, $kw) !== false) { $nonbook = true; break; }
+    }
+    if (!$nonbook) {
+        foreach ($NONBOOK_TITLE_KWS as $kw) {
+            if (mb_strpos($ttlHay, $kw) !== false) { $nonbook = true; break; }
+        }
+    }
+    if ($nonbook) {
+        $unpubN++;
+        if (count($unpubSample) < 50) {
+            $unpubSample[] = trim(($b['title'] ?? '') . '  〔' . ($lblHay ?: ($b['publisher'] ?? '')) . '〕');
+        }
+        if (!$dry) {
+            $unpubBook->execute([':bid' => (int) $b['book_id']]);
+            if (++$done % 500 === 0) { db()->commit(); db()->beginTransaction(); echo "  已處理 $done…\n"; }
+        }
+        continue;
+    }
+
     $campusCode = (string) ($b['campus_code'] ?? '');
     if ($campusCode !== '') {
         // 校園:照來源代碼
@@ -234,6 +268,11 @@ $total = count($rows);
 $catchPct = $total ? round($catchN * 100 / $total, 1) : 0;
 echo "\n來源: 校園(照來源){$srcN} 本、基道/新品(關鍵字){$kwN} 本\n";
 echo "多分類(>=2 類):{$multi};落入「{$CATCH_ALL}」:{$catchN}({$catchPct}%)\n";
+echo "非書商品下架(紙品/月曆等):{$unpubN}\n";
+if ($unpubN && $unpubSample) {
+    echo "== 下架清單樣本(前 " . count($unpubSample) . " 筆,複核用)==\n";
+    foreach ($unpubSample as $t) echo "  - $t\n";
+}
 
 if ($dumpN && $catchSample) {
     echo "\n== 落入「{$CATCH_ALL}」樣本(前 " . count($catchSample) . " 本,調規則用)==\n";
