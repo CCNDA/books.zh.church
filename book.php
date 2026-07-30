@@ -152,7 +152,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <header>
   <div class="hd-inner">
     <h1 class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
-    <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a></nav>
+    <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
   </div>
 </header>
 
@@ -178,6 +178,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
   <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a></span>
 </div></footer>
 
+<script src="/assets/lang.js"></script>
 <script>
 "use strict";
 const API = "/api";
@@ -260,13 +261,14 @@ function render(b){
   for (const su of (b.subjects || [])) tags.push(`<span class="tag">${esc(su.label || su.code)}</span>`);
   $("bTags").innerHTML = tags.join("");
 
-  // 購書連結(buy_links JSON:容忍字串或物件)+ 複製連結
+  // 購書連結:API 已彙整所有來源(校園/基道/未來新增,{platform,label,url,note});容忍舊格式字串
   const btns = [];
   for (const l of (Array.isArray(b.buy_links) ? b.buy_links : [])){
     const url = typeof l === "string" ? l : (l.url || "");
     if (!url) continue;
     const label = typeof l === "string" ? "購書連結" : (l.label || PLATFORM_NAMES[l.platform] || l.platform || l.name || "購書連結");
-    btns.push(`<a class="btn primary" href="${esc(url)}" target="_blank" rel="noopener nofollow">🛒 ${esc(label)}</a>`);
+    const note = typeof l === "string" ? "" : (l.note || "");
+    btns.push(`<a class="btn primary" href="${esc(url)}"${note ? ` title="${esc(note)}"` : ""} target="_blank" rel="noopener nofollow">🛒 ${esc(label)}</a>`);
   }
   btns.push(`<button class="btn" id="copyBtn">🔗 複製本頁連結</button>`);
   $("bBtns").innerHTML = btns.join("");

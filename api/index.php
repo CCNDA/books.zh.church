@@ -16,6 +16,13 @@ declare(strict_types=1);
 require __DIR__ . '/lib/db.php';
 require __DIR__ . '/lib/response.php';
 
+/**
+ * 購書平台顯示名與排序(新增來源時在此擴充即可;platform 代碼由匯入器寫入
+ * links.platform / books.buy_links[].platform,未列入者以 platform 原值當顯示名)
+ */
+const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder'];
+const BUY_PLATFORM_ORDER  = ['campus' => 1, 'logos' => 2];
+
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');
 header('Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS');
@@ -462,7 +469,49 @@ function get_book(int $id): never
          ORDER BY l.link_type, l.link_id'
     );
     $stmt->execute([':id1' => $id, ':id2' => $id]);
-    $book['links'] = $stmt->fetchAll();
+    $linkRows = $stmt->fetchAll();
+
+    // 購書連結彙整:links(link_type='buy',正規層)+ books.buy_links(平面後備)
+    // URL 去重、平台固定排序;統一格式 {platform, label, url, note},來源增加時只需擴充上方常數
+    $buy = [];
+    $addBuy = static function (?string $platform, string $url, ?string $note = null, ?string $label = null) use (&$buy): void {
+        $url = trim($url);
+        if ($url === '' || isset($buy[$url])) {
+            return;
+        }
+        $buy[$url] = [
+            'platform' => $platform,
+            'label'    => ($label !== null && $label !== '')
+                          ? $label
+                          : (BUY_PLATFORM_LABELS[$platform] ?? ($platform !== null && $platform !== '' ? $platform : '購書連結')),
+            'url'      => $url,
+            'note'     => ($note !== null && $note !== '') ? $note : null,
+        ];
+    };
+    $others = [];
+    foreach ($linkRows as $r) {
+        if ($r['link_type'] === 'buy') {
+            $addBuy($r['platform'], (string) $r['url'], $r['note']);
+        } else {
+            $others[] = $r;
+        }
+    }
+    foreach ((array) $book['buy_links'] as $l) {
+        if (is_string($l)) {
+            $addBuy(null, $l);
+        } elseif (is_array($l)) {
+            $addBuy(isset($l['platform']) ? (string) $l['platform'] : null,
+                    (string) ($l['url'] ?? ''),
+                    isset($l['note']) ? (string) $l['note'] : null,
+                    isset($l['label']) ? (string) $l['label'] : null);
+        }
+    }
+    $buy = array_values($buy);
+    usort($buy, static fn (array $a, array $b): int =>
+        [BUY_PLATFORM_ORDER[$a['platform']] ?? 9, $a['label']]
+        <=> [BUY_PLATFORM_ORDER[$b['platform']] ?? 9, $b['label']]);
+    $book['buy_links'] = $buy;    // 所有購書來源(校園/基道/未來新增)
+    $book['links']     = $others; // 延伸連結(已排除購書,避免與按鈕重複)
 
     json_data($book);
 }

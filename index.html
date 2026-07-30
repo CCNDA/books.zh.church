@@ -142,7 +142,7 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
   <div class="hd-inner">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
       <h1 class="serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
-      <nav style="font-size:.88rem;color:var(--ink-soft)"><span>書目瀏覽</span> ・ <a href="/about.html" style="color:inherit">關於本站</a></nav>
+      <nav style="font-size:.88rem;color:var(--ink-soft)"><span>書目瀏覽</span> ・ <a href="/about.html" style="color:inherit">關於本站</a> ・ <a href="#" id="langToggle" style="color:inherit" aria-label="簡繁體切換"></a></nav>
     </div>
     <div class="hd-sub">基督徒圖書分享服務・幫助你找到造就生命的下一本書</div>
   </div>
@@ -181,9 +181,10 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 
 <footer><div class="ft">
   <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
-  <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a></span>
+  <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a> ・ <span title="版本 1.1.0">v1.1</span></span>
 </div></footer>
 
+<script src="/assets/lang.js"></script>
 <script>
 "use strict";
 const API = "/api";
@@ -267,6 +268,7 @@ async function loadDiscover(q){
   if (!discoverKind) return;
   const kind = discoverKind;
   const ep = kind === "person" ? "/persons" : "/publishers";
+  if (q && window.SiteLang) q = SiteLang.toHant(q); // 簡體輸入轉繁體查詢
   let rows = [];
   try { rows = await fetchJson(API + ep + (q ? "?q=" + encodeURIComponent(q) + "&limit=30" : "?limit=20")); }
   catch(_){ rows = []; }
@@ -404,7 +406,10 @@ function renderPager(cur, pages){
 
 /* 搜尋互動 */
 function doSearch(){
-  state.q = $("q").value.trim(); state.person = ""; state.publisher = "";
+  // 簡體模式下把關鍵字轉繁體再查(資料庫為繁體);SiteLang 未載入則原樣
+  const raw = $("q").value.trim();
+  state.q = window.SiteLang ? SiteLang.toHant(raw) : raw;
+  state.person = ""; state.publisher = "";
   state.page = 1; writeUrl(); load();
 }
 $("goBtn").addEventListener("click", doSearch);
