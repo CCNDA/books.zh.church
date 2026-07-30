@@ -122,6 +122,41 @@ function campus_category(string $code, string $label): string {
     return '綜合其他'; // 未知校園碼
 }
 
+/**
+ * 標籤反查校園代碼(v1.1.2):每日新品詳情頁常無 category_source 代碼、
+ * 只有 category_text 標籤(如「聖經／註釋本聖經」),但整站爬取已在 subjects
+ * 建立完整「代碼+標籤」對照 → 以標籤反查代碼,即可照來源權威歸位,
+ * 不再落入關鍵字誤判(如 74695 新約聖經被摘要「福音派」帶去福音類)。
+ * 先精確比對整個標籤;不中再以大類前綴比對、只取 2 碼大類。查無回 ''。
+ */
+function campus_code_by_label(string $label): string
+{
+    static $cache = [], $stExact = null, $stTop = null;
+    if (isset($cache[$label])) {
+        return $cache[$label];
+    }
+    if ($stExact === null) {
+        $stExact = db()->prepare("SELECT s.code FROM subjects s
+                                  WHERE s.scheme='campus' AND s.code IS NOT NULL AND s.label = :l
+                                  ORDER BY s.code LIMIT 1");
+        $stTop   = db()->prepare("SELECT s.code FROM subjects s
+                                  WHERE s.scheme='campus' AND s.code IS NOT NULL AND s.label LIKE :l
+                                  ORDER BY s.code LIMIT 1");
+    }
+    $stExact->execute([':l' => $label]);
+    $code = (string) ($stExact->fetchColumn() ?: '');
+    if ($code === '') {
+        $p   = mb_strpos($label, '／');
+        $top = $p !== false ? mb_substr($label, 0, $p) : $label;
+        $stTop->execute([':l' => $top . '／%']);
+        $code = (string) ($stTop->fetchColumn() ?: '');
+        if ($code !== '') {
+            $code = substr($code, 0, 2); // 子類不確定,只信大類碼
+        }
+    }
+    return $cache[$label] = $code;
+}
+
 // ── 載入分類 id / code ─────────────────────────────
 $cats = [];
 $catCode = [];
@@ -210,10 +245,15 @@ foreach ($rows as $b) {
         continue;
     }
 
-    $campusCode = (string) ($b['campus_code'] ?? '');
+    $campusCode  = (string) ($b['campus_code'] ?? '');
+    $campusLabel = (string) ($b['campus_label'] ?? '');
+    if ($campusCode === '' && $campusLabel !== '') {
+        // 新品:無代碼但有來源標籤 → 反查代碼(見 campus_code_by_label)
+        $campusCode = campus_code_by_label($campusLabel);
+    }
     if ($campusCode !== '') {
         // 校園:照來源代碼
-        $matched = [campus_category($campusCode, (string) ($b['campus_label'] ?? ''))];
+        $matched = [campus_category($campusCode, $campusLabel)];
         $srcN++;
     } else {
         // 基道 / 新品:關鍵字
