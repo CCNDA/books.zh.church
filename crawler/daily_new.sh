@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓兩站新品 → 產生當日 delta jsonl → tools/import.php 匯入(以 source_url 去重)。
+# 流程:new_arrivals.py 抓三站新品(校園/基道/以琳)→ 產生當日 delta jsonl
+#      → tools/import.php 匯入(以 source_url 去重)→ 以琳套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
 
@@ -49,6 +50,23 @@ run_source() {
 run_source campus --browser-ua
 # 基道:年份錨 2021 起、日期倒序;增量翻頁見到既有書即停
 run_source logos --year 2021
+# 以琳:逐分類增量(列表最新在前、無新品即停);紀錄自帶分類路徑
+run_source elim
+
+# ── 以琳分類套用:scheme='elim' 存證 → elim_category_map 對映站內分類 ──
+# 冪等可重跑;需在 classify 之前跑,elim 新書由對映表歸類(而非關鍵字猜測),
+# category_id 就位後 classify(只處理 NULL)自然跳過它們。
+APPLY_ELIM="$ROOT/tools/apply_elim_categories.php"
+if [ -f "$APPLY_ELIM" ]; then
+  log "--- 以琳分類套用(對映表)---"
+  if php "$APPLY_ELIM" >>"$LOG" 2>&1; then
+    log "以琳分類套用完成"
+  else
+    log "[錯誤] 以琳分類套用失敗(可手動重跑 php tools/apply_elim_categories.php)"
+  fi
+else
+  log "[警告] 找不到 $APPLY_ELIM,略過以琳分類套用"
+fi
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),

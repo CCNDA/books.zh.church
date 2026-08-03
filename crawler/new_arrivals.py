@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""每日新品增量檢查(伺服器 cron 用):校園 IsNewBook.aspx + 基道年度新品(日期倒序)。
+"""每日新品增量檢查(伺服器 cron 用):校園 IsNewBook.aspx + 基道年度新品(日期倒序)
++ 以琳分類列表增量(2026-08-03 新增,最新在前、無新品即停)。
 
 設計:重用既有 campus_crawler / logos_crawler 的解析邏輯,只新增
  (1)「新品列表」入口(校園全館新書、基道年份檢索日期倒序);
@@ -30,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 import campus_crawler as campus
+import elim_crawler as elim
 import logos_crawler as logos
 
 HERE = Path(__file__).parent
@@ -126,6 +128,55 @@ def collect_logos(writer, year: int, max_pages: int, dry_run: bool) -> list[dict
     return _parse_new(new_codes, logos.parse_product, writer, dry_run)
 
 
+# ── 以琳分類增量(各分類列表最新在前,無新品即停)──────────────
+
+def collect_elim(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """以琳:走 elim_crawler.CATEGORIES(書籍+聖經各分類),列表最新在前
+    (gid 遞減),逐分類增量翻頁、本頁無新品即停。不用官網「新書頁」
+    (category2_1)是因為它只有大類、拿不到子分類 → 雙軌分類會全落綜合其他;
+    新書必然同時出現在其分類列表最前面,逐分類走不會漏且路徑完整。
+    列表頁一律 force 重抓(快取會讀到昨天的第 1 頁而永遠看不到新品);
+    商品頁沿用快取(新品必然未快取)。"""
+    gid_cats: dict[str, list[str]] = {}
+    first_page_fail = 0
+    for path, name in elim.CATEGORIES:
+        page, found = 1, 0
+        while True:
+            try:
+                html = elim.fetch(elim.list_url(path, page), force=True)
+            except RuntimeError as e:
+                print(f"  [{name}] 第 {page} 頁抓取失敗:{e}", flush=True)
+                if page == 1:
+                    first_page_fail += 1
+                break
+            gids = elim.extract_gids(html)
+            if not gids:          # 空頁 = 分類走完
+                break
+            page_new = [g for g in gids if g not in writer.seen]
+            for g in page_new:
+                cats = gid_cats.setdefault(g, [])
+                if path not in cats:
+                    cats.append(path)
+            found += len(page_new)
+            if not page_new:      # 最新在前,本頁全是既有書 → 之後更舊,停
+                break
+            if max_pages and page >= max_pages:
+                break
+            page += 1
+        if found:
+            print(f"  [{name}] 新品 {found}", flush=True)
+    if first_page_fail >= len(elim.CATEGORIES):
+        print("以琳所有分類首頁抓取失敗", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    print(f"以琳:共 {len(gid_cats)} 個新品 gid", flush=True)
+
+    def parse(gid: str):
+        cats = sorted(gid_cats[gid], key=lambda c: elim.CAT_ORDER.get(c, 999))
+        return elim.parse_product(gid, cats)
+
+    return _parse_new(list(gid_cats), parse, writer, dry_run)
+
+
 # ── 共用:逐筆解析新品 ──────────────────────────────────────
 
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
@@ -151,7 +202,7 @@ def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dic
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", required=True, choices=["campus", "logos"])
+    ap.add_argument("--source", required=True, choices=["campus", "logos", "elim"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -166,6 +217,12 @@ def main():
             print("校園改用瀏覽器式 UA", flush=True)
         writer = _writer("campus_books.jsonl", "product_id")
         fresh = collect_campus(writer, args.max_pages, args.dry_run)
+    elif args.source == "elim":
+        writer = _writer("elim_books.jsonl", "gid")
+        fresh = collect_elim(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
     else:
         writer = _writer("logos_books.jsonl", "code")
         fresh = collect_logos(writer, args.year, args.max_pages, args.dry_run)
