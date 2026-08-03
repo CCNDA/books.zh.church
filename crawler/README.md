@@ -1,6 +1,26 @@
-# 兩站書目爬蟲(校園書房 + 基道)
+# 書目爬蟲(校園書房 + 基道 + 以琳書房)
 
-在熊哥本機(Windows)執行,單執行緒禮貌抓取。輸出 JSONL 原始資料,匯入正規化表由後續 importer 處理(拆分可無損還原,多值一律原樣保留)。
+單執行緒禮貌抓取。輸出 JSONL 原始資料,匯入正規化表由後續 importer 處理(拆分可無損還原,多值一律原樣保留)。校園/基道在熊哥本機(Windows)執行;以琳(2026-07-31 新增)於主機執行。
+
+## 以琳書房(elim,7/31 新增)
+
+主機執行流程(先 Navicat 跑 `database/migrations/2026-07-31_elim_category_map.sql`,再 FTP 上傳程式):
+
+```bash
+cd crawler
+python3 -m venv venv && venv/bin/pip install -r requirements.txt   # 一次
+venv/bin/python elim_crawler.py --probe          # 先探測,輸出貼回給 Claude 確認
+nohup venv/bin/python elim_crawler.py > logs/elim.log 2>&1 &        # 全量(可中斷續跑)
+# 完成後匯入 + 套分類(都先 dry-run 看統計):
+php tools/import.php --file=crawler/data/elim_books.jsonl --source=elim --dry-run
+php tools/import.php --file=crawler/data/elim_books.jsonl --source=elim
+php tools/apply_elim_categories.php --dry-run
+php tools/apply_elim_categories.php
+```
+
+範圍:只抓「書籍」「聖經」兩大類(7/31 決議;影音/禮品不抓,日誌月曆照抓、匯入後由對映表下架)。
+分類雙軌:以琳原始分類(一書多分類、完整路徑)入 `subjects(scheme='elim')` 永久存證;站內瀏覽分類由 `elim_category_map` 對映(Navicat 可改,改後重跑 apply 即生效)。
+注意:以琳商品頁不顯示 ISBN 文字,僅能從商品圖檔名提取(候選唯一才認定),其餘靠書名+作者模糊合併。
 
 ## 安裝(一次)
 

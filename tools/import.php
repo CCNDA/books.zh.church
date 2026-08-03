@@ -16,6 +16,11 @@ declare(strict_types=1);
  *   php tools/import.php --file=crawler/data/logos_books.jsonl  --source=logos  --dry-run
  *   php tools/import.php --file=crawler/data/logos_books.jsonl  --source=logos
  *   php tools/import.php --file=crawler/data/campus_books.jsonl --source=campus
+ *   php tools/import.php --file=crawler/data/elim_books.jsonl   --source=elim
+ *
+ * elim(以琳書房,2026-07-31):紀錄含 categories 完整清單(一書多分類,
+ * 路徑碼+名稱路徑),全部寫 subjects(scheme='elim')原樣存證;站內瀏覽分類
+ * 之後由 tools/apply_elim_categories.php 依 elim_category_map 對映(雙軌並存)。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -29,8 +34,8 @@ $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos [--limit=N] [--dry-run]\n");
+if (!$file || !in_array($source, ['campus', 'logos', 'elim'], true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -133,13 +138,17 @@ function map_record(string $source, array $r): array
     $isJunkTitle = !tidy($r['title'] ?? null);
     [$isbn13, $isbn10] = isbn_pair($r['isbn'] ?? ($r['isbn_meta'] ?? null));
     [$bDate, $eDate]   = parse_date($r['publish_date'] ?? null);
+    // 以琳多人名以「/」分隔(如「薛玉光/古維華」)→ 先換成頓號再拆;
+    // 僅 elim 適用,避免影響其他來源既有行為。原始字串仍完整保留於 *_raw 與 extra。
+    $names = fn(?string $s): array => split_names(
+        $source === 'elim' && $s !== null ? str_replace('/', '、', $s) : $s);
     $m = [
         'title'          => cap(tidy($r['title'] ?? null), 255),
         'original_title' => cap(tidy($r['title_en'] ?? null), 255),
-        'authors'        => split_names($r['authors_raw'] ?? null),
-        'translators'    => split_names($r['translators_raw'] ?? null),
-        'illustrators'   => split_names($r['illustrators_raw'] ?? null),
-        'editors'        => split_names($r['editors_raw'] ?? null),
+        'authors'        => $names($r['authors_raw'] ?? null),
+        'translators'    => $names($r['translators_raw'] ?? null),
+        'illustrators'   => $names($r['illustrators_raw'] ?? null),
+        'editors'        => $names($r['editors_raw'] ?? null),
         'authors_raw'    => cap(tidy($r['authors_raw'] ?? null), 255),
         'publisher'      => cap(tidy($r['publisher'] ?? null), 100), // books.publisher(100)、publishers.name_zh(150) 取小者
         'book_date'      => $bDate,
@@ -157,13 +166,23 @@ function map_record(string $source, array $r): array
         'store_code'     => cap(tidy($r['item_no'] ?? ($r['code'] ?? null)), 30),
         'price'          => isset($r['price_list']) && $r['price_list'] !== '' ? $r['price_list']
                             : ($r['price_sale'] ?? null),
-        'currency'       => $source === 'campus' ? 'TWD' : (tidy($r['currency'] ?? null) ?: 'HKD'),
+        'currency'       => tidy($r['currency'] ?? null) ?: ($source === 'logos' ? 'HKD' : 'TWD'),
         'cover_url'      => tidy($r['cover_url'] ?? null),
         'source_url'     => $r['source_url'] ?? null,
         'subject_code'   => cap(tidy($r['category_source'] ?? null), 20),
         'subject_label'  => cap(tidy($r['category_text'] ?? null), 150),
         'skip'           => $isJunkTitle,
     ];
+    // 來源分類清單(elim:一書多分類,原樣存證;其他來源退回單一平面欄位)
+    $m['subjects'] = [];
+    foreach ((array) ($r['categories'] ?? []) as $c) {
+        $code  = cap(tidy(is_array($c) ? ($c['code'] ?? null) : null), 20);
+        $label = cap(tidy(is_array($c) ? ($c['path'] ?? null) : null), 150);
+        if ($code || $label) $m['subjects'][] = [$code, $label ?: $code];
+    }
+    if (!$m['subjects'] && ($m['subject_code'] || $m['subject_label'])) {
+        $m['subjects'][] = [$m['subject_code'], $m['subject_label'] ?: $m['subject_code']];
+    }
     return $m;
 }
 
@@ -186,7 +205,9 @@ foreach ($pdo->query(
     $isbnMap[$r['id_value']] = (int) $r['book_id'];
 }
 $fuzzyMap = [];
-foreach ($pdo->query("SELECT book_id, title, author FROM books") as $r) {
+$bookIsbn = [];   // book_id → isbn13(模糊命中時判斷可否合併用)
+foreach ($pdo->query("SELECT book_id, title, author, isbn13 FROM books") as $r) {
+    $bookIsbn[(int) $r['book_id']] = $r['isbn13'] ?: null;
     $first = split_names($r['author'])[0]['name'] ?? null;
     $k = fuzzy_key($r['title'], $first);
     if ($k) $fuzzyMap[$k] = (int) $r['book_id'];
@@ -231,11 +252,18 @@ while (($line = fgets($fh)) !== false) {
     if ($m['isbn13'] && isset($isbnMap[$m['isbn13']])) {
         $bookId = $isbnMap[$m['isbn13']];
         $isMerge = true;
-    } elseif (!$m['isbn13']) {
+    } else {
+        // 模糊比對(書名+第一作者)。2026-08-02 修:帶 ISBN 的紀錄也要比——
+        // 「A 站有 ISBN、B 站同書無 ISBN」曾因此拆成兩筆(525 組)。
+        // 僅當既有書無 ISBN 或同 ISBN 才合併;異 ISBN 存疑不合併(交 merge 工具)。
         $fk = fuzzy_key($m['title'], $m['authors'][0]['name'] ?? null);
         if ($fk && isset($fuzzyMap[$fk])) {
-            $bookId = $fuzzyMap[$fk];
-            $isMerge = true;
+            $cand = $fuzzyMap[$fk];
+            $candIsbn = $bookIsbn[$cand] ?? null;
+            if (!$m['isbn13'] || $candIsbn === null || $candIsbn === $m['isbn13']) {
+                $bookId = $cand;
+                $isMerge = true;
+            }
         }
     }
 
@@ -268,6 +296,7 @@ while (($line = fgets($fh)) !== false) {
         ]);
         $bookId = (int) $pdo->lastInsertId();
         $stats['new_book']++;
+        $bookIsbn[$bookId] = $m['isbn13'];
         if ($m['isbn13']) $isbnMap[$m['isbn13']] = $bookId;
         $fk = fuzzy_key($m['title'], $m['authors'][0]['name'] ?? null);
         if ($fk) $fuzzyMap[$fk] = $bookId;
@@ -304,6 +333,11 @@ while (($line = fgets($fh)) !== false) {
             ':id' => $bookId,
         ]);
         $stats['merged']++;
+        // 合併時 COALESCE 可能補上 ISBN → 同步記憶,後續同 ISBN 紀錄才配得到
+        if ($m['isbn13'] && empty($bookIsbn[$bookId])) {
+            $bookIsbn[$bookId] = $m['isbn13'];
+            $isbnMap[$m['isbn13']] = $bookId;
+        }
     }
 
     // 2. persons + book_persons(多角色:作者/譯者/繪者/編者;credit_text 保留原樣)
@@ -382,7 +416,8 @@ while (($line = fgets($fh)) !== false) {
     $st = $pdo->prepare(
         "INSERT INTO links (edition_id, link_type, platform, url)
          VALUES (:e, 'buy', :pf, :u)");
-    $st->execute([':e' => $editionId, ':pf' => $source === 'campus' ? '校園書房' : '基道 BookFinder',
+    $st->execute([':e' => $editionId,
+                  ':pf' => ['campus' => '校園書房', 'logos' => '基道 BookFinder', 'elim' => '以琳書房'][$source],
                   ':u' => $m['source_url']]);
 
     // 8. 封面(先記來源網址;R2 轉存腳本後續更新 url_or_path 與 books.cover_url)
@@ -393,16 +428,15 @@ while (($line = fgets($fh)) !== false) {
         $st->execute([':e' => $editionId, ':u' => $m['cover_url'], ':s' => $m['cover_url']]);
     }
 
-    // 9. 來源分類(subjects scheme=campus/logos)
-    if ($m['subject_code'] || $m['subject_label']) {
-        $label = $m['subject_label'] ?: $m['subject_code'];
-        $key = "$source|{$m['subject_code']}|$label";
+    // 9. 來源分類(subjects scheme=campus/logos/elim;elim 一書多分類全數存證)
+    foreach ($m['subjects'] as [$sCode, $sLabel]) {
+        $key = "$source|$sCode|$sLabel";
         if (!isset($subjMap[$key])) {
             // uq_scheme_code_label 同為 unicode_ci;upsert 取回既有 id 防變體撞鍵 1062。
             $st = $pdo->prepare(
                 "INSERT INTO subjects (scheme, code, label) VALUES (:s, :c, :l)
                  ON DUPLICATE KEY UPDATE subject_id = LAST_INSERT_ID(subject_id)");
-            $st->execute([':s' => $source, ':c' => $m['subject_code'], ':l' => $label]);
+            $st->execute([':s' => $source, ':c' => $sCode, ':l' => $sLabel]);
             $subjMap[$key] = (int) $pdo->lastInsertId();
         }
         $st = $pdo->prepare("INSERT IGNORE INTO book_subjects (book_id, subject_id) VALUES (:b, :s)");
