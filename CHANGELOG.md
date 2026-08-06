@@ -11,6 +11,21 @@
 
 ---
 
+## [1.2.0] - 2026-08-06 —— 新增書目來源:天恩出版社(graceph.com)
+
+### 新增
+- 天恩出版社爬蟲 `crawler/graceph_crawler.py`:WooCommerce Store API 商品清單(日期倒序)+ 商品頁「資訊」頁籤書目欄位;全站抓入(約 1,626 件),快取續跑
+- 每日新品:`new_arrivals.py --source grace`(Store API 日期倒序、無新品即停)、`daily_new.sh` 加入 grace 與天恩分類套用
+- 分類雙軌(沿以琳做法):`subjects(scheme='grace')` 原樣存證 + `grace_category_map` 對映站內分類(migration `2026-08-06_grace_category_map.sql` + `tools/apply_grace_categories.php`)
+- 電子書(8/6 決議):照書上架、與紙本同書合併(同名同作者即使 eISBN 不同也併為同一作品的版本);價格記 `media_type='ebook'`,購書連結標示「天恩出版社(電子書)」與紙本並列
+- 非書(文創禮品/質選文創好物/專輯有聲/虛擬商品/年度日月曆):全站抓入存證,匯入後由對映表下架(命中任一即下架,留庫可還原)
+- API 購書平台常數補 `elim`/`grace`(含電子書),排序:校園→基道→以琳→天恩→天恩電子書
+
+### 部署
+- Navicat 跑 `database/migrations/2026-08-06_grace_category_map.sql` → FTP 上傳 6 檔(graceph_crawler.py、new_arrivals.py、daily_new.sh、tools/import.php、tools/apply_grace_categories.php、api/index.php)→ 主機先 `--probe` 驗證解析,再全量抓取+匯入(見 crawler/README.md)
+
+---
+
 ## [1.1.2] - 2026-07-30 —— 新品分類:標籤反查代碼
 
 ### 修正

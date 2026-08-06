@@ -17,10 +17,17 @@ declare(strict_types=1);
  *   php tools/import.php --file=crawler/data/logos_books.jsonl  --source=logos
  *   php tools/import.php --file=crawler/data/campus_books.jsonl --source=campus
  *   php tools/import.php --file=crawler/data/elim_books.jsonl   --source=elim
+ *   php tools/import.php --file=crawler/data/grace_books.jsonl  --source=grace
  *
  * elim(以琳書房,2026-07-31):紀錄含 categories 完整清單(一書多分類,
  * 路徑碼+名稱路徑),全部寫 subjects(scheme='elim')原樣存證;站內瀏覽分類
  * 之後由 tools/apply_elim_categories.php 依 elim_category_map 對映(雙軌並存)。
+ *
+ * grace(天恩出版社,2026-08-06):同 elim 的雙軌分類(subjects scheme='grace'
+ * 存證 → tools/apply_grace_categories.php 依 grace_category_map 對映)。
+ * 電子書(紀錄 is_ebook=true,8/6 決議):照書上架、與紙本同書合併——
+ * 同名同作者即使 ISBN 不同(電子書各有 eISBN)也視為同一作品的另一版本;
+ * 價格 media_type='ebook',購書連結標示「天恩出版社(電子書)」與紙本並列。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -34,8 +41,8 @@ $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos', 'elim'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim [--limit=N] [--dry-run]\n");
+if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace'], true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -117,11 +124,12 @@ function split_names(?string $raw): array
     return $out;
 }
 
-/** 模糊合併鍵:書名+第一作者(去空白、轉小寫) */
+/** 模糊合併鍵:書名+第一作者(去空白+標點符號、轉小寫;2026-08-03 修:
+ *  與 merge_duplicate_books.php 的 norm() 同步,避免「：」vs「--」等標點變體再拆成兩筆) */
 function fuzzy_key(?string $title, ?string $firstAuthor): ?string
 {
     if (!$title || !$firstAuthor) return null;
-    $n = fn($s) => mb_strtolower(preg_replace('/\s+/u', '', $s), 'UTF-8');
+    $n = fn($s) => mb_strtolower(preg_replace('/[\s\p{P}\p{S}]+/u', '', $s), 'UTF-8');
     return $n($title) . '|' . $n($firstAuthor);
 }
 
@@ -246,6 +254,12 @@ while (($line = fgets($fh)) !== false) {
     if ($m['skip'] || !$m['source_url']) { $stats['skip_bad']++; continue; }
     if (isset($doneUrls[$m['source_url']])) { $stats['skip_done']++; continue; }
 
+    // 天恩電子書(8/6 決議):價格記 ebook、購書連結標示電子書、放寬同名合併
+    $isEbook     = $source === 'grace' && !empty($raw['is_ebook']);
+    $buyPlatform = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
+                    'elim' => '以琳書房', 'grace' => '天恩出版社'][$source]
+                 . ($isEbook ? '(電子書)' : '');
+
     // 1. 找/建 book(Work)
     $bookId = null;
     $isMerge = false;
@@ -260,7 +274,10 @@ while (($line = fgets($fh)) !== false) {
         if ($fk && isset($fuzzyMap[$fk])) {
             $cand = $fuzzyMap[$fk];
             $candIsbn = $bookIsbn[$cand] ?? null;
-            if (!$m['isbn13'] || $candIsbn === null || $candIsbn === $m['isbn13']) {
+            // 電子書例外(8/6):eISBN 本來就與紙本不同,同名同作者即視為
+            // 同一作品的電子版本 → 即使異 ISBN 也合併(books.isbn13 以
+            // COALESCE 保留紙本,eISBN 只記在該版本的 identifiers)。
+            if (!$m['isbn13'] || $candIsbn === null || $candIsbn === $m['isbn13'] || $isEbook) {
                 $bookId = $cand;
                 $isMerge = true;
             }
@@ -290,7 +307,10 @@ while (($line = fgets($fh)) !== false) {
             ':i13' => $m['isbn13'], ':i10' => $m['isbn10'], ':pc' => $m['page_count'],
             ':bd' => $m['binding'], ':lg' => $m['language'], ':se' => $m['series'],
             ':su' => $m['summary'], ':kw' => $m['keywords'],
-            ':bl' => json_encode([['platform' => $source, 'url' => $m['source_url']]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ':bl' => json_encode([$isEbook
+                        ? ['platform' => $source, 'url' => $m['source_url'], 'label' => $buyPlatform]
+                        : ['platform' => $source, 'url' => $m['source_url']]],
+                     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ':ex' => json_encode([$source => $extraRec], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ':src' => $source,
         ]);
@@ -311,7 +331,9 @@ while (($line = fgets($fh)) !== false) {
         $extra = $curRow['extra'] ? (json_decode($curRow['extra'], true) ?: []) : [];
         $extra[$source] = $extraRec;
         $bl = $curRow['buy_links'] ? (json_decode($curRow['buy_links'], true) ?: []) : [];
-        $bl[] = ['platform' => $source, 'url' => $m['source_url']];
+        $bl[] = $isEbook
+            ? ['platform' => $source, 'url' => $m['source_url'], 'label' => $buyPlatform]
+            : ['platform' => $source, 'url' => $m['source_url']];
         $stmt = $pdo->prepare(
             "UPDATE books SET
                original_title = COALESCE(original_title, :ot), author = COALESCE(author, :au),
@@ -404,21 +426,20 @@ while (($line = fgets($fh)) !== false) {
         $st->execute([':e' => $editionId, ':t' => $t, ':v' => $v]);
     }
 
-    // 6. 價格(各站幣別)
+    // 6. 價格(各站幣別;電子書記 ebook)
     if ($m['price'] !== null && is_numeric($m['price'])) {
         $st = $pdo->prepare(
             "INSERT INTO formats_prices (edition_id, media_type, price, currency)
-             VALUES (:e, 'print', :p, :c)");
-        $st->execute([':e' => $editionId, ':p' => $m['price'], ':c' => $m['currency']]);
+             VALUES (:e, :mt, :p, :c)");
+        $st->execute([':e' => $editionId, ':mt' => $isEbook ? 'ebook' : 'print',
+                      ':p' => $m['price'], ':c' => $m['currency']]);
     }
 
-    // 7. 購書連結(版本層)
+    // 7. 購書連結(版本層;天恩電子書標示「天恩出版社(電子書)」)
     $st = $pdo->prepare(
         "INSERT INTO links (edition_id, link_type, platform, url)
          VALUES (:e, 'buy', :pf, :u)");
-    $st->execute([':e' => $editionId,
-                  ':pf' => ['campus' => '校園書房', 'logos' => '基道 BookFinder', 'elim' => '以琳書房'][$source],
-                  ':u' => $m['source_url']]);
+    $st->execute([':e' => $editionId, ':pf' => $buyPlatform, ':u' => $m['source_url']]);
 
     // 8. 封面(先記來源網址;R2 轉存腳本後續更新 url_or_path 與 books.cover_url)
     if ($m['cover_url']) {
@@ -428,7 +449,7 @@ while (($line = fgets($fh)) !== false) {
         $st->execute([':e' => $editionId, ':u' => $m['cover_url'], ':s' => $m['cover_url']]);
     }
 
-    // 9. 來源分類(subjects scheme=campus/logos/elim;elim 一書多分類全數存證)
+    // 9. 來源分類(subjects scheme=campus/logos/elim/grace;elim/grace 一書多分類全數存證)
     foreach ($m['subjects'] as [$sCode, $sLabel]) {
         $key = "$source|$sCode|$sLabel";
         if (!isset($subjMap[$key])) {

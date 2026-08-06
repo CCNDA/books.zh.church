@@ -20,9 +20,11 @@ require __DIR__ . '/lib/response.php';
  * 購書平台顯示名與排序(新增來源時在此擴充即可;platform 代碼由匯入器寫入
  * links.platform / books.buy_links[].platform,未列入者以 platform 原值當顯示名)
  */
-const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder'];
+const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
+                             'elim' => '以琳書房', 'grace' => '天恩出版社'];
 // 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
-const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2];
+const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
+                             'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');
@@ -399,12 +401,15 @@ function get_book(int $id): never
     }
     $book['contributors'] = $contributors ?: null;
 
-    // 版本(含出版者、識別碼、格式/價格)
+    // 版本(含出版者、識別碼、格式/價格);出版者顯示正規社名(canonical),id 也回正規列
     $stmt = db()->prepare(
         'SELECT e.edition_id, e.edition_statement, e.publish_date, e.place_of_publication,
                 e.page_count, e.binding, e.dimensions, e.source, e.source_url,
-                e.publisher_id, pub.name_zh AS publisher_name
-         FROM editions e LEFT JOIN publishers pub ON pub.publisher_id = e.publisher_id
+                COALESCE(praw.canonical_id, praw.publisher_id) AS publisher_id,
+                pub.name_zh AS publisher_name
+         FROM editions e
+         LEFT JOIN publishers praw ON praw.publisher_id = e.publisher_id
+         LEFT JOIN publishers pub  ON pub.publisher_id  = COALESCE(praw.canonical_id, praw.publisher_id)
          WHERE e.book_id = :id ORDER BY e.publish_date DESC, e.edition_id ASC'
     );
     $stmt->execute([':id' => $id]);
