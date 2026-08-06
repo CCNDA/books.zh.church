@@ -127,11 +127,12 @@ def walk_products(force_lists: bool = False, max_pages: int = 0) -> dict[str, di
 
 # 「資訊」頁籤逐行標籤(8/6 偵察:英文書名/編號/發行/開數/ISBN/作者/譯者/
 # 類別/定價/頁數/初版;另備防出版社/裝訂/條碼變體)。行首錨定,標籤與值
-# 之間容許全半形空白與冒號(教訓:全形冒號寫 [:：],值比對用 [ \t　] 不用 \s
-# 以免空值吃到下一行;見 sandbox-mount-and-parsing-pitfalls)。
+# 之間**必須**有分隔(空白或冒號)——8/6 主機 probe 實測:選單「作者列表」、
+# 描述「作者簡介」會被無分隔比對誤抓成作者(教訓:全形冒號寫 [:：],
+# 值比對用 [ \t　] 不用 \s 以免空值吃到下一行;見 sandbox-mount-and-parsing-pitfalls)。
 PAGE_LABELS: list[tuple[str, str]] = [
     ("title_en",        r"英\s*文\s*書\s*名"),
-    ("item_no",         r"編\s*號|貨\s*號"),
+    ("item_no_page",    r"編\s*號|貨\s*號"),
     ("publisher_raw",   r"發\s*行|出\s*版\s*社"),
     ("dimensions",      r"開\s*數|尺\s*寸"),
     ("isbn",            r"ISBN|國際書號"),
@@ -142,29 +143,35 @@ PAGE_LABELS: list[tuple[str, str]] = [
     ("price_page",      r"定\s*價"),
     ("page_count",      r"頁\s*數"),
     ("publish_date",    r"初\s*版|出\s*版\s*日\s*期"),
-    ("binding",         r"裝\s*訂"),
+    ("binding",         r"裝\s*訂(?:方\s*式)?"),
 ]
 
 EBOOK_NAME = re.compile(r"\s*[((【\[]\s*電子書\s*[))】\]]\s*$")
 
 
-def info_lines(soup: BeautifulSoup) -> list[str]:
-    """取欄位比對用的文字行:先鎖 WooCommerce 頁籤面板(排除商品描述頁籤,
-    描述文案可能含「作者:」字樣),找不到面板才退回整頁(仍先摘除描述)。"""
-    panels = [p for p in soup.select(".woocommerce-Tabs-panel")
-              if "description" not in (p.get("id") or "")]
-    scope = panels or [soup]
-    if not panels:
-        for sel in ("#tab-description", ".woocommerce-product-details__short-description"):
-            for el in soup.select(sel):
-                el.extract()
-    lines: list[str] = []
-    for node in scope:
-        for raw in node.get_text("\n").splitlines():
-            line = raw.strip()
-            if line:
-                lines.append(line)
-    return lines
+def _lines(node) -> list[str]:
+    out: list[str] = []
+    for raw in node.get_text("\n").splitlines():
+        line = raw.strip()
+        if line:
+            out.append(line)
+    return out
+
+
+def info_line_sets(soup: BeautifulSoup) -> list[list[str]]:
+    """回傳候選文字行集(每個頁籤面板一組)。8/6 主機 probe 實測:描述頁籤
+    id 不一定含 description,且「資訊」面板可能排在描述之後 → 不靠 id 排除,
+    改成逐面板各自比對、由 parse_best() 取欄位命中最多者。
+    無任何面板(如試讀冊頁)才退回整頁,並先摘除頁首選單/頁尾(選單有
+    「作者列表」等字樣會污染比對)。"""
+    panels = soup.select(".woocommerce-Tabs-panel")
+    if panels:
+        return [_lines(p) for p in panels]
+    for sel in ("header", "nav", "footer", ".site-header", ".site-footer",
+                "#tab-description", ".woocommerce-product-details__short-description"):
+        for el in soup.select(sel):
+            el.extract()
+    return [_lines(soup)]
 
 
 def parse_fields(lines: list[str]) -> dict:
@@ -173,12 +180,23 @@ def parse_fields(lines: list[str]) -> dict:
         for key, label in PAGE_LABELS:
             if key in out:
                 continue
-            m = re.match(rf"(?:{label})[ \t　]*[:：∶]?[ \t　]*(.+)$", line, re.IGNORECASE)
+            m = re.match(rf"(?:{label})[ \t　:：∶]+(.+)$", line, re.IGNORECASE)
             if m:
                 val = m.group(1).strip(" \t　:：∶")
                 if val and val not in ("無", "-", "—"):
                     out[key] = val
     return out
+
+
+def parse_best(line_sets: list[list[str]]) -> dict:
+    """逐候選面板比對,取欄位命中最多的一組(避免描述面板的零星誤中蓋過
+    真正的「資訊」面板)。"""
+    best: dict = {}
+    for lines in line_sets:
+        f = parse_fields(lines)
+        if len(f) > len(best):
+            best = f
+    return best
 
 
 def _num(s: str | None) -> str | None:
@@ -219,7 +237,7 @@ def parse_product(prod: dict, retried: bool = False) -> dict | None:
 
     rec: dict = {
         "pid": pid,
-        "item_no": sku or pid,   # → identifiers(STORE);商品頁「編號」再覆寫
+        "item_no": sku or pid,   # → identifiers(STORE);sku 缺漏才用頁面編號
         "source": "grace",
         "source_url": url,
         "title": title,
@@ -258,13 +276,17 @@ def parse_product(prod: dict, retried: bool = False) -> dict | None:
         print(f"  [跳過 {pid},下次重跑補抓] {e}", flush=True)
         return None
     soup = BeautifulSoup(html, "lxml")
-    fields = parse_fields(info_lines(soup))
+    fields = parse_best(info_line_sets(soup))
     if not fields and not retried:   # 可能快取到空殼頁 → force 重抓一次
         return parse_product(prod, retried=True)
     for k, v in fields.items():
         rec[k] = v
 
     # 欄位整理
+    # 編號:以 sku 為準(電子書 sku 是 eb 碼,商品頁「編號」顯示的是紙本碼,
+    # 不可覆蓋);sku 缺漏時才用頁面編號。頁面值另存 item_no_page 進 extra。
+    if not sku and rec.get("item_no_page"):
+        rec["item_no"] = rec["item_no_page"]
     if rec.get("item_no"):
         rec["item_no"] = rec["item_no"].strip()
     rec["publisher"] = rec.get("publisher_raw") or "天恩出版社"
@@ -326,9 +348,12 @@ def probe():
         except RuntimeError as e:
             print(f"商品頁抓取失敗:{e}", flush=True)
             continue
-        lines = info_lines(BeautifulSoup(html, "lxml"))
-        print("[資訊頁籤原始行,前 25 行]", flush=True)
-        for ln in lines[:25]:
+        line_sets = info_line_sets(BeautifulSoup(html, "lxml"))
+        best = parse_best(line_sets)
+        # 顯示「欄位命中最多」那組面板的原始行(即被採用的資訊面板)
+        show = max(line_sets, key=lambda ls: len(parse_fields(ls))) if line_sets else []
+        print(f"[候選面板 {len(line_sets)} 組;採用面板原始行前 25 行;欄位命中 {len(best)}]", flush=True)
+        for ln in show[:25]:
             print("  |", ln[:80], flush=True)
         rec = parse_product(prod)
         print(json.dumps(rec, ensure_ascii=False, indent=1)[:1800], flush=True)
