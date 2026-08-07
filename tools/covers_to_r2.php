@@ -24,7 +24,7 @@ require dirname(__DIR__) . '/api/lib/db.php';
 
 $opt   = getopt('', ['limit::', 'dry-run', 'source::']);
 $limit = (int) ($opt['limit'] ?? 0);
-$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim)
+$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace)
 $dry   = array_key_exists('dry-run', $opt);
 
 $r2 = app_config()['r2'] ?? null;
@@ -160,8 +160,8 @@ function fetch_image(string $url, ?string &$why = null): ?array
 $pdo = db();
 $srcCond = '';
 if ($srcFilter !== '') {
-    if (!in_array($srcFilter, ['campus', 'logos', 'elim'], true)) {
-        exit("--source 只接受 campus|logos|elim\n");
+    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace'], true)) {
+        exit("--source 只接受 campus|logos|elim|grace\n");
     }
     $srcCond = " AND e.source = " . $pdo->quote($srcFilter);
 }
