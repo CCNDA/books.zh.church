@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """每日新品增量檢查(伺服器 cron 用):校園 IsNewBook.aspx + 基道年度新品(日期倒序)
 + 以琳分類列表增量(2026-08-03 新增,最新在前、無新品即停)
-+ 天恩出版社 Store API 日期倒序增量(2026-08-06 新增)。
++ 天恩出版社 Store API 日期倒序增量(2026-08-06 新增)
++ 微讀書城 所有書籍列表增量(2026-08-09 新增,SSR 上架新→舊、無新品即停)
++ 衛理書房 導覽全分類日期倒序增量(2026-08-17 新增,無新品即停)。
 
 設計:重用既有 campus_crawler / logos_crawler 的解析邏輯,只新增
  (1)「新品列表」入口(校園全館新書、基道年份檢索日期倒序);
@@ -14,6 +16,8 @@
   python3 new_arrivals.py --source campus
   python3 new_arrivals.py --source logos --year 2021
   python3 new_arrivals.py --source grace
+  python3 new_arrivals.py --source wdbook
+  python3 new_arrivals.py --source methodist
   python3 new_arrivals.py --source campus --dry-run          # 只列出新品、不寫任何檔
   python3 new_arrivals.py --source logos --out data/new/x.jsonl
   python3 new_arrivals.py --source campus --max-pages 3       # 保險上限(0=自動)
@@ -36,6 +40,8 @@ import campus_crawler as campus
 import elim_crawler as elim
 import graceph_crawler as grace
 import logos_crawler as logos
+import methodist_crawler as methodist
+import wdbook_crawler as wdbook
 
 HERE = Path(__file__).parent
 DATA = HERE / "data"
@@ -215,6 +221,71 @@ def collect_grace(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
                       writer, dry_run)
 
 
+# ── 微讀書城 所有書籍列表增量(SSR 上架新→舊,無新品即停)────
+
+def collect_wdbook(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """微讀:/store/category/0(所有書籍)伺服器直出、預設上架由新到舊,
+    本頁完全沒有新品即停。不用「近期上架」頁(/recommended/recent)是因為
+    它靠 JS widget API 載入(非公開介面、格式變動風險高),而其內容與
+    category/0 前段完全一致(8/9 Chrome 實測)。
+    清單頁一律 force 重抓(快取會讀到昨天的第 1 頁而永遠看不到新品);
+    商品頁沿用快取(新品必然未快取)。"""
+    new_ids: list[str] = []
+    seen_this_run: set[str] = set()
+    page = 1
+    while True:
+        try:
+            html = wdbook.fetch(wdbook.list_url(page), force=True)
+        except RuntimeError as e:
+            if page == 1:
+                print(f"微讀清單第 1 頁抓取失敗:{e}", flush=True)
+                return None  # 供 main 判別失敗(結束碼 2)
+            print(f"  第 {page} 頁抓取失敗:{e}", flush=True)
+            break
+        got = wdbook.extract_ids(html)
+        if not got:        # 空頁 = 走完
+            break
+        page_new = [p for p in got if p not in writer.seen and p not in seen_this_run]
+        seen_this_run.update(got)
+        new_ids.extend(page_new)
+        print(f"  第 {page} 頁:{len(got)} 件,新品 {len(page_new)}", flush=True)
+        if not page_new:   # 最新在前,本頁全是既有書 → 之後更舊,停
+            break
+        if max_pages and page >= max_pages:
+            break
+        page += 1
+    print(f"微讀:共 {len(new_ids)} 個新品", flush=True)
+
+    return _parse_new(new_ids, wdbook.parse_product, writer, dry_run)
+
+
+# ── 衛理書房 導覽全分類增量(各分類依上架日倒序,無新品即停)────
+
+def collect_methodist(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """衛理:導覽選單全分類(含「新品上架」各月份子分類)逐一以
+    ?sort=p.date_added&order=DESC 依上架日倒序走訪,本頁無新品即停
+    (通常每分類只需第 1 頁,約 180 次請求)。不只走「新品上架」分類,
+    是因為站方可能只把商品掛主題分類;走全分類同時蒐集完整分類歸屬
+    (雙軌分類直接可用)。清單頁一律 force 重抓;商品頁沿用快取
+    (新品必然未快取)。max_pages 由各分類「無新品即停」自然節制,不另設限。"""
+    try:
+        cats = methodist.parse_nav(force=True)
+    except RuntimeError as e:
+        print(f"衛理首頁(導覽選單)抓取失敗:{e}", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    if not cats:
+        print("衛理導覽選單解析不到分類(版型可能改版)", flush=True)
+        return None
+    members = methodist.collect_memberships(cats, by_date=True, stop_on_seen=writer.seen)
+    print(f"衛理:共 {len(members)} 個新品", flush=True)
+
+    def parse(key: str):
+        d = members[key]
+        return methodist.parse_product(d["pid"], d["cats"], href=d["href"])
+
+    return _parse_new(list(members), parse, writer, dry_run)
+
+
 # ── 共用:逐筆解析新品 ──────────────────────────────────────
 
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
@@ -240,7 +311,7 @@ def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dic
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace"])
+    ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -264,6 +335,18 @@ def main():
     elif args.source == "grace":
         writer = _writer("grace_books.jsonl", "pid")
         fresh = collect_grace(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "wdbook":
+        writer = _writer("wdbook_books.jsonl", "pid")
+        fresh = collect_wdbook(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "methodist":
+        writer = _writer("methodist_books.jsonl", "pid")
+        fresh = collect_methodist(writer, args.max_pages, args.dry_run)
         if fresh is None:
             writer.close()
             sys.exit(2)

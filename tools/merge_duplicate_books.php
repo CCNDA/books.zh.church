@@ -40,10 +40,11 @@ $dry   = array_key_exists('dry-run', $opt);
 $full  = array_key_exists('full', $opt);
 $limit = (int) ($opt['limit'] ?? 0);
 
-/** 正規化:去空白轉小寫 */
+/** 正規化:去空白+標點符號、轉小寫(2026-08-03 修:「某確類：…」與「某確類--…」
+ *  等標點變體視為同名;誤合風險由「作者相同+多 ISBN 不合併」規則守住) */
 function norm(?string $s): string
 {
-    return mb_strtolower(preg_replace('/\s+/u', '', (string) $s), 'UTF-8');
+    return mb_strtolower(preg_replace('/[\s\p{P}\p{S}]+/u', '', (string) $s), 'UTF-8');
 }
 
 /** 第一作者(與 import.php split_names 分隔符一致,另含 elim 的「/」) */

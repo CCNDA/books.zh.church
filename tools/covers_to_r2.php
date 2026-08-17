@@ -24,7 +24,7 @@ require dirname(__DIR__) . '/api/lib/db.php';
 
 $opt   = getopt('', ['limit::', 'dry-run', 'source::']);
 $limit = (int) ($opt['limit'] ?? 0);
-$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace)
+$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace|wdbook)
 $dry   = array_key_exists('dry-run', $opt);
 
 $r2 = app_config()['r2'] ?? null;
@@ -105,6 +105,11 @@ function url_candidates(string $url): array
             $url,                                    // 原網址(保底)
         ];
     }
+    // 衛理書房(methodistbookroom):og:image 偶為 /image/cache/...-420x420.jpg
+    // 縮圖網址;優先試改寫回原圖路徑(爬蟲已改寫,此處保底處理歷史資料)
+    if (preg_match('#^(https?://methodistbookroom\.com)/image/cache/(.+)-\d+x\d+(\.[a-z]+)$#i', $url, $m)) {
+        return [$m[1] . '/image/' . $m[2] . $m[3], $url];
+    }
     return [$url];
 }
 
@@ -160,8 +165,8 @@ function fetch_image(string $url, ?string &$why = null): ?array
 $pdo = db();
 $srcCond = '';
 if ($srcFilter !== '') {
-    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace'], true)) {
-        exit("--source 只接受 campus|logos|elim|grace\n");
+    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist'], true)) {
+        exit("--source 只接受 campus|logos|elim|grace|wdbook|methodist\n");
     }
     $srcCond = " AND e.source = " . $pdo->quote($srcFilter);
 }

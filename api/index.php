@@ -21,10 +21,13 @@ require __DIR__ . '/lib/response.php';
  * links.platform / books.buy_links[].platform,未列入者以 platform 原值當顯示名)
  */
 const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
-                             'elim' => '以琳書房', 'grace' => '天恩出版社'];
+                             'elim' => '以琳書房', 'grace' => '天恩出版社',
+                             'wdbook' => '微讀書城', 'methodist' => '衛理書房'];
 // 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
 const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
-                             'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5];
+                             'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5,
+                             'wdbook' => 6, '微讀書城' => 6, '微讀書城(簡體)' => 6,
+                             'methodist' => 7, '衛理書房' => 7, '衛理書房(簡體)' => 7];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');

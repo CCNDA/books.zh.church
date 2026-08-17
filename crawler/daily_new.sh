@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓四站新品(校園/基道/以琳/天恩)→ 產生當日 delta jsonl
-#      → tools/import.php 匯入(以 source_url 去重)→ 以琳/天恩套對映分類 → 其餘分類回填。
+# 流程:new_arrivals.py 抓六站新品(校園/基道/以琳/天恩/微讀/衛理)→ 產生當日 delta jsonl
+#      → tools/import.php 匯入(以 source_url 去重)→ 以琳/天恩/微讀/衛理套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
 
@@ -54,6 +54,10 @@ run_source logos --year 2021
 run_source elim
 # 天恩:Store API 日期倒序增量(無新品即停);紀錄自帶完整分類清單
 run_source grace
+# 微讀書城:所有書籍列表增量(SSR 上架新→舊,無新品即停);全站電子書
+run_source wdbook
+# 衛理書房:導覽全分類日期倒序增量(無新品即停);紀錄自帶完整分類歸屬
+run_source methodist
 
 # ── 對映分類套用:scheme 存證 → *_category_map 對映站內分類 ──
 # 冪等可重跑;需在 classify 之前跑,新書由對映表歸類(而非關鍵字猜測),
@@ -73,6 +77,8 @@ apply_map() {
 }
 apply_map "以琳" "$ROOT/tools/apply_elim_categories.php"
 apply_map "天恩" "$ROOT/tools/apply_grace_categories.php"
+apply_map "微讀" "$ROOT/tools/apply_wdbook_categories.php"
+apply_map "衛理" "$ROOT/tools/apply_methodist_categories.php"
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),

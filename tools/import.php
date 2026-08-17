@@ -18,6 +18,8 @@ declare(strict_types=1);
  *   php tools/import.php --file=crawler/data/campus_books.jsonl --source=campus
  *   php tools/import.php --file=crawler/data/elim_books.jsonl   --source=elim
  *   php tools/import.php --file=crawler/data/grace_books.jsonl  --source=grace
+ *   php tools/import.php --file=crawler/data/wdbook_books.jsonl --source=wdbook
+ *   php tools/import.php --file=crawler/data/methodist_books.jsonl --source=methodist
  *
  * elim(以琳書房,2026-07-31):紀錄含 categories 完整清單(一書多分類,
  * 路徑碼+名稱路徑),全部寫 subjects(scheme='elim')原樣存證;站內瀏覽分類
@@ -28,6 +30,13 @@ declare(strict_types=1);
  * 電子書(紀錄 is_ebook=true,8/6 決議):照書上架、與紙本同書合併——
  * 同名同作者即使 ISBN 不同(電子書各有 eISBN)也視為同一作品的另一版本;
  * 價格 media_type='ebook',購書連結標示「天恩出版社(電子書)」與紙本並列。
+ *
+ * wdbook(微讀書城,2026-08-09):WeDevote 純電子書店(USD)。全站皆
+ * 電子書(is_ebook=true),與紙本同書合併沿 8/6 天恩電子書規則;簡體書
+ * 欄位已由爬蟲以 OpenCC 轉繁體入庫(原始簡體存 extra.hans),購書連結
+ * 標「微讀書城」(簡體書標「微讀書城(簡體)」)。雙軌分類
+ * subjects(scheme='wdbook', code=微讀分類 id)存證 →
+ * tools/apply_wdbook_categories.php 依 wdbook_category_map 對映。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -41,8 +50,8 @@ $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace [--limit=N] [--dry-run]\n");
+if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist'], true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -254,11 +263,15 @@ while (($line = fgets($fh)) !== false) {
     if ($m['skip'] || !$m['source_url']) { $stats['skip_bad']++; continue; }
     if (isset($doneUrls[$m['source_url']])) { $stats['skip_done']++; continue; }
 
-    // 天恩電子書(8/6 決議):價格記 ebook、購書連結標示電子書、放寬同名合併
-    $isEbook     = $source === 'grace' && !empty($raw['is_ebook']);
+    // 電子書(8/6 天恩決議;8/9 微讀沿用):價格記 ebook、放寬同名合併。
+    // 購書連結:天恩電子書標「(電子書)」;微讀全站皆電子書故不加尾綴,
+    // 惟簡體書標「(簡體)」,與繁體版本並列時可辨。
+    $isEbook     = in_array($source, ['grace', 'wdbook'], true) && !empty($raw['is_ebook']);
     $buyPlatform = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
-                    'elim' => '以琳書房', 'grace' => '天恩出版社'][$source]
-                 . ($isEbook ? '(電子書)' : '');
+                    'elim' => '以琳書房', 'grace' => '天恩出版社',
+                    'wdbook' => '微讀書城', 'methodist' => '衛理書房'][$source]
+                 . ($source === 'grace' && $isEbook ? '(電子書)'
+                    : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
 
     // 1. 找/建 book(Work)
     $bookId = null;
@@ -449,7 +462,7 @@ while (($line = fgets($fh)) !== false) {
         $st->execute([':e' => $editionId, ':u' => $m['cover_url'], ':s' => $m['cover_url']]);
     }
 
-    // 9. 來源分類(subjects scheme=campus/logos/elim/grace;elim/grace 一書多分類全數存證)
+    // 9. 來源分類(subjects scheme=campus/logos/elim/grace/wdbook;elim/grace/wdbook 一書多分類全數存證)
     foreach ($m['subjects'] as [$sCode, $sLabel]) {
         $key = "$source|$sCode|$sLabel";
         if (!isset($subjMap[$key])) {

@@ -164,7 +164,7 @@ foreach ($byBook as $bid => $d) {
     }
     if ($replace) $updBook->execute([':cid' => $cats[$primary], ':bid' => $bid]);
 
-    if (++$done % 500 === 0) { $pdo->commit(); $pdo->beginTransaction(); echo "  已處理 $done…\n"; }
+    if (++$done % 500 === 0) { $pdo->commit(); $pdo->beginTransaction(); echo "  已處理 {$done}…\n"; }
 }
 if (!$dry && $pdo->inTransaction()) $pdo->commit();
 

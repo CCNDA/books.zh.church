@@ -1,4 +1,4 @@
-# 書目爬蟲(校園書房 + 基道 + 以琳書房 + 天恩出版社)
+# 書目爬蟲(校園書房 + 基道 + 以琳書房 + 天恩出版社 + 微讀書城 + 衛理書房)
 
 單執行緒禮貌抓取。輸出 JSONL 原始資料,匯入正規化表由後續 importer 處理(拆分可無損還原,多值一律原樣保留)。校園/基道在熊哥本機(Windows)執行;以琳(2026-07-31 新增)、天恩(2026-08-06 新增)於主機執行。
 
@@ -87,6 +87,7 @@ python -X utf8 logos_crawler.py
 | `data/logos_books.jsonl` | 每行一本,key=code |
 | `data/elim_books.jsonl` | 每行一本,key=gid |
 | `data/grace_books.jsonl` | 每行一本,key=pid |
+| `data/wdbook_books.jsonl` | 每行一本,key=pid(微讀書城,全站電子書) |
 | `data/*_state.json` | 已完成的分類/年份(續跑用) |
 | `cache/` | 已抓頁面 gzip 快取(重新解析不需重抓) |
 
@@ -94,6 +95,33 @@ python -X utf8 logos_crawler.py
 
 ## 合規
 
-- UA 註明 CCNDA、聯絡信箱與用途;robots.txt 已核(校園允許商品/分類頁;基道無限制;天恩僅擋 wp-admin/cart/checkout/my-account)
+- UA 註明 CCNDA、聯絡信箱與用途;robots.txt 已核(校園允許商品/分類頁;基道無限制;天恩僅擋 wp-admin/cart/checkout/my-account;微讀僅擋 /mine/)
 - 429/503 自動退避;單執行緒 + 隨機延遲
 - 簡介與封面入庫時保留 source_url 標注出處
+
+
+## 衛理書房(methodist,8/17 新增)
+
+馬來西亞衛理公會書局(methodistbookroom.com),OpenCart 商城、全站 SSR、MYR 計價。
+書名/簡介多為簡體 → 沿微讀規則 s2tw 轉繁入庫、原文存 extra.hans。
+分類樹由導覽選單動態解析(不寫死);商品分類歸屬由「清單走訪」蒐集(一書多分類,同以琳)。
+Product SKU 多數即 ISBN13(97x 開頭才認定);Brand=出版社。
+
+主機執行流程(先 Navicat 跑 `database/migrations/2026-08-17_methodist_category_map.sql`,再 FTP 上傳程式):
+
+```bash
+cd crawler
+venv/bin/python methodist_crawler.py --probe     # 先探測,輸出貼回給 Claude 確認
+nohup venv/bin/python methodist_crawler.py > logs/methodist.log 2>&1 &   # 全量(可中斷續跑)
+# 完成後匯入 + 套分類(都先 dry-run 看統計):
+php tools/import.php --file=crawler/data/methodist_books.jsonl --source=methodist --dry-run
+php tools/import.php --file=crawler/data/methodist_books.jsonl --source=methodist
+php tools/apply_methodist_categories.php --dry-run
+php tools/apply_methodist_categories.php
+php tools/covers_to_r2.php --source=methodist
+```
+
+範圍(8/17 決議):全站抓入存證;非書(禮品/詩歌CD/桌遊等)與外文書(英文/馬來文/印尼文)
+由 methodist_category_map 下架(任一命中即下架)。
+每日新品:new_arrivals.py --source methodist(導覽全分類 ?sort=p.date_added&order=DESC
+日期倒序增量、無新品即停),已入 daily_new.sh。

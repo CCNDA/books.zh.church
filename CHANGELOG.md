@@ -11,6 +11,40 @@
 
 ---
 
+## [1.4.0] - 2026-08-17 —— 新增書目來源:衛理書房(methodistbookroom.com)
+
+### 新增
+- 衛理書房爬蟲 `crawler/methodist_crawler.py`:馬來西亞衛理公會書局,OpenCart 商城、全站 SSR、MYR 計價(本站第一個 MYR 來源)。分類樹由導覽選單動態解析(約 27 頂層 + 150 餘子分類,不寫死);商品分類歸屬由「清單走訪」蒐集(一書多分類,同以琳);商品頁以 route 正規網址抓取避免多網址重複快取;Product SKU 直接當 ISBN13(97x 開頭才認定,禮品為一般條碼不誤收);「详细资料」面板解析 作者/譯者/出版日期/頁數/尺寸/語言/裝訂/出版社原始分類;快取縮圖封面網址改寫回原圖
+- 簡體處理沿微讀規則(8/9 決議):主欄位 OpenCC s2tw 轉繁入庫、原文存 extra.hans;is_hans 以「語言」欄位為準(8/12 教訓)
+- 範圍(8/17 決議):全站抓入存證;非書(禮品/詩歌CD/桌遊/單張/會員費等)與外文書(英文/馬來文/印尼文,含外文聖經)由對映表下架(任一命中即下架,沿天恩規則)
+- 雙軌分類:subjects(scheme='methodist', code=SEO slug 末段截 20 字)存證 + `methodist_category_map`(153 列,internal_name 可 NULL=僅存證)+ `tools/apply_methodist_categories.php`
+- 每日新品:new_arrivals.py 新增 collect_methodist(導覽全分類 ?sort=p.date_added&order=DESC 日期倒序增量、無新品即停,8/17 實測排序參數有效);daily_new.sh 併入排程(六站)
+- 匯入:import.php 支援 --source=methodist,購書連結「衛理書房」(簡體書標「衛理書房(簡體)」);api/index.php 購書排序 methodist=7;covers_to_r2 --source 支援 methodist + 衛理縮圖網址改寫候選
+
+### 部署
+- Navicat 先跑 `database/migrations/2026-08-17_methodist_category_map.sql`(執行前先 `SELECT name FROM categories` 核對表頭註解所列 18 個分類名皆存在)
+- FTP 上傳:crawler/methodist_crawler.py、crawler/new_arrivals.py、crawler/daily_new.sh、tools/import.php、tools/apply_methodist_categories.php、tools/covers_to_r2.php、api/index.php、index.html、VERSION
+- 主機:`methodist_crawler.py --probe` 貼回確認 → 全量(nohup)→ import(先 --dry-run)→ apply_methodist_categories(先 --dry-run)→ covers_to_r2 --source=methodist;cron 隔日自動跟進
+
+---
+
+## [1.3.0] - 2026-08-09 —— 新增書目來源:微讀書城(wdbook.com)
+
+### 新增
+- 微讀書城爬蟲 `crawler/wdbook_crawler.py`:WeDevote 純電子書店(USD),SSR 清單(/store/category/0「所有書籍」,上架新→舊)+ 商品頁 .info-area 欄位;全站約 2,022 件(8/9 決議:含免費電子書與套裝書),快取續跑;全站商品頁無 ISBN
+- 簡體書處理(8/9 決議):書名/作者/譯者/出版社/簡介以 OpenCC s2t 轉繁體入主欄位(利跨站模糊合併與前台一致),原始簡體存 extra.hans;書名尾綴「(繁體版)/(簡體版)」去除後入檔(原名存 name_raw)
+- 雙軌分類:subjects(scheme='wdbook', code=微讀分類 id)存證 + `wdbook_category_map`(鍵=分類 id;站方分類名稱隨語系浮動不可靠)+ `tools/apply_wdbook_categories.php`
+- 每日新品:new_arrivals.py 新增 collect_wdbook(category/0 最新在前、無新品即停;「近期上架」頁為 JS widget 不採用,內容與 category/0 一致);daily_new.sh 併入排程
+- 匯入:import.php 支援 --source=wdbook,全站視為電子書、與紙本同書合併(沿 8/6 天恩規則);購書連結「微讀書城」(簡體書標「微讀書城(簡體)」);api/index.php 購書排序 wdbook=6;covers_to_r2 --source 支援 wdbook
+- crawler 依賴新增 opencc-python-reimplemented(簡繁轉換;未安裝時全量模式中止並提示)
+
+### 部署
+- Navicat 先跑 `database/migrations/2026-08-09_wdbook_category_map.sql`
+- FTP 上傳:crawler/wdbook_crawler.py、crawler/new_arrivals.py、crawler/daily_new.sh、crawler/requirements.txt、tools/import.php、tools/apply_wdbook_categories.php、tools/covers_to_r2.php、api/index.php、index.html、VERSION
+- 主機:venv `pip install "opencc-python-reimplemented>=0.1.7"` → `wdbook_crawler.py --probe` 貼回確認 → 全量 → import → apply_wdbook_categories → covers_to_r2 --source=wdbook
+
+---
+
 ## [1.2.1] - 2026-08-06 —— 天恩爬蟲解析修正(主機 probe 回饋)
 
 ### 修正

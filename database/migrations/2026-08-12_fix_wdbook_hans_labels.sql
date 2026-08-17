@@ -1,0 +1,15 @@
+-- ============================================================
+-- 【已作廢,請勿執行】微讀「(簡體)」標籤修正(2026-08-12)
+--
+-- 本檔原以 books.extra 的 wdbook.language 做 book 層修正,但
+-- books.extra['wdbook'] 只保留該來源最後一筆匯入紀錄——同作品
+-- 繁簡雙版本(兩個 wdbook editions 合併於一書,約 251 本)會互相
+-- 覆蓋,按 book 層判定必然錯標另一條連結(8/12 查數實證:
+-- 「簡體中文×微讀書城 27」等矛盾組)。
+--
+-- 改用逐連結(per-edition)修正工具,請執行:
+--   php tools/fix_wdbook_hans_labels.php --dry-run
+--   php tools/fix_wdbook_hans_labels.php
+-- (讀 crawler/data/wdbook_books.jsonl 逐筆語言,以 source_url 對應
+--  links 列與 books.buy_links entry;冪等,誤跑過本檔者亦會矯正回來。)
+-- ============================================================
