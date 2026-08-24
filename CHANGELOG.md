@@ -11,6 +11,115 @@
 
 ---
 
+## [1.8.0] - 2026-08-23 —— 新增書目來源:真哪噠買書(MEZU)網(www.mezu.com.tw)
+
+### 上線實績(8/23)
+- 走訪 10,027 件全數入檔(略過 0)→ 匯入版本 10,027(1 筆重複網址去重)→ 新書 4,859(上架 4,633、非書下架 226)、跨站合併 5,167(ISBN 命中 2,829 / 模糊 2,325 / 同檔 4)
+- apply 8,903 本:多分類 1,262、無主題分類 641 交 classify;classify 再處理 895 本(關鍵字 894、落入綜合其他 129=14.4%、非書下架 1)。**未分類歸零**
+- primary 分布:靈修 4,349 / 神學 1,441 / 門徒造就 539 / 見證 390 / 福音 377 / 青少年家庭 347 / 健康 317 / 聖經 256 / 兒童教材 183 / 詩本樂譜 60 / 社會 3
+- **ISBN 來源實績(驗證 8/23 兜底設計)**:handle 1,765 / 描述標籤 1,705 / 條碼欄 119 / 描述裸掃 75 = 3,664 本;三種兜底貢獻 1,959 本(佔 53%)。最大標籤組合 `[作者,譯者,出版社]` 1,937 件完全沒有 ISBN,全靠 handle 救回
+- 封面轉 R2 4,440 張
+- 8/23 決議:站方最大萬用類「生命造就」(3,978 件)對映**靈修**而非門徒造就(全歸門徒造就會讓該類暴增六成)
+
+### 新增
+- 真哪噠爬蟲 `crawler/mezu_crawler.py`:EasyStore 商城(TWD、繁體,浸信會特約書店兼營代編代印)。**站方無任何 JSON API**(`/products.json`、`?format=json` 皆回 HTML 首頁),改以 **`sitemap_products.xml`(34 分片 = 10,027 件)當權威全站清單**,119 個 collection 清單只負責蒐集分類歸屬(一書多分類)→ 站方改選單也不會漏抓(其「潮牌禮品」4 個子選單連結已 404)
+- 站台四陷阱(寫入爬蟲檔頭與 `crawler/README.md`):①**超出末頁回傳末頁內容且 HTTP 200**(各款聖經 5 頁 240 件,`page=99` 仍回第 5 頁那 40 件)→ 停止條件改為「不足 50 件或本頁與前頁 handle 集合相同」;②分頁列只是「當前頁 ±5」的視窗,看不出總頁數;③**404 頁面仍含 4 個推薦商品連結**→ 每個網址都要驗 HTTP 狀態;④商品描述是 **Froala 富文本自由文字**,同欄位多種寫法(「出版社:」vs「出 版 商」+`&nbsp;`)
+- 範圍決議(8/22):**全站 10,027 件抓入存證**,非書(喜樂影音/哪噠禮品/潮牌禮品/客製化月曆/月桌曆)由 `mezu_category_map` unpublish 下架(任一命中即下架,僅 mezu-only 書)
+- 欄位決議(8/22):**原文優先、解析留待後續**——描述原文整段存 `extra.desc_raw`、通用「標籤→值」採集存 `extra.spec_all`(供事後統計標籤分布再決定對映),只有白名單欄位(ISBN/EAN/出版社/作者/譯者/出版日期/頁數/尺寸/重量/系列/語文/裝訂)入平面欄
+- 分類決議(8/22):只有站方 **17 個主題分類**參與站內分類;出版社/總代理(約 70 個)與促銷彙整僅存證不歸類,出版社分類另作出版社欄位佐證(apply 工具只報表不寫入)
+- 雙軌分類:`mezu_category_map`(119 列,與站台分類 100% 對齊)+ `tools/apply_mezu_categories.php`
+- **ISBN 多來源兜底(8/23 probe 後補強)**:站方描述只有約 17% 有 ISBN 標籤,但 **handle 本身就是 ISBN 的有 1,937 件**(ISBN13 1,491、ISBN10 446;檢查碼實測 1,489/1,491 與 427/446 通過)→ 來源優先序「標籤 → 條碼欄(含「電腦條碼」)→ 描述裸掃 → handle」,後兩者**嚴驗檢查碼**、裸掃要求整段只有一個 ISBN(叢書列表會列別本書的 ISBN),寧缺勿錯;來源記於 `isbn_from` 供稽核。handle 像店內貨號者存 `item_no`(排除英文書名 slug),價格去小數尾零,`spec_all` 過濾目錄行與單字鍵,複合值(「頁數開本 尺寸:… 頁數:…」)再撈尺寸/頁數/重量
+- 每日新品:`new_arrivals.py --source mezu`(先走「新品上架/注目優惠」約 8 頁;有新品才補走 119 個分類取歸屬)+ `daily_new.sh` 十一站(含九套 apply)
+- `deploy/mezu-runbook.md`:上線步驟、FTP 上傳對照表、驗收 SQL、待覆核清單
+
+### 變更
+- `tools/import.php`:白名單加 mezu;購書連結標「真哪噠」
+- `api/index.php`:`BUY_PLATFORM_LABELS`/`ORDER` 加真哪噠(排序 12)
+- `tools/covers_to_r2.php`:`--source` 白名單加 mezu
+- **`database/migrations/2026-08-23_widen_source_url.sql`**:`editions.source_url` 500→1000、`links.url` 700→1000。真哪噠中文 handle percent-encoding 後每個中文字佔 9 字元,最長網址 540 字元(全站僅 1 筆超過 500)撞上 `1406 Data too long`,匯入中途中斷;兩欄皆無索引,加寬零風險。**教訓:新來源 probe 階段就要量欄位長度上限**
+- 版號規劃調整:M1-B 進階搜尋改用 **v1.9.0**(原規劃 v1.8.0)
+
+---
+
+## [1.7.0] - 2026-08-21 —— 新增書目來源:宇宙光全人關懷機構(bookstore.cosmiccare.org)
+
+### 新增
+- 宇宙光爬蟲 `crawler/cosmiccare_crawler.py`:自建 SSR 商城(ASP.NET MVC 系,TWD、繁體);清單 `/Product/List?Category=&Tag=&page=N`(每頁 16、末頁由 `>>` 宣告)、商品 `/Product/Detail/{商品代碼}`;書名取 `h2.product-title`(本站無 h1)、規格逐欄 `.detailsp`(掃全頁——尺寸/重量/頁數/裝訂在頁籤區之後)、內容頁籤以 `h3.tabcont-title` 取名(頁籤列 4 項但 pane 有 5 個,不可索引對位)、`og:image` 封面
+- 範圍決議(8/21):**全站抓入存證**(1,671 件:書籍約 1,419、繪本 50、雜誌 120、影音 23、禮品 59),非書(影音/禮品/雜誌訂閱/海外運費)由對映表下架;代銷他社書全收(同 ISBN 自動跨站合併)
+- 雜誌決議(8/21):《宇宙光雜誌》約 120 期收錄,新增站內分類**「期刊雜誌」**(categories code='T');該站 ISBN 欄放的是 ISSN 條碼(977…),爬蟲不會誤判為 ISBN13,不會與書籍誤合併
+- 分類決議(8/21):作者系列 Tag(林治平/黃小石/魏外揚/諾曼．萊特/張德健長老作品)與★福利書**不參與分類**,`internal_name=NULL` 僅存證,分類改由其他主題 Tag 決定
+- 雙軌分類:`cosmiccare_category_map`(51 列)+ `tools/apply_cosmiccare_categories.php`;對映表與爬蟲走訪清單 100% 對齊(零未對映)
+- 每日新品:`new_arrivals.py --source cosmiccare`(先走 6 個大類彙整約 107 頁;有新品才補走 45 個 Tag 取分類歸屬)+ `daily_new.sh` 十站(含八套 apply)
+- `tools/import.php` dry-run 新增**合併明細**:`ISBN 命中 / 模糊比對 / 同檔內重複` 三分,並列出最多 30 筆模糊配對供人眼核對;重用 import 自身比對邏輯,落實「合併率偏高先拆再匯」的慣例(宇宙光 77% 合併率:ISBN 1,158、模糊 118、同檔 6,零誤併)
+- `tools/notify_discord.py`:Discord 版本公告的 Python 版(只用標準函式庫,無 PHP 環境如 Windows 本機也能跑),與 PHP 版同一份 `release-notes/vX.Y.Z.md` 文案、同樣的切則與 allowed_mentions 規則;webhook 依序取自環境變數 `DISCORD_WEBHOOK_URL`、`--webhook-file`、`config/app.local.php`
+
+### 變更
+- `tools/import.php`:白名單加 cosmiccare;購書連結標「宇宙光」
+- `api/index.php`:`BUY_PLATFORM_LABELS`/`ORDER` 加宇宙光(排序 11)
+- `tools/covers_to_r2.php`:`--source` 白名單加 cosmiccare
+- 版號規劃調整:M1-B 進階搜尋改用 **v1.8.0**(原規劃 v1.7.0)
+
+### 已知陷阱(寫進爬蟲註解)
+- 清單頁側欄「熱門排行 TOP」與 Tag 頁頂端兩格「焦點」(`div.product.topsection`)都是商品連結且每頁重複 → 選擇器必須是 `div.product:not(.topsection)`
+- 書籍 Tag「真實故事」的站方 Tag 值**開頭有一個半形空格**,少一格會 0 件(0 件分類不會印 log)
+
+---
+
+## [1.6.0] - 2026-08-21 —— 新增書目來源:道聲(taosheng.com.tw)、橄欖華宣(cclm.com.tw)
+
+### 新增
+- 道聲爬蟲 `crawler/taosheng_crawler.py`:Cyberbiz 商城(與格子外面同平台,TWD、繁體),全站入口 `/collections/all`(1,637 件);規格表格式異於格子外面(裝訂/頁數/規格/出版社/ISBN/出版日期/商品語言),沿用「規格欄位命中 ≥2」內容特徵辨識(實測 16/20);tags 可辨非書
+- 橄欖華宣爬蟲 `crawler/cclm_crawler.py`:自建 SSR 商城(OpenCart 系,TWD、繁體);清單 `/{中文分類}?page=N`(每頁 15、id 遞減=新→舊,增量可整頁已見即停)、商品頁 `#additionalinformation` 規格(標籤與值被 inline 拆行 → 標籤字樣切割並切掉退貨條款)、`#description` 簡介、`.new-price`/`.old-price`、`og:image` 封面
+- 範圍決議(8/19):道聲**全站抓入**、非書(影音/月曆/刮刮卡/桌遊/禮品/福音機)由對映表下架,代銷他社書全收(同 ISBN 自動跨站合併);橄欖華宣沿以琳「只抓書籍+聖經」——書籍全枝 + 聖經全枝(實抓 2,261 件;偵察推估的 4,400 是以「最大分頁 × 每頁 15」估算,實際多數頁不滿 15 件),文創/客製印刷/節期不抓,聖經周邊抓入但下架
+- 雙軌分類:`taosheng_category_map`(67 列)+ `tools/apply_taosheng_categories.php`、`cclm_category_map`(100 列)+ `tools/apply_cclm_categories.php`;兩表皆與爬蟲走訪清單 100% 對齊(零未對映)
+- 每日新品:`new_arrivals.py --source taosheng|cclm` + `daily_new.sh` 九站(含兩套 apply)
+- 版本公告工具 `tools/notify_discord.php`:把 `release-notes/vX.Y.Z.md`(寫給一般使用者的更新說明,與 CHANGELOG 分工)發佈到 Discord webhook;超過 2000 字自動依段落切則、`allowed_mentions` 關閉避免誤 @everyone;webhook URL 放 `config/app.local.php` 的 `discord.webhook_url`(不進 git)
+
+### 修正
+- `cclm_crawler.py` 分頁走訪提前中斷(8/21):原「首次空頁/無新項即停」使「書籍」只走到第 3 頁,全站僅抓 1,595 件。cclm 分頁序列布滿長度不定的空洞頁(page 120/150 空,但 200/250/294 仍有商品),改以 `max_page_hint()` 取分頁列宣告的末頁為邊界、空洞頁略過續走,另加 `PAGE_MARGIN = 6` 滾動延伸 → 2,261 件(「全部書籍」42 → 2,169)
+- `cclm_crawler.py` 增量模式空洞頁誤判:`all(p in stop_on_seen for p in got)` 對空集合回 True,加 `got and` 保護
+- `cclm_crawler.py` + `cclm_category_map`:`聖經 > 註釋研讀` 網址由單段 `/注釋`(404)修正為兩段式 `/注釋/研讀`,對映表 code 同步 `注釋` → `研讀`
+
+### 變更
+- `tools/import.php`:白名單加 taosheng、cclm;購書連結標「道聲」「橄欖華宣」
+- `api/index.php`:BUY_PLATFORM 加 taosheng=9(道聲)、cclm=10(橄欖華宣)
+- `tools/covers_to_r2.php`:--source 白名單加 taosheng、cclm
+- 首頁 footer 版號 v1.6;about.html 收錄書房清單加入道聲、橄欖華宣(台灣區)
+
+### 部署
+1. Navicat 跑 `database/migrations/2026-08-19_taosheng_category_map.sql` 與 `2026-08-19_cclm_category_map.sql`
+2. FTP 上傳程式(見交付對照表)
+3. 依 `crawler/README.md` 兩段落執行 probe → 全量 → 匯入 → 套分類 → 封面轉 R2(橄欖華宣清單 759 頁約 30 分鐘,加商品頁全程約 2 小時)
+4. 對映表若已建過,`注釋` → `研讀` 改 code 用 `UPDATE cclm_category_map SET cclm_code='研讀' WHERE cclm_code='注釋';`
+
+### 上線實績
+- 道聲:抓 1,639 件 → 新書 698 + 跨站合併 941 → apply 1,609 本、非書下架 105、未對映 0 → 封面 595 張 0 失敗
+- 橄欖華宣:抓 2,261 件 → 新書 400 + 跨站合併 1,860(其中 1,816 靠 ISBN、約 44 靠模糊比對) → apply 2,252 本、非書下架 5、未對映 0 → 封面 401 張 0 失敗
+
+---
+
+## [1.5.0] - 2026-08-18 —— 新增書目來源:格子外面(osb.com.tw)
+
+### 新增
+- 格子外面爬蟲 `crawler/osb_crawler.py`:台灣「格子外面」書房(前程文化),Cyberbiz 商城、TWD、全站繁體(不需 OpenCC)。清單走 `search_products.json` 公開 JSON(每頁 100;`products.json` 分頁失效不可用)、商品走 `/products/{handle}.json`;規格表(原書號/ISBN/出版日期/頁數/尺寸/語言/裝訂/出版社分類)散落 other_descriptions 且區塊語意不固定 → 以「規格欄位命中 ≥2」內容特徵辨識,先逐行比對、不足再退標籤切割;中文 handle 請求時 quote、source_url 存 percent-encoded 正規網址;封面取 photo_urls[].original
+- 範圍(8/18 決議,沿以琳「只抓書籍+聖經」):全部書籍(osb,約 1,106 件)+ 聖經三分類(和合本/當代譯本/活頁筆記-聖經)+ ★新書到;文創禮品/前程教材/回頭書不抓,混入非書由對映表 unpublish(任一命中即下架,沿天恩規則)+ classify 關鍵字保底
+- 雙軌分類:subjects(scheme='osb', code=collection handle,中文 handle 直接入 code)存證 + `osb_category_map`(62 列,internal_name 可 NULL=僅存證)+ `tools/apply_osb_categories.php`(查表一律 array_key_exists,沿 8/17 教訓);分類歸屬由清單走訪蒐集(書籍類型 43 + 幸福門訓 18 + 前程彙整)
+- 每日新品:`new_arrivals.py --source osb`(每日重走全部分類清單約 85 請求,無排序假設,範圍內未見過的 handle 即新品)+ `daily_new.sh` 七站(含 apply_osb_categories 套用)
+
+### 變更
+- `tools/import.php`:來源白名單加 osb;購書連結標「格子外面」
+- `api/index.php`:BUY_PLATFORM_LABELS/ORDER 加 osb=8(格子外面)
+- `tools/covers_to_r2.php`:--source 白名單加 osb
+- `about.html`:「資料來源」新增目前收錄書房清單,依地區分組(台灣:校園/以琳/天恩/格子外面;香港:基道 BookFinder;馬來西亞:衛理書房;電子書:微讀書城),名稱含官網連結
+- 首頁 footer 版號 v1.5
+
+### 部署
+1. Navicat 跑 `database/migrations/2026-08-18_osb_category_map.sql`
+2. FTP 上傳程式(osb_crawler.py、new_arrivals.py、daily_new.sh、import.php、apply_osb_categories.php、covers_to_r2.php、api/index.php、index.html)
+3. 主機依 `crawler/README.md` 格子外面段落執行 probe → 全量 → 匯入 → 套分類 → 封面轉 R2
+
+---
+
 ## [1.4.0] - 2026-08-17 —— 新增書目來源:衛理書房(methodistbookroom.com)
 
 ### 新增

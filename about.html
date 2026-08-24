@@ -50,6 +50,14 @@ h2{font-size:1.12rem;letter-spacing:.08em;margin:34px 0 10px;
 p{margin:0 0 14px}
 .quote{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold-soft);
   border-radius:8px;padding:16px 22px;color:var(--ink-soft);font-size:.95rem;margin:20px 0}
+.sources{margin:14px 0 6px}
+.src-row{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;flex-wrap:wrap}
+.src-region{flex:0 0 auto;font-size:.85rem;letter-spacing:.1em;color:var(--ink-soft);
+  border-right:3px solid var(--gold-soft);padding-right:12px;min-width:4.2em}
+.src-links{display:flex;flex-wrap:wrap;gap:10px}
+.src-links a{display:inline-block;background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:5px 16px;font-size:.92rem;color:var(--gold)}
+.src-links a:hover{border-color:var(--gold);background:#eaf4f9}
 footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:860px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
   display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
@@ -75,6 +83,27 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 
   <h2 class="serif">資料來源</h2>
   <p>書目資料彙整自各基督教出版社與網路書房的公開資訊,並由同工與網友持續補充校對。若您發現資料有誤、或希望收錄某本書,歡迎與我們聯繫。</p>
+  <p>目前收錄的網路書房與出版社:</p>
+  <div class="sources">
+    <div class="src-row"><span class="src-region">台灣</span><span class="src-links">
+      <a href="https://shop.campus.org.tw" target="_blank" rel="noopener">校園書房</a>
+      <a href="https://www.elimbookstore.com.tw" target="_blank" rel="noopener">以琳書房</a>
+      <a href="https://graceph.com" target="_blank" rel="noopener">天恩出版社</a>
+      <a href="https://www.osb.com.tw" target="_blank" rel="noopener">格子外面</a>
+      <a href="https://www.taosheng.com.tw" target="_blank" rel="noopener">道聲出版社</a>
+      <a href="https://www.cclm.com.tw" target="_blank" rel="noopener">橄欖華宣</a>
+    </span></div>
+    <div class="src-row"><span class="src-region">香港</span><span class="src-links">
+      <a href="https://www.logos.com.hk/bf/" target="_blank" rel="noopener">基道 BookFinder</a>
+    </span></div>
+    <div class="src-row"><span class="src-region">馬來西亞</span><span class="src-links">
+      <a href="https://methodistbookroom.com" target="_blank" rel="noopener">衛理書房</a>
+    </span></div>
+    <div class="src-row"><span class="src-region">電子書</span><span class="src-links">
+      <a href="https://wdbook.com" target="_blank" rel="noopener">微讀書城</a>
+    </span></div>
+  </div>
+  <p style="font-size:.88rem;color:var(--ink-soft)">各書房書目每日自動更新;收錄範圍以華文屬靈書籍與聖經為主。</p>
 
   <h2 class="serif">關於我們</h2>
   <p>本服務由<a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a>建置與維護。協會長期投入網路福音事工,同時營運<a href="https://www.taiwanbible.com" target="_blank" rel="noopener">台灣聖經網</a>、<a href="https://church.oursweb.net" target="_blank" rel="noopener">華人教會機構名錄</a>等服務。</p>

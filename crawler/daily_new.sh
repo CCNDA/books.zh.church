@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓六站新品(校園/基道/以琳/天恩/微讀/衛理)→ 產生當日 delta jsonl
-#      → tools/import.php 匯入(以 source_url 去重)→ 以琳/天恩/微讀/衛理套對映分類 → 其餘分類回填。
+# 流程:new_arrivals.py 抓十一站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠)→ 產生當日 delta jsonl
+#      → tools/import.php 匯入(以 source_url 去重)→ 九站套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
 
@@ -58,6 +58,16 @@ run_source grace
 run_source wdbook
 # 衛理書房:導覽全分類日期倒序增量(無新品即停);紀錄自帶完整分類歸屬
 run_source methodist
+# 格子外面:全分類走訪增量(範圍=osb+聖經三分類+★新書到);紀錄自帶完整分類歸屬
+run_source osb
+# 道聲:Cyberbiz 全分類走訪增量(全站抓入,非書由對映表下架)
+run_source taosheng
+# 橄欖華宣:全分類增量(清單 id 遞減、整頁已見即停;範圍=書籍+聖經)
+run_source cclm
+# 宇宙光:六大類彙整清單增量(聯集=全站);有新品才補走 Tag 取分類歸屬
+run_source cosmiccare
+# 真哪噠:新品上架/注目優惠清單增量(全站抓入,非書由對映表下架);有新品才補走 119 分類取歸屬
+run_source mezu
 
 # ── 對映分類套用:scheme 存證 → *_category_map 對映站內分類 ──
 # 冪等可重跑;需在 classify 之前跑,新書由對映表歸類(而非關鍵字猜測),
@@ -79,6 +89,11 @@ apply_map "以琳" "$ROOT/tools/apply_elim_categories.php"
 apply_map "天恩" "$ROOT/tools/apply_grace_categories.php"
 apply_map "微讀" "$ROOT/tools/apply_wdbook_categories.php"
 apply_map "衛理" "$ROOT/tools/apply_methodist_categories.php"
+apply_map "格子外面" "$ROOT/tools/apply_osb_categories.php"
+apply_map "道聲" "$ROOT/tools/apply_taosheng_categories.php"
+apply_map "橄欖華宣" "$ROOT/tools/apply_cclm_categories.php"
+apply_map "宇宙光" "$ROOT/tools/apply_cosmiccare_categories.php"
+apply_map "真哪噠" "$ROOT/tools/apply_mezu_categories.php"
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),

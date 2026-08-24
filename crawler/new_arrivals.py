@@ -3,7 +3,12 @@
 + 以琳分類列表增量(2026-08-03 新增,最新在前、無新品即停)
 + 天恩出版社 Store API 日期倒序增量(2026-08-06 新增)
 + 微讀書城 所有書籍列表增量(2026-08-09 新增,SSR 上架新→舊、無新品即停)
-+ 衛理書房 導覽全分類日期倒序增量(2026-08-17 新增,無新品即停)。
++ 衛理書房 導覽全分類日期倒序增量(2026-08-17 新增,無新品即停)
++ 格子外面 全分類走訪增量(2026-08-18 新增,範圍=osb+聖經+★新書到)
++ 道聲 全分類走訪增量(2026-08-19 新增,Cyberbiz 全站)
++ 橄欖華宣 全分類增量(2026-08-19 新增,清單 id 遞減、整頁已見即停)
++ 宇宙光 大類彙整清單增量(2026-08-21 新增,五大類聯集=全站;有新品才補走 Tag)
++ 真哪噠 新品上架/注目優惠清單增量(2026-08-22 新增,有新品才補走 119 個分類取歸屬)。
 
 設計:重用既有 campus_crawler / logos_crawler 的解析邏輯,只新增
  (1)「新品列表」入口(校園全館新書、基道年份檢索日期倒序);
@@ -18,6 +23,11 @@
   python3 new_arrivals.py --source grace
   python3 new_arrivals.py --source wdbook
   python3 new_arrivals.py --source methodist
+  python3 new_arrivals.py --source osb
+  python3 new_arrivals.py --source taosheng
+  python3 new_arrivals.py --source cclm
+  python3 new_arrivals.py --source cosmiccare
+  python3 new_arrivals.py --source mezu
   python3 new_arrivals.py --source campus --dry-run          # 只列出新品、不寫任何檔
   python3 new_arrivals.py --source logos --out data/new/x.jsonl
   python3 new_arrivals.py --source campus --max-pages 3       # 保險上限(0=自動)
@@ -40,7 +50,12 @@ import campus_crawler as campus
 import elim_crawler as elim
 import graceph_crawler as grace
 import logos_crawler as logos
+import cclm_crawler as cclm
+import cosmiccare_crawler as cosmiccare
+import mezu_crawler as mezu
 import methodist_crawler as methodist
+import osb_crawler as osb
+import taosheng_crawler as taosheng
 import wdbook_crawler as wdbook
 
 HERE = Path(__file__).parent
@@ -286,6 +301,124 @@ def collect_methodist(writer, max_pages: int, dry_run: bool) -> list[dict] | Non
     return _parse_new(list(members), parse, writer, dry_run)
 
 
+
+# ── 格子外面 全分類走訪增量(scope 內未見過即新品)────────────
+
+def collect_osb(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """格子外面:Cyberbiz search_products.json 無可靠日期排序參數,但走訪
+    清單極便宜(每頁 100 件、全走訪約 85 請求)→ 每日直接重走全部分類
+    (osb 12 頁 + ★新書到 3 頁 + 各主題分類多為 1 頁),範圍內(osb/聖經
+    三分類/★新書到)未見過的 handle 即新品。不依賴排序假設,同時蒐集完整
+    分類歸屬(雙軌分類直接可用)。清單頁一律 force 重抓(快取會讀到昨天
+    的頁面而永遠看不到新品);商品 JSON 沿用快取(新品必然未快取)。"""
+    members = osb.collect_memberships(force_lists=True)
+    if not members:
+        print("格子外面清單走訪失敗(全分類皆無回應)", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    new = {h: d for h, d in members.items()
+           if d["scope"] and h not in writer.seen}
+    print(f"格子外面:走訪 {len(members)} 件,範圍內新品 {len(new)}", flush=True)
+
+    def parse(handle: str):
+        return osb.parse_product(handle, new[handle]["cats"])
+
+    return _parse_new(list(new), parse, writer, dry_run)
+
+
+
+# ── 道聲 全分類走訪增量(未見過即新品)────────────────────────
+
+def collect_taosheng(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """道聲:Cyberbiz 同 osb,無可靠日期排序參數 → 每日重走全部分類清單
+    (all 17 頁 + 各主題分類多為 1 頁,約 90 請求),未見過的 handle 即新品。
+    走全分類而非只走「新書上市」(該分類僅 7 件、站方人工維護會漏),
+    同時蒐集完整分類歸屬(雙軌分類直接可用)。清單頁一律 force 重抓;
+    商品 JSON 沿用快取(新品必然未快取)。"""
+    members = taosheng.collect_memberships(force_lists=True)
+    if not members:
+        print("道聲清單走訪失敗(全分類皆無回應)", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    new = {h: d for h, d in members.items() if h not in writer.seen}
+    print(f"道聲:走訪 {len(members)} 件,新品 {len(new)}", flush=True)
+
+    def parse(handle: str):
+        return taosheng.parse_product(handle, new[handle]["cats"])
+
+    return _parse_new(list(new), parse, writer, dry_run)
+
+
+# ── 橄欖華宣 全分類增量(清單 id 遞減,整頁已見即停)──────────
+
+def collect_cclm(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """橄欖華宣:清單頁為商品 id 遞減(新→舊)→ 逐分類翻頁、整頁皆已在庫
+    即停該分類(通常每分類只需第 1 頁,約 100 請求)。走全分類而非單一
+    「書籍」彙整,是為同時蒐集完整分類歸屬。清單頁一律 force 重抓;
+    商品頁沿用快取(新品必然未快取)。"""
+    members = cclm.collect_memberships(force_lists=True, stop_on_seen=writer.seen)
+    if not members:
+        print("橄欖華宣清單走訪失敗(全分類皆無回應)", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    new = {p: d for p, d in members.items() if p not in writer.seen}
+    print(f"橄欖華宣:走訪 {len(members)} 件,新品 {len(new)}", flush=True)
+
+    def parse(pid: str):
+        return cclm.parse_product(pid, new[pid]["cats"])
+
+    return _parse_new(list(new), parse, writer, dry_run)
+
+
+# ── 宇宙光 大類彙整增量(未見過即新品)────────────────────────
+
+def collect_cosmiccare(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """宇宙光:先只走六個大類彙整清單(約 107 頁)——實測五大類聯集
+    = /Product/List 全站 1,671 件,故便宜又完整;未見過的商品代碼即新品。
+    有新品時才再走全部 Tag 清單(約 150 頁)補齊分類歸屬,讓新書直接由
+    對映表歸類而非關鍵字猜測。清單頁一律 force 重抓(快取會讀到昨天的
+    頁面而永遠看不到新品);商品頁沿用快取(新品必然未快取)。"""
+    members = cosmiccare.collect_memberships(force_lists=True, only_promo=True)
+    if not members:
+        print("宇宙光清單走訪失敗(全分類皆無回應)", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    new = {p: d for p, d in members.items() if p not in writer.seen}
+    print(f"宇宙光:走訪 {len(members)} 件,新品 {len(new)}", flush=True)
+    if new:
+        full = cosmiccare.collect_memberships(force_lists=True)
+        for pid in new:
+            if pid in full:
+                new[pid] = full[pid]
+
+    def parse(pid: str):
+        return cosmiccare.parse_product(pid, new[pid]["cats"])
+
+    return _parse_new(list(new), parse, writer, dry_run)
+
+
+# ── 真哪噠 新品上架清單增量(未見過即新品)────────────────────
+
+def collect_mezu(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """真哪噠:先只走「新品上架/注目優惠」兩個清單(每頁 50 件,約 8 頁)——
+    站方新品都會掛在這裡,便宜又即時;未見過的 handle 即新品。
+    有新品時才再走全部 119 個分類清單(約 600 頁)補齊分類歸屬,讓新書直接由
+    對映表歸類而非關鍵字猜測。清單頁一律 force 重抓(快取會讀到昨天的頁面
+    而永遠看不到新品);商品頁沿用快取(新品必然未快取)。"""
+    members = mezu.collect_memberships(force_lists=True, only=mezu.NEW_ENTRY)
+    if not members:
+        print("真哪噠清單走訪失敗(新品清單無回應)", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    new = {h: cs for h, cs in members.items() if h not in writer.seen}
+    print(f"真哪噠:走訪 {len(members)} 件,新品 {len(new)}", flush=True)
+    if new:
+        full = mezu.collect_memberships(force_lists=True)
+        for h in new:
+            if h in full:
+                new[h] = full[h]
+
+    def parse(h: str):
+        return mezu.parse_product(h, new[h])
+
+    return _parse_new(list(new), parse, writer, dry_run)
+
+
 # ── 共用:逐筆解析新品 ──────────────────────────────────────
 
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
@@ -311,7 +444,8 @@ def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dic
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist"])
+    ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
+                             "taosheng", "cclm", "cosmiccare", "mezu"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -347,6 +481,33 @@ def main():
     elif args.source == "methodist":
         writer = _writer("methodist_books.jsonl", "pid")
         fresh = collect_methodist(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "osb":
+        writer = _writer("osb_books.jsonl", "pid")
+        fresh = collect_osb(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "taosheng":
+        writer = _writer("taosheng_books.jsonl", "pid")
+        fresh = collect_taosheng(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "cclm":
+        writer = _writer("cclm_books.jsonl", "pid")
+        fresh = collect_cclm(writer, args.max_pages, args.dry_run)
+    elif args.source == "cosmiccare":
+        writer = _writer("cosmiccare_books.jsonl", "pid")
+        fresh = collect_cosmiccare(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "mezu":
+        writer = _writer("mezu_books.jsonl", "pid")
+        fresh = collect_mezu(writer, args.max_pages, args.dry_run)
         if fresh is None:
             writer.close()
             sys.exit(2)

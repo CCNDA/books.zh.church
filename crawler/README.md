@@ -1,4 +1,4 @@
-# 書目爬蟲(校園書房 + 基道 + 以琳書房 + 天恩出版社 + 微讀書城 + 衛理書房)
+# 書目爬蟲(校園書房 + 基道 + 以琳書房 + 天恩出版社 + 微讀書城 + 衛理書房 + 格子外面 + 道聲 + 橄欖華宣 + 宇宙光 + 真哪噠)
 
 單執行緒禮貌抓取。輸出 JSONL 原始資料,匯入正規化表由後續 importer 處理(拆分可無損還原,多值一律原樣保留)。校園/基道在熊哥本機(Windows)執行;以琳(2026-07-31 新增)、天恩(2026-08-06 新增)於主機執行。
 
@@ -125,3 +125,174 @@ php tools/covers_to_r2.php --source=methodist
 由 methodist_category_map 下架(任一命中即下架)。
 每日新品:new_arrivals.py --source methodist(導覽全分類 ?sort=p.date_added&order=DESC
 日期倒序增量、無新品即停),已入 daily_new.sh。
+
+## 格子外面(osb,8/18 新增)
+
+Cyberbiz 站(osb.com.tw,前程文化/格子外面,TWD,全站繁體):清單走
+`/zh-TW/collections/{handle}/search_products.json?page=N&per=100`(穩定 JSON;
+注意 `products.json` 分頁參數無效不可用),商品走 `/products/{handle}.json`
+(title/vendor=出版社/slogan≈作者/body_html=簡介/other_descriptions 含規格表
+——區塊語意不固定,以「規格欄位命中 ≥2」內容特徵辨識)。handle 可為中文,
+請求時 quote、source_url 存 percent-encoded 正規網址。
+
+範圍(8/18 決議,沿以琳「只抓書籍+聖經」):`osb`(全部書籍,約 1,106 件)
++ 聖經三分類(和合本/當代譯本/活頁筆記-聖經)+ `★新書到`(每日增量入口)。
+文創禮品/前程教材/回頭書不抓;混入的非書由 `osb_category_map`(unpublish)
++ classify 關鍵字下架。分類歸屬由「清單走訪」蒐集(走訪 書籍類型 43 +
+幸福門訓 18 + 前程彙整,寫死清單;站方改選單需重新偵察),一書多分類全數
+存證 `subjects(scheme='osb', code=collection handle)`。
+
+主機執行流程(先 Navicat 跑 `database/migrations/2026-08-18_osb_category_map.sql`,再 FTP 上傳程式):
+
+```bash
+cd crawler
+venv/bin/python osb_crawler.py --probe           # 先探測,輸出貼回給 Claude 確認
+nohup venv/bin/python osb_crawler.py > logs/osb.log 2>&1 &          # 全量(可中斷續跑)
+# 完成後匯入 + 套分類(都先 dry-run 看統計):
+php tools/import.php --file=crawler/data/osb_books.jsonl --source=osb --dry-run
+php tools/import.php --file=crawler/data/osb_books.jsonl --source=osb
+php tools/apply_osb_categories.php --dry-run
+php tools/apply_osb_categories.php
+# 封面轉 R2:
+php tools/covers_to_r2.php --source=osb
+```
+
+每日新品:`new_arrivals.py --source osb` 每日重走全部分類清單(約 85 請求,
+無排序假設),範圍內未見過的 handle 即新品;已併入 `daily_new.sh`。
+
+## 道聲(taosheng,8/19 新增)
+
+Cyberbiz 站(taosheng.com.tw,**與格子外面同平台**),TWD、繁體:清單走
+`/zh-TW/collections/{handle}/search_products.json?page=N&per=100`(全站入口
+`all`,1,637 件),商品走 `/products/{handle}.json`。規格表格式**異於格子外面**
+(裝訂/頁數/規格/出版社/ISBN/出版日期/商品語言),同樣以「規格欄位命中 ≥2」
+內容特徵辨識(實測命中 16/20;月刊/月曆/文創本就無規格)。
+
+範圍(8/19 決議):**全站抓入存證**,非書(影音/月曆/刮刮卡/桌遊/禮品/福音機)
+由 `taosheng_category_map` unpublish 下架;**代銷他社書全收**(香港道聲 185、
+高示 97、格子外面 68、橄欖華宣 67…同 ISBN 自動跨站合併,多一個購書管道)。
+
+```bash
+cd crawler
+venv/bin/python taosheng_crawler.py --probe        # 先探測,輸出貼回確認
+nohup venv/bin/python taosheng_crawler.py > logs/taosheng.log 2>&1 &
+php tools/import.php --file=crawler/data/taosheng_books.jsonl --source=taosheng --dry-run
+php tools/import.php --file=crawler/data/taosheng_books.jsonl --source=taosheng
+php tools/apply_taosheng_categories.php --dry-run
+php tools/apply_taosheng_categories.php
+php tools/covers_to_r2.php --source=taosheng
+```
+
+每日新品:`new_arrivals.py --source taosheng`(重走全分類約 90 請求),已入 `daily_new.sh`。
+
+## 橄欖華宣(cclm,8/19 新增)
+
+自建 SSR 商城(cclm.com.tw,OpenCart 系),TWD、繁體:清單頁 `/{中文分類}` 或
+`/product-category/{id}` + `?page=N`(每頁 15;**排序為商品 id 遞減=新→舊**,
+增量可「整頁已見即停」),商品頁 `/product/{id}`——`h1` 書名、`#description`
+簡介、`#additionalinformation` 規格(商品貨號/出版社/作者/ISBN/頁數/尺寸/重量;
+標籤與值會被 inline 標籤拆行 → 以標籤字樣切割整段,並切掉其後的退貨條款)、
+`.new-price`/`.old-price` 價格、`og:image` 封面。
+
+範圍(8/19 決議,沿以琳「只抓書籍+聖經」):【書籍】全枝(294 頁約 4,400 件)
++【聖經】全枝(約 110 件);文創/客製印刷/節期禮品不抓,聖經周邊抓入但下架。
+全量約 4,500 件、節流 2-3 秒 → **預估 4-5 小時,建議過夜跑**。
+
+```bash
+cd crawler
+venv/bin/python cclm_crawler.py --probe            # 先探測,輸出貼回確認
+nohup venv/bin/python cclm_crawler.py > logs/cclm.log 2>&1 &
+php tools/import.php --file=crawler/data/cclm_books.jsonl --source=cclm --dry-run
+php tools/import.php --file=crawler/data/cclm_books.jsonl --source=cclm
+php tools/apply_cclm_categories.php --dry-run
+php tools/apply_cclm_categories.php
+php tools/covers_to_r2.php --source=cclm
+```
+
+每日新品:`new_arrivals.py --source cclm`(逐分類、整頁已見即停),已入 `daily_new.sh`。
+
+## 宇宙光全人關懷機構(cosmiccare,8/21 新增)
+
+自建 SSR 商城(bookstore.cosmiccare.org,ASP.NET MVC 系),TWD、繁體:清單頁
+`/Product/List?Category={大類}[&Tag={子類}][&page=N]`(每頁 16 件,分頁列末頁由
+`>>` 宣告),商品頁 `/Product/Detail/{商品代碼}`(代碼如 MA628、DS060-3)。
+商品頁**沒有 h1**——書名在 `h2.product-title`;規格是一欄一個 `.detailsp`
+(售價/優惠價/作者/出版社/ISBN/出版日期/尺寸/重量/頁數/裝訂),**其中尺寸/重量/
+頁數/裝訂在頁籤區之後**,要掃全頁;內容頁籤 `.tab-pane` 各自帶
+`h3.tabcont-title`(頁籤列只有 4 項但 pane 有 5 個,**不可用索引對位**),
+「商品介紹」入簡介、其餘存 `extra.tabs`;封面取 `og:image`。
+
+清單走訪兩個陷阱:側欄「熱門排行 TOP」是商品連結(整頁 regex 會混入)、Tag
+清單頁最上方兩格「焦點」是 `div.product.topsection` 且**每頁重複**——選擇器一律
+用 `div.product:not(.topsection)`。
+
+範圍(8/21 決議):**全站抓入存證**(實測 1,671 件:書籍約 1,419、繪本 50、
+雜誌 120、影音 23、禮品 59),非書(影音/禮品/雜誌訂閱/海外運費)由
+`cosmiccare_category_map` unpublish 下架;《宇宙光雜誌》約 120 期收錄(新分類
+「期刊雜誌」);作者系列 Tag 與★福利書不參與分類。
+**五個大類清單的聯集 = `/Product/List` 全站 1,671 件**(8/21 全站走訪驗證,
+無空洞頁、無重複)→ 走訪 6 個大類即保證完整,Tag 走訪只為取細分類。
+全量約 1,671 件、節流 2-3 秒 → 預估 1.5-2 小時。
+
+```bash
+cd crawler
+venv/bin/python cosmiccare_crawler.py --probe      # 先探測,輸出貼回確認
+nohup venv/bin/python cosmiccare_crawler.py > logs/cosmiccare.log 2>&1 &
+# 先跑 migration:database/migrations/2026-08-21_cosmiccare_category_map.sql(Navicat)
+php tools/import.php --file=crawler/data/cosmiccare_books.jsonl --source=cosmiccare --dry-run
+php tools/import.php --file=crawler/data/cosmiccare_books.jsonl --source=cosmiccare
+php tools/apply_cosmiccare_categories.php --dry-run
+php tools/apply_cosmiccare_categories.php
+php tools/covers_to_r2.php --source=cosmiccare
+```
+
+每日新品:`new_arrivals.py --source cosmiccare`(先走 6 個大類彙整約 107 頁;
+偵測到新品才補走 45 個 Tag 取分類歸屬),已入 `daily_new.sh`。
+
+## 真哪噠買書(MEZU)網(mezu,8/22 新增)
+
+EasyStore 商城(www.mezu.com.tw,浸信會特約書店、承襲恩膏書房,兼營代編代印),
+TWD、繁體(少數簡體品項)。**沒有任何 JSON API**(`/products.json`、
+`?format=json` 都回 HTML 首頁),只能解析 HTML。
+
+**商品清單走 sitemap**:`/sitemap_products.xml`(34 個分片 = 10,027 件)是權威
+全站清單;`/sitemap_collections.xml` = 119 個分類。分類頁只負責蒐集「分類歸屬」
+(一書多分類)。好處是不寫死導覽選單——站方「潮牌禮品」4 個子選單連結已 404。
+
+清單分頁 `?page=N` 固定每頁 50 件(**`limit` 參數無效**),四個陷阱:
+
+1. **超出末頁不會空、也不會 404,而是回傳末頁內容(HTTP 200)** —— 各款聖經共
+   5 頁 240 件,`page=6/7/20/99` 都回第 5 頁那 40 件。停止條件必須是
+   「不足 50 件」或「本頁 handle 集合與前一頁相同」。
+2. 分頁列只是「當前頁 ±5」的視窗,**看不出總頁數**(禱告靈修第 1 頁顯示到 6、
+   第 9 頁顯示到 14)→ 不可拿分頁列末頁當邊界。
+3. **404 頁面仍含 4 個推薦商品連結** → 每個網址都要驗 HTTP 狀態。
+4. 商品規格是 **Froala 富文本自由文字**,同欄位寫法不一(「出版社:」vs
+   「出 版 商」+`&nbsp;`;還有系列別/語文別/頁數開本/印刷裝訂/EAN/類別)。
+
+**欄位解析(8/22 決議):原文優先、解析留待後續**——描述原文整段存
+`extra.desc_raw`,通用「標籤→值」採集存 `extra.spec_all`(供事後統計標籤分布
+再決定對映),只有白名單欄位(ISBN/EAN/出版社/作者/譯者/出版日期/頁數/尺寸/
+重量/系列/語文/裝訂)入平面欄。價格取 `.product-single__price`(現價)與
+`.product-single__sale-price`(定價),封面取 `og:image`(cdn.store-assets.com)。
+
+範圍(8/22 決議):**全站 10,027 件抓入存證**,非書(喜樂影音/哪噠禮品/潮牌
+禮品/客製化月曆)由 `mezu_category_map` unpublish 下架;分類只採站方 17 個主題
+分類,出版社/總代理(約 70 個)與促銷彙整僅存證不歸類。
+全量約 10,027 件商品頁 + 約 600 頁清單、節流 1.5-2.5 秒 → **預估 5-7 小時**
+(可中斷續跑,快取在 `cache/mezu`)。
+
+```bash
+cd crawler
+venv/bin/python mezu_crawler.py --probe            # 先探測,輸出貼回確認
+nohup venv/bin/python mezu_crawler.py > logs/mezu.log 2>&1 &
+# 先跑 migration:database/migrations/2026-08-22_mezu_category_map.sql(Navicat)
+php tools/import.php --file=crawler/data/mezu_books.jsonl --source=mezu --dry-run
+php tools/import.php --file=crawler/data/mezu_books.jsonl --source=mezu
+php tools/apply_mezu_categories.php --dry-run
+php tools/apply_mezu_categories.php
+php tools/covers_to_r2.php --source=mezu
+```
+
+每日新品:`new_arrivals.py --source mezu`(先走「新品上架/注目優惠」約 8 頁;
+偵測到新品才補走 119 個分類取歸屬),已入 `daily_new.sh`。

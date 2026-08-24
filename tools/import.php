@@ -20,6 +20,11 @@ declare(strict_types=1);
  *   php tools/import.php --file=crawler/data/grace_books.jsonl  --source=grace
  *   php tools/import.php --file=crawler/data/wdbook_books.jsonl --source=wdbook
  *   php tools/import.php --file=crawler/data/methodist_books.jsonl --source=methodist
+ *   php tools/import.php --file=crawler/data/osb_books.jsonl    --source=osb
+ *   php tools/import.php --file=crawler/data/taosheng_books.jsonl --source=taosheng
+ *   php tools/import.php --file=crawler/data/cclm_books.jsonl  --source=cclm
+ *   php tools/import.php --file=crawler/data/cosmiccare_books.jsonl --source=cosmiccare
+ *   php tools/import.php --file=crawler/data/mezu_books.jsonl      --source=mezu
  *
  * elim(以琳書房,2026-07-31):紀錄含 categories 完整清單(一書多分類,
  * 路徑碼+名稱路徑),全部寫 subjects(scheme='elim')原樣存證;站內瀏覽分類
@@ -37,6 +42,36 @@ declare(strict_types=1);
  * 標「微讀書城」(簡體書標「微讀書城(簡體)」)。雙軌分類
  * subjects(scheme='wdbook', code=微讀分類 id)存證 →
  * tools/apply_wdbook_categories.php 依 wdbook_category_map 對映。
+ *
+ * osb(格子外面,2026-08-18):Cyberbiz 商城(TWD,全站繁體)。範圍=
+ * 全部書籍(osb)+聖經三分類+★新書到(沿以琳「只抓書籍+聖經」);雙軌分類
+ * subjects(scheme='osb', code=collection handle,中文 handle 直接入 code)
+ * 存證 → tools/apply_osb_categories.php 依 osb_category_map 對映。
+ * 購書連結標「格子外面」。
+ *
+ * taosheng(道聲,2026-08-19):Cyberbiz 商城(與 osb 同平台,TWD)。全站
+ * 抓入存證(1,637 件),非書(影音/月曆/桌遊/刮刮卡/福音機)由對映表下架;
+ * 代銷他社書全收(8/19 決議),同 ISBN 自動跨站合併。雙軌分類
+ * subjects(scheme='taosheng') → tools/apply_taosheng_categories.php。
+ *
+ * cclm(橄欖華宣,2026-08-19):自建 SSR 商城(TWD)。範圍=書籍全枝
+ * (約 4,400)+聖經全枝(沿以琳「只抓書籍+聖經」);聖經周邊非書由對映表
+ * 下架。雙軌分類 subjects(scheme='cclm') → tools/apply_cclm_categories.php。
+ *
+ * cosmiccare(宇宙光全人關懷機構,2026-08-21):自建 SSR 商城(TWD)。全站
+ * 抓入存證(1,671 件:書籍/繪本/雜誌/影音/禮品),非書(影音/禮品/雜誌訂閱/
+ * 海外運費)由對映表下架;《宇宙光雜誌》約 120 期收錄(歸「期刊雜誌」,
+ * ISBN 欄放的是 ISSN 條碼 977…,爬蟲不會誤認為 ISBN13)。作者系列 Tag 與
+ * ★福利書不參與分類(8/21 決議)。雙軌分類 subjects(scheme='cosmiccare')
+ * → tools/apply_cosmiccare_categories.php。
+ *
+ * mezu(真哪噠買書網,2026-08-22):EasyStore 商城(TWD,繁體)。全站
+ * 10,027 件抓入存證——商品清單走 sitemap_products.xml(權威全站清單),
+ * 分類歸屬走 119 個 collection 清單;非書(影音/禮品/文具/客製化月曆)
+ * 由對映表下架。站方商品描述是 Froala 自由文字、欄位標籤不統一,故原文
+ * 整段存 extra.desc_raw、通用標籤採集存 extra.spec_all,只有白名單欄位
+ * 入平面欄(8/22 決議:欄位解析留待後續版本)。雙軌分類
+ * subjects(scheme='mezu')→ tools/apply_mezu_categories.php。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -50,8 +85,8 @@ $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist [--limit=N] [--dry-run]\n");
+if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu'], true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -246,7 +281,11 @@ echo "預載:editions " . count($doneUrls) . "、isbn " . count($isbnMap)
 
 // ── 匯入主迴圈 ───────────────────────────────────────────
 
-$stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merged' => 0, 'edition' => 0];
+$stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merged' => 0, 'edition' => 0,
+          // dry-run 合併明細(8/21 起):合併率異常高時要能當場分辨
+          // 「ISBN 命中」與「書名+第一作者模糊比對」,後者才是誤併風險所在。
+          'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0];
+$fuzzySamples = [];   // dry-run:模糊命中的前 N 筆,供人眼核對
 $fh = fopen($file, 'r');
 $batch = 0;
 if (!$dry) $pdo->beginTransaction();
@@ -269,16 +308,21 @@ while (($line = fgets($fh)) !== false) {
     $isEbook     = in_array($source, ['grace', 'wdbook'], true) && !empty($raw['is_ebook']);
     $buyPlatform = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
                     'elim' => '以琳書房', 'grace' => '天恩出版社',
-                    'wdbook' => '微讀書城', 'methodist' => '衛理書房'][$source]
+                    'wdbook' => '微讀書城', 'methodist' => '衛理書房',
+                    'osb' => '格子外面', 'taosheng' => '道聲', 'cclm' => '橄欖華宣',
+                    'cosmiccare' => '宇宙光', 'mezu' => '真哪噠'][$source]
                  . ($source === 'grace' && $isEbook ? '(電子書)'
                     : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
 
     // 1. 找/建 book(Work)
     $bookId = null;
     $isMerge = false;
+    $mergeVia = null;                 // 'isbn' | 'fuzzy' | 'infile'(dry-run 明細用)
     if ($m['isbn13'] && isset($isbnMap[$m['isbn13']])) {
         $bookId = $isbnMap[$m['isbn13']];
         $isMerge = true;
+        // dry-run 時新書會以 -1 佔位,故 -1 代表「同一檔案內重複的 ISBN」而非在庫命中
+        $mergeVia = $bookId === -1 ? 'infile' : 'isbn';
     } else {
         // 模糊比對(書名+第一作者)。2026-08-02 修:帶 ISBN 的紀錄也要比——
         // 「A 站有 ISBN、B 站同書無 ISBN」曾因此拆成兩筆(525 組)。
@@ -293,13 +337,22 @@ while (($line = fgets($fh)) !== false) {
             if (!$m['isbn13'] || $candIsbn === null || $candIsbn === $m['isbn13'] || $isEbook) {
                 $bookId = $cand;
                 $isMerge = true;
+                $mergeVia = 'fuzzy';
             }
         }
     }
 
     $extraRec = $raw;
     if ($dry) {
-        if (!$bookId) $stats['new_book']++; else $stats['merged']++;
+        if (!$bookId) {
+            $stats['new_book']++;
+        } else {
+            $stats['merged']++;
+            $stats['merge_' . $mergeVia]++;
+            if ($mergeVia === 'fuzzy' && count($fuzzySamples) < 30) {
+                $fuzzySamples[] = [$m['title'], $m['authors'][0]['name'] ?? '', (int) $bookId];
+            }
+        }
         $stats['edition']++;
         $doneUrls[$m['source_url']] = true;
         if ($m['isbn13'] && !$bookId) $isbnMap[$m['isbn13']] = -1;
@@ -489,3 +542,28 @@ fclose($fh);
 echo ($dry ? "[dry-run 模擬] " : "") . "完成:讀 {$stats['read']}、新書 {$stats['new_book']}、"
    . "合併 {$stats['merged']}、版本 {$stats['edition']}、已存在跳過 {$stats['skip_done']}、"
    . "無效跳過 {$stats['skip_bad']}\n";
+
+// dry-run 合併明細:ISBN 命中是硬證據,模糊比對(書名+第一作者)才需要人眼把關。
+// 沿 8/19 橄欖華宣慣例——合併率偏高時,先確認高的是 ISBN 那一段再正式匯入。
+if ($dry) {
+    echo "  合併明細:ISBN 命中 {$stats['merge_isbn']}、模糊比對 {$stats['merge_fuzzy']}、"
+       . "同檔內重複 {$stats['merge_infile']}\n";
+    if ($fuzzySamples) {
+        $exist = [];
+        $uniq = array_values(array_unique(array_filter(
+            array_column($fuzzySamples, 2), fn($x) => $x > 0)));
+        if ($uniq) {
+            $ph = implode(',', array_fill(0, count($uniq), '?'));
+            $st = $pdo->prepare("SELECT book_id, title, author, isbn13 FROM books WHERE book_id IN ($ph)");
+            $st->execute($uniq);
+            foreach ($st as $r) $exist[(int) $r['book_id']] = $r;
+        }
+        echo "  模糊比對樣本(最多 30 筆,請確認左右是否同一本書):\n";
+        foreach ($fuzzySamples as [$t, $a, $bid]) {
+            $e = $exist[$bid] ?? [];
+            echo "    「{$t}」/" . ($a !== '' ? $a : '(無作者)') . "\n"
+               . "      ↔ #{$bid}「" . ($e['title'] ?? '?') . "」/" . ($e['author'] ?? '')
+               . ' ' . ($e['isbn13'] ?? '') . "\n";
+        }
+    }
+}

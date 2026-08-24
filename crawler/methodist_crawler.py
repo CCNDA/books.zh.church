@@ -22,6 +22,9 @@
       内容简介/作者介绍/目录/详细资料;「详细资料」含 作者/译者/出版日期/
       页数/尺寸/排版方式/语言/装订方式/印刷方式/分类(出版社原始分類)。
       禮品與部分外文書無子頁籤 → 整區文字當簡介。
+      **8/17 probe 發現:子頁籤結構是前端 JS 生成,raw HTML 為平鋪
+      (h2/文字標題行 + 段落)→ 解析改以「標題行切段」,不依賴頁籤類名;
+      詳細資料的 label/value 會被 inline 標籤拆行,以 <br> sentinel 併回。**
     - og:image 封面;/image/cache/...-420x420.jpg 改寫回 /image/... 原圖。
  5. robots.txt 404(無限制);分類歸屬由「清單走訪」蒐集(一書多分類,
     商品頁麵包屑只帶進入路徑,不可靠)——同以琳做法。
@@ -240,24 +243,38 @@ DETAIL_LABELS: list[tuple[str, str]] = [
     ("pub_category",    "分類"),
 ]
 _COLONS = "\uff1a:\u2236"  # :、:、∶
+_BR = "\x0b"  # <br> 真斷行 sentinel(get_text 的 tag 斷行不可信)
+# 详细资料以「標籤字樣+冒號」切割(8/17 probe v3:部分商品整段無 <br>,
+# 欄位間只有 inline 標籤邊界,不能依賴斷行)。出版日期須排在出版社之前。
+_DETAIL_SPLIT = re.compile(
+    r"(作者|譯者|译者|出版日期|出版社|頁數|页数|尺寸|排版方式|語言|语言|"
+    r"裝訂方式|装订方式|印刷方式|分類|分类)\s*[" + _COLONS + r"]"
+)
+
+# 描述區標題行 → 欄位(先 s2tw 再比對;英文站/禮品只有 Description)
+SECTION_HEADS = {
+    "內容簡介": "summary", "作者介紹": "author_intro", "目錄": "toc",
+    "詳細資料": "detail",
+    "Description": "summary", "Product Description": "summary",
+}
 
 
 def parse_detail_panel(text: str) -> dict:
-    """详细资料面板文字 → 欄位 dict(值保留原文,轉繁由主流程統一處理)。"""
+    """详细资料面板文字 → 欄位 dict(值保留原文,轉繁由主流程統一處理)。
+    以標籤字樣切割整段文字,不依賴斷行(部分商品欄位間無 <br>)。"""
+    label_key = {want: key for key, want in DETAIL_LABELS}
+    parts = _DETAIL_SPLIT.split(re.sub(r"\s+", " ", text))
     fields: dict = {}
-    for line in text.split("\n"):
-        line = line.strip()
-        if not line or line in ("详细资料", "詳細資料"):
-            continue
-        m = re.match(rf"^([^{_COLONS}]{{1,8}})[{_COLONS}]\s*(.+)$", line)
-        if not m:
-            continue
-        lab = s2t(m.group(1).strip()) or ""
-        val = m.group(2).strip()
-        for key, want in DETAIL_LABELS:
-            if key not in fields and lab == want:
-                fields[key] = val
-                break
+    for i in range(1, len(parts) - 1, 2):
+        lab = s2t(parts[i]) or ""
+        val = parts[i + 1].strip()
+        # inline 標籤併回造成的空隙:括號內縮、CJK 人名間的點號正規化
+        val = re.sub(r"([(\uff08])\s+", r"\1", val)   # 含全形((U+FF08)
+        val = re.sub(r"\s+([)\uff09])", r"\1", val)   # 含全形)(U+FF09)
+        val = re.sub(r"(?<=[\u4e00-\u9fff])\s*[.·•]\s*(?=[\u4e00-\u9fff])", "·", val)
+        key = label_key.get(lab)
+        if key and key not in fields and val:
+            fields[key] = val
     return fields
 
 
@@ -334,32 +351,42 @@ def parse_product(pid: str | None, cats: list[dict], href: str | None = None,
         except ValueError:
             pass
 
-    # 描述區:子頁籤(内容简介/作者介绍/目录/详细资料)或整區文字
+    # 描述區:raw HTML 為平鋪結構(子頁籤是前端 JS 生成),以標題行切段。
+    # <br> 先換成 sentinel 保留「真斷行」;get_text("\n") 的 tag 斷行僅用於
+    # 找標題行,各段落再把碎行併回。
     summary = author_intro = toc = None
     detail: dict = {}
     area = soup.select_one("#tab-description")
     if area is not None:
-        panels = area.select(".prod-desc-tab-content")
-        if panels:
-            for p in panels:
-                head_el = p.find(["h2", "h3"])
-                head = s2t(head_el.get_text(strip=True)) if head_el else ""
-                txt = p.get_text("\n", strip=True)
-                if head_el:  # 面板文字去掉標頭那一行
-                    txt = re.sub(r"^" + re.escape(head_el.get_text(strip=True)) + r"\s*",
-                                 "", txt).strip()
-                if "簡介" in head and summary is None:
-                    summary = txt or None
-                elif "作者介紹" in head and author_intro is None:
-                    author_intro = txt or None
-                elif "目錄" in head and toc is None:
-                    toc = txt or None
-                elif "詳細資料" in head and not detail:
-                    detail = parse_detail_panel(txt)
-        else:  # 無子頁籤(禮品/部分外文書):整區當簡介
-            txt = area.get_text("\n", strip=True)
-            txt = re.sub(r"^Description\s*", "", txt).strip()
-            summary = re.sub(r"\n{2,}", "\n", txt) or None
+        for br in area.find_all("br"):
+            br.replace_with(_BR)
+        sections: dict[str, list[str]] = {}
+        cur = "summary"
+        for line in area.get_text("\n").split("\n"):
+            plain = line.replace(_BR, "").strip()
+            if not plain:
+                continue
+            head = SECTION_HEADS.get(s2t(plain) or plain)
+            if head is not None:
+                cur = head
+                continue
+            sections.setdefault(cur, []).append(line.strip())
+
+        def _joined(name: str) -> str | None:
+            if name not in sections:
+                return None
+            txt = "\n".join(sections[name]).replace(_BR, "\n")
+            txt = "\n".join(l.strip() for l in txt.split("\n"))
+            txt = re.sub(r"\n{2,}", "\n", txt).strip()
+            return txt or None
+
+        summary = _joined("summary")
+        author_intro = _joined("author_intro")
+        toc = _joined("toc")
+        if "detail" in sections:
+            # 整段併回單一字串(斷行不可靠),交由標籤切割
+            merged = " ".join(sections["detail"]).replace(_BR, " ")
+            detail = parse_detail_panel(merged)
     if summary is None:
         summary = _meta(soup, "og:description")
 
@@ -381,6 +408,8 @@ def parse_product(pid: str | None, cats: list[dict], href: str | None = None,
                 "pub_category"):
         if detail.get(key):
             rec[key] = detail[key]
+    if not rec.get("language") and spec.get("Language"):
+        rec["language"] = spec["Language"]  # 部分商品語言在規格表而非詳細資料
 
     # 封面:og:image;快取縮圖網址改寫回原圖(原網址保留供保底)
     cover = _meta(soup, "og:image")
@@ -411,10 +440,11 @@ def parse_product(pid: str | None, cats: list[dict], href: str | None = None,
         rec[key] = conv
     if hans:
         rec["hans"] = hans
-    # is_hans 以「語言」欄位為準(8/12 微讀教訓:繁體書經 s2tw 正規化也會
-    # 產生 hans,不可據此判簡體);無語言欄位(禮品/外文)才退回 hans 判斷
+    # is_hans 僅在「語言」欄位明說簡體才 True(8/17 probe 決定,異於微讀:
+    # 該站介面/書名全為簡體字,hans 不能當版本證據——道聲等台版繁體書的
+    # 站上書名也是簡體;未標語言一律視為非簡體,寧漏勿誤標)
     _lang = rec.get("language") or ""
-    rec["is_hans"] = ("簡體" in _lang) if _lang else bool(hans)
+    rec["is_hans"] = "簡體" in _lang
 
     return rec
 

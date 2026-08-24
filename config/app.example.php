@@ -25,6 +25,12 @@ return [
         'public_url'        => 'https://imgr2.example.net',
         'prefix'            => 'books/',
     ],
+    'discord' => [
+        // 版本更新公告(tools/notify_discord.php)。到 Discord 頻道
+        // 設定 → 整合 → 建立 Webhook 取得網址;此檔已在 .gitignore
+        'webhook_url' => 'https://discord.com/api/webhooks/...',
+        'username'    => '屬靈共同書目',
+    ],
     'aws' => [
         'region'        => 'ap-northeast-1',
         'ses_from'      => 'support@ccnda.org',

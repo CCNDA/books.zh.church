@@ -22,12 +22,21 @@ require __DIR__ . '/lib/response.php';
  */
 const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
                              'elim' => '以琳書房', 'grace' => '天恩出版社',
-                             'wdbook' => '微讀書城', 'methodist' => '衛理書房'];
+                             'wdbook' => '微讀書城', 'methodist' => '衛理書房',
+                             'osb' => '格子外面', 'taosheng' => '道聲',
+                             'cclm' => '橄欖華宣',
+                             'cosmiccare' => '宇宙光',
+                             'mezu' => '真哪噠'];
 // 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
 const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
                              'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5,
                              'wdbook' => 6, '微讀書城' => 6, '微讀書城(簡體)' => 6,
-                             'methodist' => 7, '衛理書房' => 7, '衛理書房(簡體)' => 7];
+                             'methodist' => 7, '衛理書房' => 7, '衛理書房(簡體)' => 7,
+                             'osb' => 8, '格子外面' => 8,
+                             'taosheng' => 9, '道聲' => 9,
+                             'cclm' => 10, '橄欖華宣' => 10,
+                             'cosmiccare' => 11, '宇宙光' => 11,
+                             'mezu' => 12, '真哪噠' => 12];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');
