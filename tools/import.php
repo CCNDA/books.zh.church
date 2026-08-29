@@ -85,8 +85,8 @@ $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu [--limit=N] [--dry-run]\n");
+if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr', 'pctpress'], true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -221,14 +221,14 @@ function map_record(string $source, array $r): array
         'currency'       => tidy($r['currency'] ?? null) ?: ($source === 'logos' ? 'HKD' : 'TWD'),
         'cover_url'      => tidy($r['cover_url'] ?? null),
         'source_url'     => $r['source_url'] ?? null,
-        'subject_code'   => cap(tidy($r['category_source'] ?? null), 20),
+        'subject_code'   => cap(tidy($r['category_source'] ?? null), 40), // 2026-08-25 20→40:subjects.code 已加寬(福音書房 24 碼 ID handle)
         'subject_label'  => cap(tidy($r['category_text'] ?? null), 150),
         'skip'           => $isJunkTitle,
     ];
     // 來源分類清單(elim:一書多分類,原樣存證;其他來源退回單一平面欄位)
     $m['subjects'] = [];
     foreach ((array) ($r['categories'] ?? []) as $c) {
-        $code  = cap(tidy(is_array($c) ? ($c['code'] ?? null) : null), 20);
+        $code  = cap(tidy(is_array($c) ? ($c['code'] ?? null) : null), 40); // 同上,subjects.code(40)
         $label = cap(tidy(is_array($c) ? ($c['path'] ?? null) : null), 150);
         if ($code || $label) $m['subjects'][] = [$code, $label ?: $code];
     }
@@ -310,7 +310,8 @@ while (($line = fgets($fh)) !== false) {
                     'elim' => '以琳書房', 'grace' => '天恩出版社',
                     'wdbook' => '微讀書城', 'methodist' => '衛理書房',
                     'osb' => '格子外面', 'taosheng' => '道聲', 'cclm' => '橄欖華宣',
-                    'cosmiccare' => '宇宙光', 'mezu' => '真哪噠'][$source]
+                    'cosmiccare' => '宇宙光', 'mezu' => '真哪噠',
+                    'twgbr' => '福音書房', 'pctpress' => '教會公報社'][$source]
                  . ($source === 'grace' && $isEbook ? '(電子書)'
                     : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
 
