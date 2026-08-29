@@ -12,14 +12,19 @@
 
 設計:重用既有 campus_crawler / logos_crawler 的解析邏輯,只新增
  (1)「新品列表」入口(校園全館新書、基道年份檢索日期倒序);
- (2)「見到既有書即停」的增量翻頁——兩站列表都是最新在前,故某頁完全沒有新書時,
-     其後皆更舊、必已在庫,即可停止翻頁,每日只抓真正新增的部分。
+ (2)「見到既有書即停」的增量翻頁——清單若按**上架日期**排序,新品必在最前面,
+     某頁完全沒有新書即代表其後皆已在庫,可停止翻頁,每日只抓真正新增的部分。
+     **例外:基道按「出版日期」倒序**,新上架的舊書會落在清單深處而非最前面,
+     早停必漏,故基道預設全掃列表(2026-08-28 改;省時模式見 --min-pages)。
+     新來源接入時,務必先確認站方排序依據是上架日期還是出版日期。
 新書寫入既有 master jsonl(campus_books.jsonl / logos_books.jsonl,JsonlWriter 天然去重),
 並另存一份當日 delta 檔,交給 tools/import.php 匯入(import 以 source_url 去重、可重跑)。
 
 用法(主機,先建 venv 裝 requests/bs4/lxml,見 deploy/cron-new-arrivals.md):
   python3 new_arrivals.py --source campus
-  python3 new_arrivals.py --source logos --year 2021
+  python3 new_arrivals.py --source logos --year 2021        # 全掃約 197 頁、約 8 分鐘
+  python3 new_arrivals.py --source logos --min-pages 5      # 省時模式(會漏新上架的舊書)
+  python3 new_arrivals.py --source logos --year 1           # 深掃全站(約 1,231 頁、約 50 分)
   python3 new_arrivals.py --source grace
   python3 new_arrivals.py --source wdbook
   python3 new_arrivals.py --source methodist
@@ -53,6 +58,8 @@ import logos_crawler as logos
 import cclm_crawler as cclm
 import cosmiccare_crawler as cosmiccare
 import mezu_crawler as mezu
+import twgbr_crawler as twgbr
+import pctpress_crawler as pctpress
 import methodist_crawler as methodist
 import osb_crawler as osb
 import taosheng_crawler as taosheng
@@ -121,13 +128,35 @@ def collect_campus(writer, max_pages: int, dry_run: bool) -> list[dict]:
 
 # ── 基道年度新品(日期倒序累積檢索)──────────────────────────
 
-def collect_logos(writer, year: int, max_pages: int, dry_run: bool) -> list[dict]:
-    """基道:field=year&text=<year> 依 FirstPublishDate 倒序,回傳本次首見的新書紀錄清單。"""
+# 基道列表的預設排序鍵。**必須是唯一鍵**——站方以 offset 分頁,排序鍵若有並列
+# (sort=FirstPublishDate 大量同日期),同一個並列群組每次查詢回傳的順序是任意的,
+# 於是相鄰頁互相重複、群組內有些列從頭到尾不曾被顯示。2026-08-28 實測:
+# 日期排序全掃 197 頁,3,934 格裡 808 個碼重複佔掉 873 格,涵蓋率只有 77.8%。
+# 改用商品碼排序讓並列消失,分頁才是確定性的。
+LOGOS_SORT = "Code"
+LOGOS_ORDER = "ASC"
+
+
+def collect_logos(writer, year: int, max_pages: int, dry_run: bool,
+                  min_pages: int = 0, sort: str = LOGOS_SORT,
+                  order: str = LOGOS_ORDER) -> list[dict] | None:
+    """基道:field=year&text=<year> 依 FirstPublishDate 倒序,回傳本次首見的新書紀錄清單。
+
+    **預設全掃列表,不做早停。** 其他站的清單是「按上架日期」排序,新品必在最前面,
+    所以「整頁皆已見即停」是安全的;基道不是——它按**出版日期**倒序,站方若把一本
+    出版日期較舊的書新上架(補書、再版鋪貨),它會落在清單深處而非最前面,任何早停
+    都會漏掉它。列表頁只是 code 清單(每頁一次請求、不開商品頁),anchor 2021 約 197 頁、
+    節流後約 8 分鐘,代價可接受,故改為全掃取精確解。
+
+    商品頁仍沿用快取(新品必然未快取),所以真正的成本與新書數成正比、與清單長度無關。
+
+    min_pages > 0 時退回舊的早停模式(掃滿 N 頁後遇整頁皆已見即停),供臨時省時用。
+    列表頁一律 force 重抓(快取會讀到第一次抓的那頁而永遠看不到新品)。"""
     def list_url(page: int) -> str:
-        u = f"{logos.SEARCH}&field=year&text={year}&sort=FirstPublishDate&order=DESC"
+        u = f"{logos.SEARCH}&field=year&text={year}&sort={sort}&order={order}"
         return u if page == 1 else f"{u}&{logos.PAGE_PARAM}={page}"
 
-    html = logos.fetch_list(list_url(1))
+    html = logos.fetch_list(list_url(1), force=True)
     if not html:
         print("基道列表首頁抓取失敗", flush=True)
         return None  # 供 main 判別失敗
@@ -135,19 +164,67 @@ def collect_logos(writer, year: int, max_pages: int, dry_run: bool) -> list[dict
     per_page = max(len(logos.extract_codes(html)), 1)
     pages = -(-total // per_page) if total else 1
     cap_pages = min(pages, max_pages) if max_pages else pages
-    print(f"基道 {year} 年起新品:宣稱 {total} 項、每頁 {per_page}、約 {pages} 頁(日期倒序,處理上限 {cap_pages} 頁)", flush=True)
+    mode = f"掃滿 {min_pages} 頁後可早停" if min_pages else "全掃不早停"
+    print(f"基道 {year} 年起:宣稱 {total} 項、每頁 {per_page}、約 {pages} 頁"
+          f"(sort={sort}/{order},處理上限 {cap_pages} 頁,{mode})", flush=True)
 
     new_codes: list[str] = []
     seen_this_run: set[str] = set()
+    missed_pages: list[int] = []
+    last_p = 0
     for p in range(1, cap_pages + 1):
-        page_html = html if p == 1 else logos.fetch_list(list_url(p))
+        page_html = html if p == 1 else logos.fetch_list(list_url(p), force=True)
         got = logos.extract_codes(page_html) if page_html else []
+        if not got:
+            missed_pages.append(p)
         page_new = [c for c in got if c not in writer.seen and c not in seen_this_run]
         seen_this_run.update(got)
         new_codes.extend(page_new)
-        print(f"  第 {p} 頁:{len(got)} 項,新書 {len(page_new)}", flush=True)
-        if not page_new:  # 最新在前,本頁全是既有書 → 停止翻頁
+        last_p = p
+        if page_new:  # 只在有斬獲時逐頁印,避免全掃時洗版
+            print(f"  第 {p} 頁:{len(got)} 項,新書 {len(page_new)}", flush=True)
+        elif p % 25 == 0:
+            print(f"  …第 {p}/{cap_pages} 頁(累計首見 {len(new_codes)} 本)", flush=True)
+        if min_pages and not page_new and p >= min_pages:
+            print(f"  第 {p} 頁整頁皆已見,早停(--min-pages {min_pages})", flush=True)
             break
+
+    # 補抓:站方偶發以 HTTP 200 回空殼頁,fetch_list 當場已 force 重抓一次仍可能失敗。
+    # sort 是唯一鍵、分頁確定性,同一頁稍後重抓會拿到同一批列,所以整趟掃完再補一次
+    # 很划算——2026-08-28 實測 21 筆缺口裡有 20 筆就是單一頁(第 79 頁)整頁落空造成的。
+    if missed_pages:
+        print(f"  [補抓] {len(missed_pages)} 個取不到內容的頁面,整趟掃完後再試一次…", flush=True)
+        still: list[int] = []
+        for p in missed_pages:
+            page_html = logos.fetch_list(list_url(p), force=True)
+            got = logos.extract_codes(page_html) if page_html else []
+            if not got:
+                still.append(p)
+                continue
+            page_new = [c for c in got if c not in writer.seen and c not in seen_this_run]
+            seen_this_run.update(got)
+            new_codes.extend(page_new)
+            print(f"    第 {p} 頁補抓成功:{len(got)} 項,新書 {len(page_new)}", flush=True)
+        missed_pages = still
+
+    # 涵蓋率:去重碼數應等於站方宣稱總數。少掉的就是「站方從頭到尾沒顯示過」的筆數,
+    # 一定要出聲——這正是 2026-08-28 靠對帳才發現的 22% 黑洞。
+    cover = f"{len(seen_this_run)}/{total}" if total else str(len(seen_this_run))
+    print(f"基道列表掃描完成:{last_p} 頁、去重 {cover} 碼、首見 {len(new_codes)} 本", flush=True)
+    if missed_pages:
+        # 取不到內容的頁數要留痕,否則「漏書」會再次變成無聲失敗
+        head = ", ".join(map(str, missed_pages[:10]))
+        more = f" 等 {len(missed_pages)} 頁" if len(missed_pages) > 10 else ""
+        print(f"  [警告] 補抓後仍取不到清單內容:第 {head}{more},該頁的書漏收"
+              f"(每頁 {per_page} 筆);明天的排程會再遇到同一頁,連續多天就要人工查", flush=True)
+    if total and not min_pages and len(seen_this_run) < total:
+        gap = total - len(seen_this_run)
+        pct = len(seen_this_run) / total * 100
+        # 缺口若剛好等於漏頁筆數,就是抓取失敗而非分頁黑洞,兩者處置不同,分開講清楚
+        by_pages = len(missed_pages) * per_page
+        cause = ("以上漏頁即可解釋" if missed_pages and gap <= by_pages
+                 else f"扣掉漏頁仍有 {gap - by_pages} 筆不明,懷疑排序鍵 {sort} 有並列 → 跑 logos_coverage.py 對帳")
+        print(f"  [警告] 涵蓋率 {pct:.1f}%,{gap} 筆未收:{cause}", flush=True)
 
     return _parse_new(new_codes, logos.parse_product, writer, dry_run)
 
@@ -395,6 +472,41 @@ def collect_cosmiccare(writer, max_pages: int, dry_run: bool) -> list[dict] | No
 
 # ── 真哪噠 新品上架清單增量(未見過即新品)────────────────────
 
+def collect_pctpress(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """教會公報社(WooCommerce Store API):取「書籍NEW」分類,API 一次給完整欄位。"""
+    recs = pctpress.collect_new(max_pages=max(1, min(max_pages or 3, 3)))
+    new = [r for r in recs if not writer.has(r["pid"])]
+    if not new:
+        print("[pctpress] 無新書", flush=True)
+        return []
+    print(f"[pctpress] 偵測到 {len(new)} 本新書", flush=True)
+    if dry_run:
+        return new
+    return [r for r in new if writer.write(r)]
+
+
+def collect_twgbr(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """福音書房(Shopline):先只走「新品推介」;有新書才補走全部分類取完整歸屬。"""
+    members = twgbr.collect_memberships_dict(only=twgbr.NEW_ENTRY)
+    new = {h: d for h, d in members.items() if not writer.has(h)}
+    if not new:
+        print("[twgbr] 無新書", flush=True)
+        return []
+    print(f"[twgbr] 偵測到 {len(new)} 本新書,補走全部分類取歸屬", flush=True)
+    full = twgbr.collect_memberships_dict()
+    for h in list(new):
+        if h in full:
+            new[h] = full[h]
+    if dry_run:
+        return [{"handle": h} for h in new]
+    out: list[dict] = []
+    for h, d in new.items():
+        rec = twgbr.parse_product(h, d["cats"])
+        if rec and writer.write(rec):
+            out.append(rec)
+    return out
+
+
 def collect_mezu(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
     """真哪噠:先只走「新品上架/注目優惠」兩個清單(每頁 50 件,約 8 頁)——
     站方新品都會掛在這裡,便宜又即時;未見過的 handle 即新品。
@@ -445,10 +557,16 @@ def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dic
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
-                             "taosheng", "cclm", "cosmiccare", "mezu"])
+                             "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
+    ap.add_argument("--sort", default=LOGOS_SORT,
+                    help=f"基道列表排序鍵(預設 {LOGOS_SORT},必須唯一,否則分頁會漏)")
+    ap.add_argument("--order", default=LOGOS_ORDER, help=f"基道列表排序方向(預設 {LOGOS_ORDER})")
+    ap.add_argument("--min-pages", type=int, default=0,
+                    help="基道專用:掃滿 N 頁後遇整頁皆已見即停(省時模式)。"
+                         "0=預設,列表全掃不早停——基道按出版日期排序,早停會漏掉新上架的舊書")
     ap.add_argument("--out", help="delta jsonl 輸出路徑;未指定則自動命名 data/new/<source>_<ts>.jsonl")
     ap.add_argument("--dry-run", action="store_true", help="只列出新品、不寫 master 也不寫 delta")
     ap.add_argument("--browser-ua", action="store_true", help="校園改用瀏覽器式 UA(遇 500/封鎖時用)")
@@ -505,6 +623,12 @@ def main():
         if fresh is None:
             writer.close()
             sys.exit(2)
+    elif args.source == "pctpress":
+        writer = _writer("pctpress_books.jsonl", "pid")
+        fresh = collect_pctpress(writer, args.max_pages, args.dry_run)
+    elif args.source == "twgbr":
+        writer = _writer("twgbr_books.jsonl", "handle")
+        fresh = collect_twgbr(writer, args.max_pages, args.dry_run)
     elif args.source == "mezu":
         writer = _writer("mezu_books.jsonl", "pid")
         fresh = collect_mezu(writer, args.max_pages, args.dry_run)
@@ -513,7 +637,8 @@ def main():
             sys.exit(2)
     else:
         writer = _writer("logos_books.jsonl", "code")
-        fresh = collect_logos(writer, args.year, args.max_pages, args.dry_run)
+        fresh = collect_logos(writer, args.year, args.max_pages, args.dry_run,
+                              args.min_pages, args.sort, args.order)
         if fresh is None:
             writer.close()
             sys.exit(2)

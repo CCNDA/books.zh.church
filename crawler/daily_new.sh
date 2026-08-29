@@ -48,7 +48,13 @@ run_source() {
 
 # 校園:全館新書列表(量小,約 13 頁);遇 500 可加 --browser-ua
 run_source campus --browser-ua
-# 基道:年份錨 2021 起、日期倒序;增量翻頁見到既有書即停
+# 基道:年份錨 2021 起,**全掃列表不早停**(約 197 頁、約 8 分鐘;商品頁仍走快取,
+# 成本與新書數成正比)。兩個站方特性導致必須這樣做:
+#   1) 清單按「出版日期」而非上架日期排序 → 新上架的舊書落在清單深處,任何早停都會漏
+#   2) 站方以 offset 分頁,排序鍵並列就會相鄰頁互相重複、有些列從不顯示
+#      (日期排序實測涵蓋率僅 77.8%)→ 改用唯一鍵 sort=Code(new_arrivals.py 預設)
+# log 結尾會印涵蓋率;若出現 [警告] 涵蓋率不足,跑 python3 logos_coverage.py 對帳。
+# 另建議每月手動或另排一次深掃補年份較舊者:python3 new_arrivals.py --source logos --year 1
 run_source logos --year 2021
 # 以琳:逐分類增量(列表最新在前、無新品即停);紀錄自帶分類路徑
 run_source elim
@@ -68,6 +74,8 @@ run_source cclm
 run_source cosmiccare
 # 真哪噠:新品上架/注目優惠清單增量(全站抓入,非書由對映表下架);有新品才補走 119 分類取歸屬
 run_source mezu
+run_source twgbr
+run_source pctpress
 
 # ── 對映分類套用:scheme 存證 → *_category_map 對映站內分類 ──
 # 冪等可重跑;需在 classify 之前跑,新書由對映表歸類(而非關鍵字猜測),
@@ -94,6 +102,8 @@ apply_map "道聲" "$ROOT/tools/apply_taosheng_categories.php"
 apply_map "橄欖華宣" "$ROOT/tools/apply_cclm_categories.php"
 apply_map "宇宙光" "$ROOT/tools/apply_cosmiccare_categories.php"
 apply_map "真哪噠" "$ROOT/tools/apply_mezu_categories.php"
+apply_map "福音書房" "$ROOT/tools/apply_twgbr_categories.php"
+apply_map "教會公報社" "$ROOT/tools/apply_pctpress_categories.php"
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),

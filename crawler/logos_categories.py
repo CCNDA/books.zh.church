@@ -141,7 +141,11 @@ def discover_categories(html: str) -> list[str]:
 
 def cat_url(text: str, page: int = 1) -> str:
     # 保留階層分隔 '/' 為字面,CJK 逐字編碼(與瀏覽器送出方式一致)
-    url = CONTENT + "&op=search&type=product&match=exact&field=Category&text=" + quote(text, safe="/")
+    # sort=Code:分類清單同樣以 offset 分頁,排序鍵有並列就會相鄰頁互相重複、
+    # 群組內有些列從不顯示(2026-08-28 於年份清單實測涵蓋率只有 77.8%)。
+    # 商品碼是唯一鍵,可讓分頁確定性。
+    url = (CONTENT + "&op=search&type=product&match=exact&field=Category&text="
+           + quote(text, safe="/") + "&sort=Code&order=ASC")
     return url if page == 1 else f"{url}&page={page}"
 
 
@@ -149,9 +153,11 @@ def is_valid_list_page(html: str) -> bool:
     return bool(extract_total(html) or extract_codes(html))
 
 
-def fetch_list(url: str) -> str | None:
+def fetch_list(url: str, force: bool = False) -> str | None:
+    """force=True:繞過磁碟快取。--refresh 重爬時必用,否則會讀到上次抓的分類頁,
+    新書永遠不會出現在對照表裡(2026-08-27 基道每日新品同款陷阱)。"""
     try:
-        html = fetch(url)
+        html = fetch(url, force=force)
         if not is_valid_list_page(html):
             html = fetch(url, force=True)
         return html if is_valid_list_page(html) else None
@@ -162,8 +168,8 @@ def fetch_list(url: str) -> str | None:
 
 # ── 抓單一分類(翻頁到底)───────────────────────────────────
 
-def crawl_category(text: str) -> dict:
-    first = fetch_list(cat_url(text))
+def crawl_category(text: str, force: bool = False) -> dict:
+    first = fetch_list(cat_url(text), force=force)
     if first is None:
         print(f"  [略過] 分類首頁抓取失敗:{text}")
         return {"total": None, "codes": []}
@@ -175,7 +181,7 @@ def crawl_category(text: str) -> dict:
     pages = -(-total // per_page) if total else 1
     bad = 0
     for p in range(2, pages + 1):
-        html = fetch_list(cat_url(text, p))
+        html = fetch_list(cat_url(text, p), force=force)
         got = extract_codes(html) if html else []
         if not got:
             bad += 1
@@ -232,7 +238,8 @@ def main():
     ap.add_argument("--discover", action="store_true", help="只印探索到的分類清單")
     ap.add_argument("--probe", action="store_true", help="抓第一個分類首頁驗證解析")
     ap.add_argument("--only", default=None, help="只抓指定主分類(含子分類)")
-    ap.add_argument("--refresh", action="store_true", help="忽略進度,重抓所有分類")
+    ap.add_argument("--refresh", action="store_true",
+                    help="忽略進度,重抓所有分類(同時繞過頁面快取,才看得到新書)")
     args = ap.parse_args()
 
     # 選單為 JS 動態產生,靜態 HTML 無連結 → 用內建權威清單(見 CATEGORIES 說明)
@@ -266,7 +273,7 @@ def main():
                 print(f"[{i}/{len(cats)}] 已完成,略過:{text}")
                 continue
             print(f"[{i}/{len(cats)}] 抓取:{text}")
-            res = crawl_category(text)
+            res = crawl_category(text, force=args.refresh)
             prog["categories"][text] = {"total": res["total"], "count": len(res["codes"]),
                                         "codes": res["codes"]}
             save_progress(prog)

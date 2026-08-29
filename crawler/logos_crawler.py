@@ -38,6 +38,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+from html import unescape as _unescape
+
 from bs4 import BeautifulSoup
 
 from common import JsonlWriter, make_session, polite_fetch
@@ -70,6 +72,76 @@ def tidy(s: str) -> str:
     return s.strip()
 
 
+# ── 產品資訊區塊(JavaScript document.write)────────────────────
+# 2026-08-29 發現:基道商品頁的 ISBN／出版社／出版日期／尺寸／頁數／重量不是靜態 HTML,
+# 而是由 <script> 動態寫出的:
+#     var s, nbsp='&'+'nbsp;';
+#     s = "9789624576702";
+#     if (s!=nbsp) document.write('ISBN：'+s+'<br>');
+#     s = "2026-7-15";
+#     if (s!=nbsp) document.write('出版日期：'+s+'<br>');
+# BeautifulSoup 不執行 JS、<script> 內容也不算文字節點,所以底下那組以 get_text() 為底的
+# 正則從建站以來一次都沒命中過(實測 22,855 筆:publish_date 0%、isbn 只有靠商品碼撿來的 62%)。
+# 解法:直接對原始 HTML 抽這組鍵值對,不必跑瀏覽器。
+_JS_FIELD_RE = re.compile(
+    r's\s*=\s*"(?P<val>(?:[^"\\]|\\.)*)"\s*;\s*'
+    r'if\s*\(\s*s\s*!=\s*nbsp\s*\)\s*document\.write\(\s*'
+    r"'(?P<label>[^']*?)\s*[:：]\s*'",
+    re.S,
+)
+
+# 站方標籤 → 紀錄欄位(import.php 已認得 dimensions/weight,見 tools/import.php)
+_JS_FIELD_MAP = {
+    "ISBN": "isbn",
+    "出版社": "publisher",
+    "出版日期": "publish_date",
+    "頁數": "page_count",
+    "尺寸": "dimensions",
+    "重量": "weight",
+    "裝訂": "binding",
+    "英文書名": "title_en",
+    "譯者": "translators_raw",
+    "編者": "editors_raw",
+    "系列": "series",
+}
+
+
+def norm_date(s: str) -> str:
+    """基道顯示為「2026-7-15」這種**未補零**的格式,直接送進 import 會被毀掉:
+    tools/import.php 的 parse_date() 先把非數字全刪再切,"2026-7-15" → "2026715"(7 碼)
+    落到「>=6 碼」分支 → 變成月份 71。故在來源端就補零成 2026-07-15(8 碼)。
+    也一併吃 2026/7/15、2026年7月15日 等寫法;認不出來就原樣退回,交給下游處理。"""
+    m = re.search(r"(\d{4})\D{1,3}(\d{1,2})(?:\D{1,3}(\d{1,2}))?", s)
+    if not m:
+        return s
+    y, mo, d = m.group(1), int(m.group(2)), m.group(3)
+    if not 1 <= mo <= 12:
+        return s
+    if d and 1 <= int(d) <= 31:
+        return f"{y}-{mo:02d}-{int(d):02d}"
+    return f"{y}-{mo:02d}"
+
+
+def parse_info_script(raw_html: str) -> dict[str, str]:
+    """從商品頁原始 HTML 的 document.write 區塊抽「標籤 → 值」。
+
+    值可能夾 HTML(出版社是 <a> 連結)→ 去標籤 + unescape;
+    空值站方以 &nbsp; 佔位(JS 自己也會跳過)→ 一併略過。"""
+    out: dict[str, str] = {}
+    for m in _JS_FIELD_RE.finditer(raw_html):
+        label = m.group("label").strip()
+        val = m.group("val")
+        val = val.replace('\\"', '"').replace("\\'", "'").replace("\\/", "/")
+        val = re.sub(r"<[^>]+>", "", val)          # 去掉 <a> 之類的標籤
+        val = _unescape(val)
+        val = re.sub(r"\s+", " ", val).strip()
+        if not val or val in {"\xa0", "&nbsp;"}:  # 空值佔位
+            continue
+        if label and label not in out:
+            out[label] = val
+    return out
+
+
 # ── 1. 列表頁(累積檢索)──────────────────────────────────────
 
 def extract_codes(html: str) -> list[str]:
@@ -93,10 +165,12 @@ def is_valid_list_page(html: str) -> bool:
     return bool(extract_total(html) or extract_codes(html))
 
 
-def fetch_list(url: str) -> str | None:
-    """抓列表頁;快取到空殼頁則 force 重抓一次,仍無效回 None(不信任壞快取)。"""
+def fetch_list(url: str, force: bool = False) -> str | None:
+    """抓列表頁;快取到空殼頁則 force 重抓一次,仍無效回 None(不信任壞快取)。
+
+    force=True:繞過磁碟快取(每日新品必用——列表頁快取會永遠回到第一次抓的那頁)。"""
     try:
-        html = fetch(url)
+        html = fetch(url, force=force)
         if not is_valid_list_page(html):
             print(f"  [空殼頁] 重抓 {url}")
             html = fetch(url, force=True)
@@ -173,6 +247,26 @@ def parse_product(code: str, retried: bool = False) -> dict | None:
         m = re.search(pat, text)
         if m:
             rec[key] = m.group(1).strip()
+
+    # 產品資訊區塊(JS document.write)——上面那組純文字正則對基道無效,真正的欄位在這裡。
+    # 既有值(meta/純文字)優先,只補空的;整包另存 spec_all 進 extra 不丟資料。
+    spec = parse_info_script(html)
+    if spec:
+        rec["spec_all"] = spec
+        for label, val in spec.items():
+            key = _JS_FIELD_MAP.get(label)
+            if not key or rec.get(key):
+                continue
+            if key == "page_count":
+                m = re.search(r"\d+", val)
+                if not m:
+                    continue
+                val = m.group(0)
+            elif key == "publish_date":
+                val = norm_date(val)
+            elif key == "dimensions" and "mm" not in val.lower():
+                val = f"{val} mm"          # 站方顯示為「尺寸：150*210*16 mm」
+            rec[key] = val
 
     # 書碼本身常是 ISBN(13 或 10):兩者都認,交給 import 轉 ISBN13 再跨站配對,
     # 提高與校園同書的合併命中率(如 981004044X 這類 ISBN-10 商品碼)。
