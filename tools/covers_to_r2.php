@@ -24,7 +24,7 @@ require dirname(__DIR__) . '/api/lib/db.php';
 
 $opt   = getopt('', ['limit::', 'dry-run', 'source::']);
 $limit = (int) ($opt['limit'] ?? 0);
-$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress)
+$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress|tiendao)
 $dry   = array_key_exists('dry-run', $opt);
 
 $r2 = app_config()['r2'] ?? null;
@@ -113,6 +113,36 @@ function url_candidates(string $url): array
     return [$url];
 }
 
+/**
+ * URL 的 path 段做 percent-encoding(保留 /),query 不動。
+ *
+ * 為什麼不直接 rawurlencode 整條:那會把 `://` 與 `?` 也編掉。
+ * 為什麼要防雙重編碼:來源站若已給編碼後的網址,再編一次 `%E9` 會變成 `%25E9`,
+ * 取回 404 —— 而 404 在本工具只會記一行「HTTP 404」,很難回推是自己編壞的。
+ */
+function encode_url_path(string $url): string
+{
+    $parts = parse_url($url);
+    if ($parts === false || !isset($parts['host']) || ($parts['path'] ?? '') === '') {
+        return str_replace(' ', '%20', $url);
+    }
+    $path = $parts['path'];
+    if (preg_match('/%[0-9A-Fa-f]{2}/', $path) === 1) {
+        $enc = str_replace(' ', '%20', $path);      // 已編碼過,只補空格
+    } else {
+        $enc = implode('/', array_map('rawurlencode', explode('/', $path)));
+    }
+    $out = ($parts['scheme'] ?? 'https') . '://' . $parts['host'];
+    if (isset($parts['port'])) {
+        $out .= ':' . $parts['port'];
+    }
+    $out .= $enc;
+    if (isset($parts['query']) && $parts['query'] !== '') {
+        $out .= '?' . $parts['query'];
+    }
+    return $out;
+}
+
 function fetch_image(string $url, ?string &$why = null): ?array
 {
     // 以琳(elimbookstore)擋非瀏覽器請求:圖檔需瀏覽器 UA + Referer 才回 200
@@ -127,8 +157,10 @@ function fetch_image(string $url, ?string &$why = null): ?array
         $headers[] = 'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8';
         usleep(random_int(1000000, 1500000)); // 對以琳額外放慢,避免觸發 WAF
     }
-    // 檔名可能帶空格/括號(如「01cover (1).png」),未編碼會讓 curl 連線失敗
-    $url = str_replace(' ', '%20', $url);
+    // 檔名可能帶空格/括號(如「01cover (1).png」)或**中文**(天道 9/2 實測:
+    // 「邁向豐盛的職場人生_平面書影_封面-600x844.jpg」),未編碼會讓 curl 連線失敗
+    // 或被伺服器拒絕。只編 path 段,query 原樣保留;已編碼過的不再編(避免 %25XX)。
+    $url = encode_url_path($url);
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -165,8 +197,8 @@ function fetch_image(string $url, ?string &$why = null): ?array
 $pdo = db();
 $srcCond = '';
 if ($srcFilter !== '') {
-    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr', 'pctpress'], true)) {
-        exit("--source 只接受 campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress\n");
+    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr', 'pctpress', 'tiendao'], true)) {
+        exit("--source 只接受 campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress|tiendao\n");
     }
     $srcCond = " AND e.source = " . $pdo->quote($srcFilter);
 }

@@ -206,7 +206,7 @@ $sql = "SELECT b.book_id, b.title, b.subtitle, b.author, b.publisher, b.keywords
          WHERE bs.book_id=b.book_id AND s.scheme='campus' ORDER BY s.code LIMIT 1) AS campus_label
         FROM books b WHERE $where ORDER BY b.book_id" . ($limit ? " LIMIT $limit" : '');
 $rows = db()->query($sql)->fetchAll();
-echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($campusOnly ? "(--campus-only 校園來源書)" : ($all ? "(--all 全部上架)" : "(僅未分類)")) . "\n";
+echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($campusOnly ? "(--campus-only 校園來源書)" : ($orphans ? "(--orphans:全部無 campus/logos 存證的上架書 —— ★會覆寫其他 12 家來源已 apply 的 primary)" : ($all ? "(--all 全部上架)" : "(僅未分類 category_id IS NULL)"))) . "\n";
 
 if (!$dry) {
     $unpubBook = db()->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid');
@@ -241,7 +241,7 @@ foreach ($rows as $b) {
         }
         if (!$dry) {
             $unpubBook->execute([':bid' => (int) $b['book_id']]);
-            if (++$done % 500 === 0) { db()->commit(); db()->beginTransaction(); echo "  已處理 $done…\n"; }
+            if (++$done % 500 === 0) { db()->commit(); db()->beginTransaction(); echo "  已處理 {$done}…\n"; }
         }
         continue;
     }
@@ -296,7 +296,7 @@ foreach ($rows as $b) {
         foreach ($matched as $i => $cat) {
             $insBS->execute([':b' => (int) $b['book_id'], ':s' => $catSubjectId[$cat], ':w' => $i === 0 ? 10 : 5]);
         }
-        if (++$done % 500 === 0) { db()->commit(); db()->beginTransaction(); echo "  已處理 $done…\n"; }
+        if (++$done % 500 === 0) { db()->commit(); db()->beginTransaction(); echo "  已處理 {$done}…\n"; }
     }
 }
 if (!$dry && db()->inTransaction()) db()->commit();

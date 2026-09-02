@@ -80,13 +80,41 @@ if (PHP_SAPI !== 'cli') {
 }
 require dirname(__DIR__) . '/api/lib/db.php';
 
+/**
+ * 來源 → 幣別對映(2026-09-01 決議 A,海外五站前置)。
+ *
+ * 原本是 import 內一行硬編碼三元式:`$source === 'logos' ? 'HKD' : 'TWD'`,
+ * 只認得基道一站是港幣、其餘一律台幣。海外站(天道、突破、海天、浸信會=港幣;
+ * 麥種=美金)接進來會被整批誤標成台幣,而 formats_prices.currency 一旦寫錯,
+ * 書目頁就會把 HK$128 顯示成「TWD 128」——數字對、幣別錯,比缺值更難察覺。
+ *
+ * 規則:爬蟲輸出的 currency 優先,本表只當 fallback;不做匯率換算,
+ * 書目頁直接標示原幣。新增來源務必在此登錄,漏登會靜默落回 TWD。
+ */
+const SOURCE_CURRENCY = [
+    // 台灣
+    'campus'     => 'TWD', 'elim'    => 'TWD', 'grace'      => 'TWD',
+    'wdbook'     => 'TWD', 'osb'     => 'TWD', 'taosheng'   => 'TWD',
+    'cclm'       => 'TWD', 'cosmiccare' => 'TWD', 'mezu'    => 'TWD',
+    'twgbr'      => 'TWD', 'pctpress' => 'TWD',
+    // 香港
+    'logos'      => 'HKD', 'tiendao' => 'HKD', 'rockhouse'  => 'HKD',
+    'btproduct'  => 'HKD', 'bappress' => 'HKD',
+    // 美國
+    'akow'       => 'USD',
+    // 馬來西亞(衛理書房,砂拉越;既有行為即 MYR 標價但先前落 TWD,一併更正)
+    'methodist'  => 'MYR',
+];
+const DEFAULT_CURRENCY = 'TWD';
+
 $opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run']);
 $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
 $dry    = array_key_exists('dry-run', $opt);
-if (!$file || !in_array($source, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr', 'pctpress'], true)) {
-    exit("用法:php tools/import.php --file=xxx.jsonl --source=campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress [--limit=N] [--dry-run]\n");
+$SOURCES = array_keys(SOURCE_CURRENCY);
+if (!$file || !in_array($source, $SOURCES, true)) {
+    exit("用法:php tools/import.php --file=xxx.jsonl --source=" . implode('|', $SOURCES) . " [--limit=N] [--dry-run]\n");
 }
 if (!is_file($file)) {
     exit("找不到檔案:$file\n");
@@ -218,7 +246,7 @@ function map_record(string $source, array $r): array
         'store_code'     => cap(tidy($r['item_no'] ?? ($r['code'] ?? null)), 30),
         'price'          => isset($r['price_list']) && $r['price_list'] !== '' ? $r['price_list']
                             : ($r['price_sale'] ?? null),
-        'currency'       => tidy($r['currency'] ?? null) ?: ($source === 'logos' ? 'HKD' : 'TWD'),
+        'currency'       => tidy($r['currency'] ?? null) ?: (SOURCE_CURRENCY[$source] ?? DEFAULT_CURRENCY), // 爬蟲值優先,對映表當 fallback(決議 A)
         'cover_url'      => tidy($r['cover_url'] ?? null),
         'source_url'     => $r['source_url'] ?? null,
         'subject_code'   => cap(tidy($r['category_source'] ?? null), 40), // 2026-08-25 20→40:subjects.code 已加寬(福音書房 24 碼 ID handle)
@@ -306,12 +334,21 @@ while (($line = fgets($fh)) !== false) {
     // 購書連結:天恩電子書標「(電子書)」;微讀全站皆電子書故不加尾綴,
     // 惟簡體書標「(簡體)」,與繁體版本並列時可辨。
     $isEbook     = in_array($source, ['grace', 'wdbook'], true) && !empty($raw['is_ebook']);
-    $buyPlatform = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
+    $platformName = ['campus' => '校園書房', 'logos' => '基道 BookFinder',
                     'elim' => '以琳書房', 'grace' => '天恩出版社',
                     'wdbook' => '微讀書城', 'methodist' => '衛理書房',
                     'osb' => '格子外面', 'taosheng' => '道聲', 'cclm' => '橄欖華宣',
                     'cosmiccare' => '宇宙光', 'mezu' => '真哪噠',
-                    'twgbr' => '福音書房', 'pctpress' => '教會公報社'][$source]
+                    'twgbr' => '福音書房', 'pctpress' => '教會公報社',
+                    // 海外(2026-09 起,一站一版 v1.11.0～v1.15.0)
+                    'tiendao' => '天道書樓', 'btproduct' => '突破機構',
+                    'rockhouse' => '海天書樓', 'bappress' => '浸信會出版社',
+                    'akow' => '麥種傳道會'][$source] ?? null;
+    // 漏登名稱會讓購書鈕變成空標題,寧可當場中止也不要產出無名連結
+    if ($platformName === null) {
+        exit("來源 $source 未登錄購書平台名稱,請補 \$platformName 對映表\n");
+    }
+    $buyPlatform = $platformName
                  . ($source === 'grace' && $isEbook ? '(電子書)'
                     : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
 

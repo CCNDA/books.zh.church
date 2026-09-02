@@ -61,6 +61,7 @@ import mezu_crawler as mezu
 import twgbr_crawler as twgbr
 import pctpress_crawler as pctpress
 import methodist_crawler as methodist
+import tiendao_crawler as tiendao
 import osb_crawler as osb
 import taosheng_crawler as taosheng
 import wdbook_crawler as wdbook
@@ -533,6 +534,69 @@ def collect_mezu(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
 
 # ── 共用:逐筆解析新品 ──────────────────────────────────────
 
+# ── 天道書樓 每日新品(105 快路徑 + 有新品才全掃取分類)────────────
+
+def collect_tiendao(writer, max_pages: int, dry_run: bool,
+                    full_scan: bool = False) -> list[dict] | None:
+    """天道:每日只走 path=105「最新出版」(1 頁、64 件),偵測到新 pid 才走全分類。
+
+    ═══ 為什麼是這個設計(2026-09-02 實測,不是猜的)═══
+
+    diag【G】拿全量 1233 件離線檢定 105 的涵蓋率:
+      全站出版日最新  30 本 → 100.0% 在 105 內
+      全站出版日最新  60 本 →  88.3%
+      全站出版日最新 120 本 →  49.2%
+    105 只有 64 件卻橫跨 1999-2026(2026:5 / 2025:14 / 2024:12 / 2023:13 / 2022:14
+    / 2020:1 / 1999:1)—— **它是站方手動維護的推薦位,不是自動新品列表**。
+    但「最新 30 本 100% 命中」證明新書確實會被放進去,即時性足夠當快路徑。
+
+    **為什麼不能只走 105:** 105 是 promo 分類(tiendao_category_map 裡
+    internal_name=NULL 僅存證不歸類)。只走它的話,新書的分類歸屬只有「最新出版」
+    一項,apply_tiendao_categories.php 無從歸類 → 那本書會沒有 primary。
+    所以偵測到新品時要走完整 94 個分類,把主題分類歸屬一起收齊(雙軌分類直接可用)。
+
+    成本:沒有新品的日子 **1 次請求**;有新品的日子 94 次清單 + N 次商品頁
+    (約 4-5 分鐘,節流 2-3 秒)。新品不是每天有,所以平均極省 ——
+    對比基道每天固定全掃 197 頁約 8 分鐘。
+
+    **--full-scan 是每週對帳用**:105 漏掉的是「上架日新但出版日舊」的書
+    (最新 60 本有 7 本不在 105 內),單靠 105 會永久漏掉它們,而且 log 全綠
+    看不出漏 —— 這正是 8/27 基道那次的形狀。清單頁一律 force 由
+    walk_category() 內建保證。"""
+    try:
+        cats = tiendao.parse_nav(force=True)
+    except RuntimeError as e:
+        print(f"天道首頁(導覽選單)抓取失敗:{e}", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    if not cats:
+        print("天道導覽選單解析不到分類(版型可能改版)", flush=True)
+        return None
+
+    if not full_scan:
+        newest = next((c for c in cats if c["path_id"] == "105"), None)
+        if newest is None:
+            print("天道:導覽選單找不到 path=105「最新出版」——"
+                  "站方可能改版,本次改走全分類", flush=True)
+        else:
+            pids = tiendao.walk_category(newest)
+            unseen = [p for p in pids if not writer.has(p)]
+            print(f"天道:105「最新出版」{len(pids)} 件,其中未見過 {len(unseen)} 件",
+                  flush=True)
+            if not unseen:
+                return []          # 無新品 → 今天到此為止,只花了 1 次請求
+            print("天道:偵測到新品 → 走全分類蒐集主題分類歸屬"
+                  "(只走 105 會讓新書沒有 primary)", flush=True)
+
+    members = tiendao.collect_memberships(cats)
+    new_keys = [p for p in members if not writer.has(p)]
+    print(f"天道:全站 {len(members)} 件,新品 {len(new_keys)} 件", flush=True)
+
+    def parse(key: str):
+        return tiendao.parse_product(key, members[key])
+
+    return _parse_new(new_keys, parse, writer, dry_run)
+
+
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
     """逐筆抓商品頁解析;dry-run 只列印,否則寫入 master jsonl(去重)並回傳首見紀錄。"""
     fresh: list[dict] = []
@@ -557,7 +621,8 @@ def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dic
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
-                             "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress"])
+                             "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress",
+                             "tiendao"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -567,6 +632,9 @@ def main():
     ap.add_argument("--min-pages", type=int, default=0,
                     help="基道專用:掃滿 N 頁後遇整頁皆已見即停(省時模式)。"
                          "0=預設,列表全掃不早停——基道按出版日期排序,早停會漏掉新上架的舊書")
+    ap.add_argument("--full-scan", action="store_true",
+                    help="天道專用:跳過 105 快路徑直接走全分類(每週對帳用;"
+                         "105 是站方手動推薦位,會漏掉上架日新但出版日舊的書)")
     ap.add_argument("--out", help="delta jsonl 輸出路徑;未指定則自動命名 data/new/<source>_<ts>.jsonl")
     ap.add_argument("--dry-run", action="store_true", help="只列出新品、不寫 master 也不寫 delta")
     ap.add_argument("--browser-ua", action="store_true", help="校園改用瀏覽器式 UA(遇 500/封鎖時用)")
@@ -599,6 +667,13 @@ def main():
     elif args.source == "methodist":
         writer = _writer("methodist_books.jsonl", "pid")
         fresh = collect_methodist(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "tiendao":
+        writer = _writer("tiendao_books.jsonl", "pid")
+        fresh = collect_tiendao(writer, args.max_pages, args.dry_run,
+                                full_scan=args.full_scan)
         if fresh is None:
             writer.close()
             sys.exit(2)

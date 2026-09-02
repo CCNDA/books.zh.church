@@ -76,6 +76,19 @@ run_source cosmiccare
 run_source mezu
 run_source twgbr
 run_source pctpress
+# 天道書樓:每日只走 path=105「最新出版」(1 頁 64 件),偵測到新 pid 才走全分類
+#   取主題分類歸屬 —— 只走 105 的話新書只會掛到 promo 分類(internal_name=NULL),
+#   apply 無從歸類、那本書就沒有 primary。
+# ★ 每週一改走全分類對帳(--full-scan):105 是站方**手動維護的推薦位**,不是自動
+#   新品列表(9/2 離線檢定:105 共 64 件卻橫跨 1999-2026;全站出版日最新 30 本
+#   100% 在 105 內,但最新 60 本只有 88.3%)。漏掉的是「上架日新、出版日舊」那類,
+#   單靠 105 會永久漏而且 log 全綠看不出來 —— 就是 8/27 基道那次的形狀。
+if [ "$(date +%u)" = "1" ]; then
+  log "天道:今天是週一,改走全分類對帳(--full-scan)"
+  run_source tiendao --full-scan
+else
+  run_source tiendao
+fi
 
 # ── 對映分類套用:scheme 存證 → *_category_map 對映站內分類 ──
 # 冪等可重跑;需在 classify 之前跑,新書由對映表歸類(而非關鍵字猜測),
@@ -104,6 +117,7 @@ apply_map "宇宙光" "$ROOT/tools/apply_cosmiccare_categories.php"
 apply_map "真哪噠" "$ROOT/tools/apply_mezu_categories.php"
 apply_map "福音書房" "$ROOT/tools/apply_twgbr_categories.php"
 apply_map "教會公報社" "$ROOT/tools/apply_pctpress_categories.php"
+apply_map "天道書樓" "$ROOT/tools/apply_tiendao_categories.php"
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),
