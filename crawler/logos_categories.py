@@ -31,12 +31,20 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, unquote
 
 from common import make_session, polite_fetch
+
+# stdout 重導向到檔案時 Python 預設 block buffering(4-8KB),進度與重試訊息會卡在
+# 緩衝區直到程式結束 —— nohup/cron 下等於「跑了兩小時 log 空的」。改行緩衝即時可見。
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+except Exception:
+    pass
 
 BASE = "https://www.logos.com.hk"
 CONTENT = BASE + "/bf/acms/content.asp?site=logosbf"
@@ -93,12 +101,19 @@ CATEGORIES = [
     "其他/期刊／主日學教材", "其他/工具書", "其他/保健", "其他/小冊子",
     "其他/單張", "其他/歌書", "其他/教會用品",
 ]
+# 2026-09-04 以瀏覽器讀選單複核(89 個 field=Category 連結)的兩項發現:
+# 1. 「童書」名稱正確,但**站方自己就回「找到 0 項」** —— 童書類目前是空的,不是我們抓錯;
+#    童書實際散在「聖經/兒童聖經／聖經故事」與「分齡牧養/兒童事工」。
+# 2. 選單另有本清單未收的「得獎作品推介」及其三個子類(基督教金書獎、湯清基督教文藝獎、
+#    香港出版雙年獎)。那是跨主題的**獎項選集**,書本身都已在主題分類裡,
+#    收了只增加 scheme='logos' 存證、對 primary 分類沒有幫助,且 logos_category_map 未登錄
+#    → 暫不納入,列為待評估。
 
 session = make_session()
 
 
-def fetch(url: str, force: bool = False) -> str:
-    return polite_fetch(session, url, CACHE, THROTTLE, force=force)
+def fetch(url: str, force: bool = False, max_retries: int = 5) -> str:
+    return polite_fetch(session, url, CACHE, THROTTLE, force=force, max_retries=max_retries)
 
 
 def cjk(label: str) -> str:
@@ -150,16 +165,23 @@ def cat_url(text: str, page: int = 1) -> str:
 
 
 def is_valid_list_page(html: str) -> bool:
-    return bool(extract_total(html) or extract_codes(html))
+    # 「找到 0 項」是**合法的空分類**,不是抓取失敗 —— 2026-09-04 以瀏覽器實測:
+    # 「童書」在站方選單裡存在(選單連結與本程式組出來的網址完全一致),但站方自己就回 0 項。
+    # 原本寫 `bool(extract_total(html) or ...)`,total==0 是 falsy → 空分類被誤判成失敗、
+    # 還會多抓一次 force,log 印「分類首頁抓取失敗」害人以為是 bug。改用 is not None。
+    return extract_total(html) is not None or bool(extract_codes(html))
 
 
 def fetch_list(url: str, force: bool = False) -> str | None:
     """force=True:繞過磁碟快取。--refresh 重爬時必用,否則會讀到上次抓的分類頁,
     新書永遠不會出現在對照表裡(2026-08-27 基道每日新品同款陷阱)。"""
     try:
-        html = fetch(url, force=force)
-        if not is_valid_list_page(html):
-            html = fetch(url, force=True)
+        # 清單頁重試上限壓到 2:polite_fetch 的退避是 60 秒×次數,5 次要燒掉約 15 分鐘,
+        # 全站 force 重爬有 1,200 頁,站方一擋就會變成「整晚跑不完且 log 看不出原因」。
+        html = fetch(url, force=force, max_retries=2)
+        if not is_valid_list_page(html) and not force:
+            # force=True 時第一次就是實抓,再抓一次只是重複一輪退避,沒有意義
+            html = fetch(url, force=True, max_retries=2)
         return html if is_valid_list_page(html) else None
     except RuntimeError as e:
         print(f"  [失敗] {e}")
@@ -174,6 +196,9 @@ def crawl_category(text: str, force: bool = False) -> dict:
         print(f"  [略過] 分類首頁抓取失敗:{text}")
         return {"total": None, "codes": []}
     total = extract_total(first)
+    if total == 0:
+        print(f"  [空分類] {text}:站方回「找到 0 項」(不是抓取失敗)")
+        return {"total": 0, "codes": []}
     codes: dict[str, None] = {}
     for c in extract_codes(first):
         codes.setdefault(c)
@@ -184,8 +209,17 @@ def crawl_category(text: str, force: bool = False) -> dict:
         html = fetch_list(cat_url(text, p), force=force)
         got = extract_codes(html) if html else []
         if not got:
+            # 站方會偶發回一頁「有『找到 N 項』但沒有任何商品」的清單頁。
+            # is_valid_list_page 認得 total 所以不會重抓 → 一頁 20 筆就這樣靜默不見
+            # (2026-09-04 實測:其他/期刊／主日學教材 第 7 頁少 20 筆,同一頁重抓即正常)。
+            print(f"  [重抓] 第 {p}/{pages} 頁 0 碼,重試一次")
+            html = fetch_list(cat_url(text, p), force=True)
+            got = extract_codes(html) if html else []
+        if not got:
             bad += 1
+            print(f"  [空頁 {bad}/3] 第 {p}/{pages} 頁抓不到商品碼")
             if bad >= 3:
+                print(f"  [提早結束] {text}:連續 3 頁無商品碼(止於第 {p} 頁),實得可能不完整")
                 break
             continue
         bad = 0
@@ -237,17 +271,30 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--discover", action="store_true", help="只印探索到的分類清單")
     ap.add_argument("--probe", action="store_true", help="抓第一個分類首頁驗證解析")
-    ap.add_argument("--only", default=None, help="只抓指定主分類(含子分類)")
+    ap.add_argument("--only", default=None,
+                    help="只抓指定分類。給主分類名(如 其他)= 該主分類含所有子分類;"
+                         "給完整路徑(如 '其他/期刊／主日學教材')= 只抓那一個子分類,"
+                         "補一頁漏抓時最省時間")
     ap.add_argument("--refresh", action="store_true",
                     help="忽略進度,重抓所有分類(同時繞過頁面快取,才看得到新書)")
+    ap.add_argument("--resume", action="store_true",
+                    help="斷點續跑:同樣繞過頁面快取,但保留既有進度,只補還沒完成的分類"
+                         "(重爬被中斷時用這個,不要用 --refresh 從頭再來)")
+    ap.add_argument("--max-age", type=int, default=7, metavar="DAYS",
+                    help="--resume 時,進度裡超過幾天(或沒有時間戳)的分類要重抓,預設 7。"
+                         "進度檔本身不記各類抓取時間時無法分辨新舊,故一律視為過期重抓")
     args = ap.parse_args()
 
     # 選單為 JS 動態產生,靜態 HTML 無連結 → 用內建權威清單(見 CATEGORIES 說明)
     cats = list(CATEGORIES)
     if args.only:
-        cats = [c for c in cats if c.split("/", 1)[0] == args.only]
+        if "/" in args.only:            # 完整路徑 → 只抓那一個子分類
+            cats = [c for c in cats if c == args.only]
+        else:                            # 主分類名 → 含其下所有子分類
+            cats = [c for c in cats if c.split("/", 1)[0] == args.only]
         if not cats:
-            print(f"找不到主分類「{args.only}」,可用:{'、'.join(TOPICAL)}")
+            print(f"找不到分類「{args.only}」。主分類可用:{'、'.join(TOPICAL)}"
+                  f"\n(子分類請給完整路徑,如 '其他/期刊／主日學教材')")
             return
 
     if args.discover:
@@ -263,22 +310,53 @@ def main():
         return
 
     prog = load_progress()
-    if args.refresh:
-        prog["categories"] = {}
+    reset = args.refresh and not args.resume   # --resume 保留進度,只補未完成分類
+    force = args.refresh or args.resume        # 兩者都要繞過頁面快取
+    if reset:
+        if args.only:
+            # --only + --refresh 只重置這次要抓的那幾類,不動其他 —— 補抓單一分類
+            # (例:9/3 童書首頁抓取失敗、實得 0 碼)不該把另外 63 類的進度一起清掉
+            for c in cats:
+                prog["categories"].pop(c, None)
+        else:
+            prog["categories"] = {}
 
     start = time.time()
     try:
         for i, text in enumerate(cats, 1):
-            if text in prog["categories"] and not args.refresh:
-                print(f"[{i}/{len(cats)}] 已完成,略過:{text}")
-                continue
+            if text in prog["categories"] and not reset:
+                if not args.resume:
+                    print(f"[{i}/{len(cats)}] 已完成,略過:{text}")
+                    continue
+                # --resume:只略過夠新的;沒有 fetched_at 的是舊格式進度,無法判斷新舊 → 重抓
+                ts = prog["categories"][text].get("fetched_at")
+                age = None
+                if ts:
+                    try:
+                        age = (datetime.now(timezone.utc)
+                               - datetime.strptime(ts, "%Y-%m-%dT%H:%M:%SZ").replace(
+                                   tzinfo=timezone.utc)).days
+                    except ValueError:
+                        age = None
+                if age is not None and age <= args.max_age:
+                    print(f"[{i}/{len(cats)}] {age} 天前抓過,略過:{text}")
+                    continue
+                why = "無時間戳(舊格式進度)" if age is None else f"已過 {age} 天"
+                print(f"[{i}/{len(cats)}] {why},重抓:{text}")
             print(f"[{i}/{len(cats)}] 抓取:{text}")
-            res = crawl_category(text, force=args.refresh)
-            prog["categories"][text] = {"total": res["total"], "count": len(res["codes"]),
-                                        "codes": res["codes"]}
+            res = crawl_category(text, force=force)
+            prog["categories"][text] = {
+                "total": res["total"], "count": len(res["codes"]),
+                # 逐類時間戳:沒有它,--resume 就分不出「今天抓的」與「上個月抓的」,
+                # 只能整份重跑(2026-09-03 實際踩到:進度檔 49 類無從判斷新舊)
+                "fetched_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "codes": res["codes"]}
             save_progress(prog)
             print(f"    宣稱 {res['total']} 項,實得 {len(res['codes'])} 碼"
                   f"(累計 {len(prog['categories'])}/{len(cats)} 類)")
+            if res["total"] and len(res["codes"]) < res["total"] * 0.98:
+                print(f"    [警告] {text}:涵蓋率 {len(res['codes']) / res['total']:.1%},"
+                      f"少 {res['total'] - len(res['codes'])} 碼 —— 這一類要複查")
     except KeyboardInterrupt:
         print("\n[中斷] 進度與頁面快取已保存,重跑同指令即續抓")
     finally:

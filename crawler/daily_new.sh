@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓十一站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠)→ 產生當日 delta jsonl
-#      → tools/import.php 匯入(以 source_url 去重)→ 九站套對映分類 → 其餘分類回填。
+# 流程:new_arrivals.py 抓十五站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓)→ 產生當日 delta jsonl
+#      → tools/import.php 匯入(以 source_url 去重)→ 十三站套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
 
@@ -29,7 +29,7 @@ run_source() {
   local src="$1"; shift
   local out="data/new/${src}_${TS}.jsonl"
   log "--- $src:抓取新品 ---"
-  if python3 new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1; then
+  if python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1; then
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
       log "$src:偵測到 $n 本新書,匯入中…"
@@ -90,6 +90,11 @@ else
   run_source tiendao
 fi
 
+# 註:基道官網分類對照的重爬不在本腳本內 —— 全站 64 類、9/3 實測 356 分鐘,會把 apply
+#     與 classify 推到中午。改由 crawler/logos_cat_refresh.sh 於**每週二 22:00** 獨立排程,
+#     06:30 這一輪的 apply_logos_categories.php 就一定吃到當週最新的 logos_code_categories.jsonl。
+#     對照檔沒更新的期間,當週新書的基道分類會落回關鍵字猜測,下一次重爬後自動修正。
+
 # ── 對映分類套用:scheme 存證 → *_category_map 對映站內分類 ──
 # 冪等可重跑;需在 classify 之前跑,新書由對映表歸類(而非關鍵字猜測),
 # category_id 就位後 classify(只處理 NULL)自然跳過它們。
@@ -106,6 +111,7 @@ apply_map() {
     log "[警告] 找不到 $tool,略過${name}分類套用"
   fi
 }
+apply_map "基道" "$ROOT/tools/apply_logos_categories.php"
 apply_map "以琳" "$ROOT/tools/apply_elim_categories.php"
 apply_map "天恩" "$ROOT/tools/apply_grace_categories.php"
 apply_map "微讀" "$ROOT/tools/apply_wdbook_categories.php"
