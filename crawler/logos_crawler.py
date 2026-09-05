@@ -137,6 +137,11 @@ def parse_info_script(raw_html: str) -> dict[str, str]:
         val = re.sub(r"\s+", " ", val).strip()
         if not val or val in {"\xa0", "&nbsp;"}:  # 空值佔位
             continue
+        # 站方模板未替換的佔位符,例如 s = "%%BookISBN%%"(2026-09-04 補抓舊書時實測到)。
+        # 這種值長得像資料但完全是垃圾,放進 isbn 欄位會汙染 identifiers、
+        # 甚至讓 import 以「同 ISBN」把兩本不相干的書併成同一個 Work(必查陷阱第 20 條)。
+        if re.fullmatch(r"%%.*?%%", val):
+            continue
         if label and label not in out:
             out[label] = val
     return out
