@@ -107,6 +107,15 @@ const SOURCE_CURRENCY = [
 ];
 const DEFAULT_CURRENCY = 'TWD';
 
+// ★ 沒有線上購書管道的來源(熊哥 2026-09-05 裁示,起於突破機構)。
+//   這些站的商品頁網址不是購書連結,而是「書籍資訊」的一般外部連結
+//   → links.link_type 寫 'official' 而非 'buy',api/index.php 的購書彙整就不會撈到它,
+//     前端也就不會長出一個點下去買不到書的假購書按鈕。
+//   突破機構 buy.php 只是批發聯絡資訊頁(電話/傳真/電郵),不是購物車。
+//   浸信會(bappress)、麥種(akow)之後應沿用同一作法 —— 這也讓海外共通決議 B 項
+//   (「無購書連結要顯示什麼文字」)變成不需要:不顯示文字,直接給連結。
+const NO_BUY_SOURCES = ['btproduct'];
+
 $opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run']);
 $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
@@ -348,6 +357,11 @@ while (($line = fgets($fh)) !== false) {
     if ($platformName === null) {
         exit("來源 $source 未登錄購書平台名稱,請補 \$platformName 對映表\n");
     }
+    // ★ 無購書管道的來源不進 buy_links 平面欄位。
+    //   只改 links.link_type 是不夠的 —— api/index.php:499 的購書彙整是
+    //   「links(link_type='buy') + books.buy_links(平面後備)」兩邊聯集,
+    //   漏掉平面欄位一樣會在書目頁長出點下去買不到書的假購書按鈕。
+    $hasBuy = !in_array($source, NO_BUY_SOURCES, true);
     $buyPlatform = $platformName
                  . ($source === 'grace' && $isEbook ? '(電子書)'
                     : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
@@ -411,9 +425,9 @@ while (($line = fgets($fh)) !== false) {
             ':i13' => $m['isbn13'], ':i10' => $m['isbn10'], ':pc' => $m['page_count'],
             ':bd' => $m['binding'], ':lg' => $m['language'], ':se' => $m['series'],
             ':su' => $m['summary'], ':kw' => $m['keywords'],
-            ':bl' => json_encode([$isEbook
+            ':bl' => json_encode($hasBuy ? [$isEbook
                         ? ['platform' => $source, 'url' => $m['source_url'], 'label' => $buyPlatform]
-                        : ['platform' => $source, 'url' => $m['source_url']]],
+                        : ['platform' => $source, 'url' => $m['source_url']]] : [],
                      JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ':ex' => json_encode([$source => $extraRec], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ':src' => $source,
@@ -435,9 +449,11 @@ while (($line = fgets($fh)) !== false) {
         $extra = $curRow['extra'] ? (json_decode($curRow['extra'], true) ?: []) : [];
         $extra[$source] = $extraRec;
         $bl = $curRow['buy_links'] ? (json_decode($curRow['buy_links'], true) ?: []) : [];
-        $bl[] = $isEbook
-            ? ['platform' => $source, 'url' => $m['source_url'], 'label' => $buyPlatform]
-            : ['platform' => $source, 'url' => $m['source_url']];
+        if ($hasBuy) {
+            $bl[] = $isEbook
+                ? ['platform' => $source, 'url' => $m['source_url'], 'label' => $buyPlatform]
+                : ['platform' => $source, 'url' => $m['source_url']];
+        }
         $stmt = $pdo->prepare(
             "UPDATE books SET
                original_title = COALESCE(original_title, :ot), author = COALESCE(author, :au),
@@ -539,11 +555,14 @@ while (($line = fgets($fh)) !== false) {
                       ':p' => $m['price'], ':c' => $m['currency']]);
     }
 
-    // 7. 購書連結(版本層;天恩電子書標示「天恩出版社(電子書)」)
+    // 7. 來源連結(版本層;天恩電子書標示「天恩出版社(電子書)」)
+    //    無購書管道的來源寫 'official'(見檔頭 NO_BUY_SOURCES),其餘寫 'buy'。
+    $linkType = in_array($source, NO_BUY_SOURCES, true) ? 'official' : 'buy';
     $st = $pdo->prepare(
         "INSERT INTO links (edition_id, link_type, platform, url)
-         VALUES (:e, 'buy', :pf, :u)");
-    $st->execute([':e' => $editionId, ':pf' => $buyPlatform, ':u' => $m['source_url']]);
+         VALUES (:e, :lt, :pf, :u)");
+    $st->execute([':e' => $editionId, ':lt' => $linkType,
+                  ':pf' => $buyPlatform, ':u' => $m['source_url']]);
 
     // 8. 封面(先記來源網址;R2 轉存腳本後續更新 url_or_path 與 books.cover_url)
     if ($m['cover_url']) {

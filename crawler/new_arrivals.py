@@ -62,6 +62,7 @@ import twgbr_crawler as twgbr
 import pctpress_crawler as pctpress
 import methodist_crawler as methodist
 import tiendao_crawler as tiendao
+import btproduct_crawler as btproduct
 import osb_crawler as osb
 import taosheng_crawler as taosheng
 import wdbook_crawler as wdbook
@@ -597,6 +598,62 @@ def collect_tiendao(writer, max_pages: int, dry_run: bool,
     return _parse_new(new_keys, parse, writer, dry_run)
 
 
+def collect_btproduct(writer, max_pages: int, dry_run: bool,
+                      full_scan: bool = False) -> list[dict] | None:
+    """突破機構:每日走 type=new 前 2 頁(42 件),偵測到新 pid 才補走 cat/ser 取分類歸屬。
+
+    ═══ 為什麼是這個設計(2026-09-05 實測,不是猜的)═══
+
+    拿全量 583 本 master 離線檢定 type=new 第 1 頁(21 件)的涵蓋率:
+      出版日最新 10 本 → 10/10 (100.0%)
+      出版日最新 21 本 → 19/21 ( 90.5%)
+    而且**第 1 頁沒有任何一本落在「出版日最新 60 本」之外** ——
+    這與天道的 105 是相反的性質(105 只有 64 件卻橫跨 1999-2026,是站方手動推薦位)。
+    本站 type=new 是按**上架日**倒序的自動清單,可信。
+
+    那 2 本沒命中的是「出版日新、上架日較早」,對每日增量無害(上架當天就會在第 1 頁),
+    但為了邊界安全走前 2 頁。成本:沒有新品的日子 **2 次請求**。
+
+    **為什麼偵測到新品才走 cat/ser:** 583 本裡有 19 本商品頁「分類」欄是空的,
+    其中 11 本在 cat/ser 清單裡是有歸屬的 —— 站方清單歸類比商品頁欄位完整。
+    不走清單的話這類新書會沒有分類、落到 classify 的關鍵字猜測。
+    有新品的日子成本是 43 次清單 + N 次商品頁(這站小,約 2 分鐘)。
+
+    **--full-scan 每週對帳用**:改走權威清單(product_key= 空查詢,583 本 28 頁),
+    並與 cat/ser 聯集對帳。type=new 只有 298 件、是全站的一半,單靠它無法證明沒漏 ——
+    本站沒有 sitemap,週對帳是唯一的自我檢查。"""
+    try:
+        keys = btproduct.list_all_books(force=True) if full_scan else btproduct.list_new()
+    except RuntimeError as e:
+        print(f"突破機構清單抓取失敗:{e}", flush=True)
+        return None  # 供 main 判別失敗(結束碼 2)
+    if not keys:
+        print("突破機構:清單抓到 0 件 —— 站方可能改版,視為失敗,"
+              "**不當成今天沒有新書**", flush=True)
+        return None
+
+    new_keys = [k for k in keys if not writer.has(k)]
+    print(f"突破機構:清單 {len(keys)} 件,其中未見過 {len(new_keys)} 件", flush=True)
+    if not new_keys:
+        return []          # 無新品 → 今天到此為止,只花了 2 次請求
+
+    print("突破機構:偵測到新品 → 走 cat/ser 取分類歸屬"
+          "(商品頁分類欄約 3% 是空的,靠清單歸屬補)", flush=True)
+    cats, sers = btproduct.list_menus(force=True)
+    cat_map = {r["label"]: r["id"] for r in cats}
+    ser_map = {r["label"]: r["id"] for r in sers}
+    members, _empty = btproduct.collect_memberships(cats, sers, force=True)
+    if full_scan:
+        btproduct.report_reconcile(keys, members, _empty)
+
+    def parse(key: str):
+        return btproduct.parse_product(key, cat_map, ser_map, members=members.get(key))
+
+    fresh = _parse_new(new_keys, parse, writer, dry_run)
+    btproduct._flush_reports()
+    return fresh
+
+
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
     """逐筆抓商品頁解析;dry-run 只列印,否則寫入 master jsonl(去重)並回傳首見紀錄。"""
     fresh: list[dict] = []
@@ -622,7 +679,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
                              "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress",
-                             "tiendao"])
+                             "tiendao", "btproduct"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -633,7 +690,7 @@ def main():
                     help="基道專用:掃滿 N 頁後遇整頁皆已見即停(省時模式)。"
                          "0=預設,列表全掃不早停——基道按出版日期排序,早停會漏掉新上架的舊書")
     ap.add_argument("--full-scan", action="store_true",
-                    help="天道專用:跳過 105 快路徑直接走全分類(每週對帳用;"
+                    help="天道/突破專用:跳過每日快路徑直接走全站(每週對帳用;"
                          "105 是站方手動推薦位,會漏掉上架日新但出版日舊的書)")
     ap.add_argument("--out", help="delta jsonl 輸出路徑;未指定則自動命名 data/new/<source>_<ts>.jsonl")
     ap.add_argument("--dry-run", action="store_true", help="只列出新品、不寫 master 也不寫 delta")
@@ -674,6 +731,13 @@ def main():
         writer = _writer("tiendao_books.jsonl", "pid")
         fresh = collect_tiendao(writer, args.max_pages, args.dry_run,
                                 full_scan=args.full_scan)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "btproduct":
+        writer = _writer("btproduct_books.jsonl", "pid")
+        fresh = collect_btproduct(writer, args.max_pages, args.dry_run,
+                                  full_scan=args.full_scan)
         if fresh is None:
             writer.close()
             sys.exit(2)
