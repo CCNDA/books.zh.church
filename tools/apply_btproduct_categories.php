@@ -17,6 +17,14 @@ declare(strict_types=1);
  *     覆蓋在對映算完之後套用 —— 內容面判斷優先於機械對映。
  *     覆蓋表以 **pid** 為鍵,pid 來自 editions.source_url 的 `id=` 尾碼。
  *
+ *     ★ 2026-09-08 修:覆蓋原本被「跨站合併書不改 primary」的規則擋住,對那 13 本
+ *     合併書完全無效。實測 pid 本來就正確的兩筆:「賜我眾山的力量」目標靈修、實際
+ *     教會復興;「凡事謝恩」目標靈修、實際社會 —— 都沒套上。單書覆蓋的存在理由
+ *     就是要蓋過機械規則(見本檔第 17 行),不該被合併保護擋住。
+ *     故改為:**命中覆蓋表且有指定分類時,強制改寫 books.category_id**;
+ *     但**不刪別站貢獻的 cat 標籤**(那是 --override-all 的行為),只改 primary
+ *     並追加自己的標籤 —— 多重呈現鐵律:不做破壞其他來源資料的清洗。
+ *
  *  3. **下架範圍小**:抓取範圍只有 /tc/book/(禮品區整區不抓),所以本站沒有
  *     「非書混進來」的問題。unpublish 只用於教科書(熊哥 9/5 裁示)與站方測試資料。
  *
@@ -37,6 +45,7 @@ declare(strict_types=1);
  *   php tools/apply_btproduct_categories.php --dry-run      # 只統計不寫入
  *   php tools/apply_btproduct_categories.php                # 寫入
  *   php tools/apply_btproduct_categories.php --override-all # 合併書也取代 primary(慎用)
+ *   ※ 單書覆蓋表命中的書一律強制改 primary,不需要也不應該為此加 --override-all。
  * 冪等可重跑(改完對映表後重跑即生效)。
  */
 
@@ -154,7 +163,7 @@ $catSid = function (string $name) use (&$catSubjId, &$upSubjCat, $catCode, $pdo)
 
 $stats = []; $labelStats = []; $unmapped = [];
 $srcOnly = 0; $merged = 0; $multi = 0; $downs = 0; $done = 0;
-$fromSer = 0; $overridden = 0; $noMap = 0;
+$fromSer = 0; $overridden = 0; $noMap = 0; $forcedPrim = 0;
 
 if (!$dry) $pdo->beginTransaction();
 foreach ($byBook as $bid => $d) {
@@ -188,13 +197,15 @@ foreach ($byBook as $bid => $d) {
 
     // ── 單書覆蓋(內容面判斷優先於機械對映)──
     $pid = $pidOf[$bid] ?? null;
+    $hadOverride = false;   // 命中覆蓋表**且有指定分類**才算(純下架列 internal_name=NULL 不算)
     if ($pid !== null && array_key_exists($pid, $ovName)) {
         $overridden++;
         if ($ovUnpub[$pid]) $anyUnpub = true;
         $ovTarget = $ovName[$pid];
         // 覆蓋值放到最前面當 primary;原對映結果保留為次分類(多重呈現,不丟資訊)
         if ($ovTarget !== null && $ovTarget !== '') {
-            $mapped = array_values(array_unique(array_merge([$ovTarget], $mapped)));
+            $mapped      = array_values(array_unique(array_merge([$ovTarget], $mapped)));
+            $hadOverride = true;
         }
     }
 
@@ -210,14 +221,19 @@ foreach ($byBook as $bid => $d) {
     if (count($mapped) >= 2) $multi++;
     $stats[$primary] = ($stats[$primary] ?? 0) + 1;
 
+    // $replace   = 整組取代(先清空本書的 cat 標籤再重寫)—— btproduct-only 或 --override-all
+    // $forcePrim = 2026-09-08 新增:合併書命中單書覆蓋 → 只改 primary,**不清空**別站的標籤
+    $replace   = $isSrcOnly || $overrideAll;
+    $forcePrim = !$replace && $hadOverride;
+    if ($forcePrim) $forcedPrim++;
+
     if ($dry) continue;
 
-    $replace = $isSrcOnly || $overrideAll;
     if ($replace) $delCat->execute([':b' => $bid]);
     foreach ($mapped as $i => $name) {
         $insBS->execute([':b' => $bid, ':s' => $catSid($name), ':w' => $i === 0 ? 10 : 5]);
     }
-    if ($replace) $updBook->execute([':cid' => $cats[$primary], ':bid' => $bid]);
+    if ($replace || $forcePrim) $updBook->execute([':cid' => $cats[$primary], ':bid' => $bid]);
     if ($willDown) $downPub->execute([':bid' => $bid]);
 
     if (++$done % 500 === 0) { $pdo->commit(); $pdo->beginTransaction(); echo "  已處理 {$done}…\n"; }
@@ -229,7 +245,8 @@ arsort($stats); arsort($labelStats);
 echo "\n== 突破機構書歸類 ==\n";
 echo '共 ' . count($byBook) . " 本(btproduct-only {$srcOnly}、跨站合併 {$merged});"
    . "多分類(>=2 站內類):{$multi}\n";
-echo "單書覆蓋命中:{$overridden};分類完全靠系列軸得來:{$fromSer};"
+echo "單書覆蓋命中:{$overridden}(其中合併書強制改 primary:{$forcedPrim});"
+   . "分類完全靠系列軸得來:{$fromSer};"
    . "仍無對映(交 classify 關鍵字):{$noMap};下架:{$downs}\n";
 echo "\n== 突破官方分類命中(書數)==\n";
 foreach ($labelStats as $g => $n) echo sprintf("  %-34s %6d\n", $g, $n);
@@ -253,4 +270,13 @@ echo $dry
     . "    WHERE e.source='btproduct' AND b.is_published=0;   -- 預期 19\n"
     . "  -- 19 = btproduct-only 的教科書 16 + 站方測試資料 3。\n"
     . "  -- 教科書共 18 本,但跨站合併的那 2 本不下架 —— is_published 在**作品層**,\n"
-    . "  -- 下架會把別站的同一本書一起藏掉(沿天恩/衛理規則)。\n";
+    . "  -- 下架會把別站的同一本書一起藏掉(沿天恩/衛理規則)。\n"
+    . "  -- ★ 2026-09-08 新增:單書覆蓋是否真的生效,預期回傳 0 列\n"
+    . "  SELECT o.pid, o.title, o.internal_name AS want, c.name AS got\n"
+    . "    FROM btproduct_book_override o\n"
+    . "    JOIN editions e ON e.source='btproduct'\n"
+    . "     AND e.source_url = CONCAT('https://www.btproduct.com/tc/book/product.php?id=', o.pid)\n"
+    . "    JOIN books b ON b.book_id = e.book_id\n"
+    . "    LEFT JOIN categories c ON c.category_id = b.category_id\n"
+    . "   WHERE o.internal_name IS NOT NULL\n"
+    . "     AND (c.name IS NULL OR c.name <> o.internal_name);\n";

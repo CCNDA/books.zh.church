@@ -189,14 +189,57 @@ function cap(?string $s, int $n): ?string
     return mb_strlen($s, 'UTF-8') > $n ? mb_substr($s, 0, $n, 'UTF-8') : $s;
 }
 
-/** 多人名拆分(;、頓號);保留「等」尾註於 credit_text */
+/**
+ * 多人名拆分(半形/全形分號、頓號);保留「等」尾註於 credit_text。
+ *
+ * 2026-09-08 修兩處(Asana「[Bug] 突破機構分類誤判 + split_names 兩缺陷」):
+ *
+ * (1) 舊版字元集的 hexdump 是 5b 3b 3b e3 80 81 5d,也就是 [ ; ; 、 ] ——
+ *     **兩個半形分號(3B 3B)、沒有全形分號**。全形分號 U+FF1B(UTF-8: EF BC 9B)在某次編輯中
+ *     退化成第二個半形分號,以全形分號分隔的多作者因此從未被拆開,整串寫成一個人名。
+ *     這是本案第二次踩到「含全形標點的 regex 會退化」(前例:全形冒號 [::])。
+ *     故分隔符與括號一律以 PHP 的 \u{} escape 書寫、不寫字面全形字元 —— escape 是純 ASCII,不會退化。
+ *
+ * (2) 切割改為**括號感知**:括號內的分隔符不切。
+ *     實例(突破機構 pid 29152561,book_id 105019):
+ *       「彭正雄、陳碧凌、Breakazine 創作小組 (彼、桀、onki、gi)」
+ *     舊版拆成六個 person,其中「Breakazine 創作小組 (彼」是殘缺髒資料。
+ *     括號內的並列是同一個署名的內部結構(創作小組成員代號),不是多位作者。
+ *     多值鐵律的兩面:既不可漏拆(缺陷 1),也不可過度拆分(缺陷 2)。
+ */
+function split_delims(string $s): array
+{
+    // 分隔符:半形分號 3B、全形分號 U+FF1B、頓號 U+3001
+    static $delims = [';', "\u{FF1B}", "\u{3001}"];
+    // 成對括號:括號內的分隔符不切(半形 ()[]、全形 U+FF08/09、U+FF3B/3D、U+3010/3011)
+    static $open   = ['(' => 1, "\u{FF08}" => 1, '[' => 1, "\u{FF3B}" => 1, "\u{3010}" => 1];
+    static $close  = [')' => 1, "\u{FF09}" => 1, ']' => 1, "\u{FF3D}" => 1, "\u{3011}" => 1];
+
+    $depth = 0;
+    $buf   = '';
+    $out   = [];
+    foreach (preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
+        if (isset($open[$ch]))  { $depth++;                   $buf .= $ch; continue; }
+        if (isset($close[$ch])) { $depth = max(0, $depth - 1); $buf .= $ch; continue; }
+        if ($depth === 0 && in_array($ch, $delims, true)) { $out[] = $buf; $buf = ''; continue; }
+        $buf .= $ch;
+    }
+    // 括號不成對(來源資料本來就殘缺)→ 大聲失敗並退回直接切割,
+    // 不讓未閉合的括號把整段後半吞成一個人名。
+    if ($depth !== 0) {
+        echo "\n  [警告] 人名括號不成對,改用直接切割:{$s}\n";
+        return explode(';', str_replace($delims, ';', $s));
+    }
+    $out[] = $buf;
+    return $out;
+}
+
 function split_names(?string $raw): array
 {
     $raw = tidy($raw);
     if (!$raw) return [];
-    $parts = preg_split('/[;;、]/u', $raw);
     $out = [];
-    foreach ($parts as $p) {
+    foreach (split_delims($raw) as $p) {
         $p = trim($p);
         if ($p === '' || $p === '等') continue;
         $name = preg_replace('/\s*等$/u', '', $p);

@@ -47,10 +47,15 @@ function norm(?string $s): string
     return mb_strtolower(preg_replace('/[\s\p{P}\p{S}]+/u', '', (string) $s), 'UTF-8');
 }
 
-/** 第一作者(與 import.php split_names 分隔符一致,另含 elim 的「/」) */
+/** 第一作者(與 import.php split_names 分隔符一致,另含 elim 的「/」)。
+ *  2026-09-08 修:原字元集 hexdump 是 5b 3b 3b e3 80 81 —— 兩個半形分號、
+ *  全形分號 U+FF1B 遺失(與 import.php:197 同一個退化),以全形分號分隔的
+ *  作者串因此取到整串當第一作者、合併鍵算錯。改以 \u{} escape 書寫免疫退化。
+ *  註:本函式不做括號感知(import.php split_delims 才有)—— 這裡只取第一段,
+ *  且 norm() 會把標點全部去掉,括號差異不影響鍵值。 */
 function first_author(?string $raw): string
 {
-    $p = preg_split('/[;;、\/]/u', (string) $raw);
+    $p = preg_split('/[;' . "\u{FF1B}\u{3001}" . '\/]/u', (string) $raw);
     return norm(preg_replace('/\s*等$/u', '', trim($p[0] ?? '')));
 }
 
