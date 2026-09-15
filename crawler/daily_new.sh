@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓十六站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓/突破機構)→ 產生當日 delta jsonl
-#      → tools/import.php 匯入(以 source_url 去重)→ 十四站套對映分類 → 其餘分類回填。
+# 流程:new_arrivals.py 抓十七站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓/突破機構/麥種傳道會)→ 產生當日 delta jsonl
+#      → tools/import.php 匯入(以 source_url 去重)→ 十五站套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
 
@@ -104,6 +104,12 @@ else
   run_source btproduct
 fi
 
+# 麥種傳道會:WooCommerce Store API orderby=date 倒序取最新兩頁。
+# ★ 本站不需要天道/突破那種每週全掃對帳:sitemap 144 = Store API 144 = shop 頁 144,
+#   URL 逐筆零差集(十七站唯一權威清單三方一致者),且全站僅 144 本、兩次請求就掃完,
+#   全掃與增量成本幾乎相同。前提是 sitemap 仍等於全站量 —— 書目量長大時要回頭重驗。
+run_source akow
+
 # 註:基道官網分類對照的重爬不在本腳本內 —— 全站 64 類、9/3 實測 356 分鐘,會把 apply
 #     與 classify 推到中午。改由 crawler/logos_cat_refresh.sh 於**每週二 22:00** 獨立排程,
 #     06:30 這一輪的 apply_logos_categories.php 就一定吃到當週最新的 logos_code_categories.jsonl。
@@ -139,6 +145,7 @@ apply_map "福音書房" "$ROOT/tools/apply_twgbr_categories.php"
 apply_map "教會公報社" "$ROOT/tools/apply_pctpress_categories.php"
 apply_map "天道書樓" "$ROOT/tools/apply_tiendao_categories.php"
 apply_map "突破機構" "$ROOT/tools/apply_btproduct_categories.php"
+apply_map "麥種傳道會" "$ROOT/tools/apply_akow_categories.php"
 
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),

@@ -27,6 +27,13 @@ declare(strict_types=1);
  *   php tools/merge_duplicate_books.php --dry-run --full   # dry-run 並列出每一組
  *   php tools/merge_duplicate_books.php                    # 寫入
  *   php tools/merge_duplicate_books.php --limit=50         # 只處理前 50 組
+ *
+ * 2026-09-14 新增 --pairs 模式(依人工複核過的配對清單合併):
+ *   php tools/find_akow_duplicates.php                     # 產 review TSV
+ *   (熊哥在 TSV 第一欄填「併入」或「不併」)
+ *   php tools/merge_duplicate_books.php --pairs=crawler/data/akow_dup_review.tsv --dry-run
+ *   php tools/merge_duplicate_books.php --pairs=crawler/data/akow_dup_review.tsv
+ *   併的方向固定「新書 → 既有書」;只認明確填「併入」的列,空白與「不併」一律跳過。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -35,10 +42,11 @@ if (PHP_SAPI !== 'cli') {
 }
 require dirname(__DIR__) . '/api/lib/db.php';
 
-$opt   = getopt('', ['dry-run', 'full', 'limit::']);
+$opt   = getopt('', ['dry-run', 'full', 'limit::', 'pairs::']);
 $dry   = array_key_exists('dry-run', $opt);
 $full  = array_key_exists('full', $opt);
 $limit = (int) ($opt['limit'] ?? 0);
+$pairs = (string) ($opt['pairs'] ?? '');   // 人工複核過的配對清單(見下)
 
 /** 正規化:去空白+標點符號、轉小寫(2026-08-03 修:「某確類：…」與「某確類--…」
  *  等標點變體視為同名;誤合風險由「作者相同+多 ISBN 不合併」規則守住) */
@@ -62,7 +70,59 @@ function first_author(?string $raw): string
 $pdo = db();
 $pdo->exec('SET NAMES utf8mb4');
 
-// ── 分組 ───────────────────────────────────────────────────
+// ── 模式二:依人工複核過的配對清單合併(--pairs=FILE,2026-09-14)──────
+// 來源:tools/find_akow_duplicates.php 產出的 TSV,第 1 欄填「併入」者才生效。
+// 欄位:判定 / 信心 / 理由 / 新id / 新書名 / 既有id / 既有書名 / …
+// 併的方向固定是「新書 → 既有書」(既有書多半已有 ISBN 與較完整書名),
+// 與模式一「有 isbn → 版本多 → id 小」的主檔挑選規則一致,但這裡由人決定配對。
+// ★ 跳過未填或填「不併」的列;同一筆新書若被填了兩次「併入」,視為衝突並中止。
+if ($pairs !== '') {
+    if (!is_file($pairs)) exit("找不到配對清單:{$pairs}\n");
+    $stGet = $pdo->prepare('SELECT book_id, title, author, isbn13, source,
+                                   (SELECT COUNT(*) FROM editions e WHERE e.book_id = b.book_id) AS ed_cnt
+                              FROM books b WHERE book_id = :id');
+    $plans = [];
+    $seen  = [];
+    $ln = 0;
+    foreach (file($pairs, FILE_IGNORE_NEW_LINES) as $line) {
+        $ln++;
+        $line = preg_replace('/^\xEF\xBB\xBF/', '', $line);
+        $c = explode("\t", $line);
+        if ($ln === 1 || count($c) < 6) continue;                 // 標題列/空列
+        if (trim($c[0]) !== '併入') continue;                      // 只認明確填「併入」
+        $dupId  = (int) trim($c[3]);                               // 新書(將被併掉)
+        $keepId = (int) trim($c[5]);                               // 既有書(保留)
+        if (!$dupId || !$keepId || $dupId === $keepId) {
+            exit("第 {$ln} 列 id 有問題:{$dupId} → {$keepId}\n");
+        }
+        if (isset($seen[$dupId])) {
+            exit("第 {$ln} 列衝突:book_id {$dupId} 被指定併入兩個不同的書,請先修清單\n");
+        }
+        $seen[$dupId] = true;
+        $stGet->execute([':id' => $keepId]); $keep = $stGet->fetch();
+        $stGet->execute([':id' => $dupId]);  $dup  = $stGet->fetch();
+        if (!$keep || !$dup) exit("第 {$ln} 列找不到書:{$dupId} / {$keepId}\n");
+        $plans[] = [$keep, [$dup]];
+    }
+    echo '配對清單:' . count($plans) . " 組(只計填了「併入」的列)\n";
+    if (!$plans) exit("沒有任何列填「併入」,結束。\n");
+    if ($dry) {
+        foreach ($plans as [$p, $d]) {
+            echo "  ○ 保留 {$p['book_id']}「{$p['title']}」({$p['source']}"
+               . ($p['isbn13'] ? ',isbn ' . $p['isbn13'] : ',無 isbn') . ")"
+               . " ← 併入 {$d[0]['book_id']}「{$d[0]['title']}」({$d[0]['source']})\n";
+        }
+        echo "[dry-run 未寫入] 確認方向正確後拿掉 --dry-run 執行。\n";
+        exit;
+    }
+    // ★ 2026-09-14 修:goto 會跳過自動分組區塊裡的 $stats 初始化,
+    //   結尾報表因而噴 "Undefined variable $stats"(合併本身正常,只是數字印不出來)。
+    //   這是 goto 最典型的坑 —— 跳過的不只是程式碼,還有變數初始化。
+    $stats = ['groups' => count($plans), 'merged_books' => count($plans), 'skipped_isbn' => 0];
+    goto execute_merge;      // 跳過自動分組,直接用這份 $plans
+}
+
+// ── 模式一:自動分組(書名+第一作者)────────────────────────
 $groups = [];
 $sqlBooks = "SELECT b.book_id, b.title, b.author, b.isbn13, b.source,
                     (SELECT COUNT(*) FROM editions e WHERE e.book_id = b.book_id) AS ed_cnt
@@ -116,6 +176,7 @@ if ($dry) {
 }
 
 // ── 執行合併 ───────────────────────────────────────────────
+execute_merge:
 $stMoveEd    = $pdo->prepare('UPDATE editions    SET book_id = :p WHERE book_id = :d');
 $stMoveRev   = $pdo->prepare('UPDATE reviews     SET book_id = :p WHERE book_id = :d');
 $stMoveClk   = $pdo->prepare('UPDATE book_clicks SET book_id = :p WHERE book_id = :d');

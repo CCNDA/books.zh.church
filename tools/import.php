@@ -112,9 +112,27 @@ const DEFAULT_CURRENCY = 'TWD';
 //   → links.link_type 寫 'official' 而非 'buy',api/index.php 的購書彙整就不會撈到它,
 //     前端也就不會長出一個點下去買不到書的假購書按鈕。
 //   突破機構 buy.php 只是批發聯絡資訊頁(電話/傳真/電郵),不是購物車。
-//   浸信會(bappress)、麥種(akow)之後應沿用同一作法 —— 這也讓海外共通決議 B 項
+//   浸信會(bappress)之後可能沿用同一作法(待該站偵察確認)—— 這也讓海外共通決議 B 項
 //   (「無購書連結要顯示什麼文字」)變成不需要:不顯示文字,直接給連結。
+//   ★ 2026-09-13 更正:麥種(akow)**不屬於此列**。原票假設它只有訂購頁,
+//     實測是完整的 WooCommerce 購物車(USD 結帳),購書連結照常寫 'buy'。
 const NO_BUY_SOURCES = ['btproduct'];
+
+/* 站方 ISBN 不具唯一性的來源(2026-09-13 麥種 akow 實測)
+ * ────────────────────────────────────────────────────────────
+ * 麥種母資料有「同一個 ISBN 掛在兩本不同書上」,且 akow.org 與 akow.tw 兩站
+ * 完全一致 → 是出版社母資料錯,不是單站手誤,日後新書還會再犯:
+ *   9781951456115《真正的快樂》 vs《現代神學精髓》
+ *   9781939251176《以西結書註釋(上下)》vs《主耶穌的畫像》(連出版日期都被複製)
+ *   9781939251015《舊約歷史書手冊》 vs《主耶穌的比喻》
+ * 對這些來源,ISBN 命中不再是硬證據,要再確認「真的是同一作品」才合併:
+ *   (1) 書名+第一作者的模糊鍵相同,或
+ *   (2) 一繁一簡的同書(去掉簡體標記後字數相同、逐字四成以上相同)
+ * 判不出來就不合併、且本筆不寫 isbn13(原值仍完整留在 extra 的 isbn/isbn_from),
+ * 寧可重複待人工,也不要把兩本不相干的書併成一本。
+ * ★ 只在「同一次匯入的同來源」之間生效,跨站 ISBN 合併行為完全不變。
+ */
+const ISBN_NOT_UNIQUE_SOURCES = ['akow'];
 
 $opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run']);
 $file   = $opt['file'] ?? null;
@@ -257,6 +275,85 @@ function fuzzy_key(?string $title, ?string $firstAuthor): ?string
     return $n($title) . '|' . $n($firstAuthor);
 }
 
+/** 去掉書名尾端的簡繁標記,讓「基督徒的信仰／简」與「基督徒的信仰」可比字數 */
+function strip_script_tag(?string $t): string
+{
+    $t = preg_replace('/[（(\/／\-－]\s*(简体|簡體|正體|繁體|简|簡)\s*[)）]?\s*$/u', '', (string) $t);
+    return trim((string) $t);
+}
+
+/** 最長共同子字串的字數(短書名,O(n*m) 足夠) */
+function lcs_len(string $a, string $b): int
+{
+    $n = mb_strlen($a, 'UTF-8');
+    $m = mb_strlen($b, 'UTF-8');
+    if ($n === 0 || $m === 0) return 0;
+    $prev = array_fill(0, $m + 1, 0);
+    $best = 0;
+    for ($i = 1; $i <= $n; $i++) {
+        $cur = array_fill(0, $m + 1, 0);
+        $ca = mb_substr($a, $i - 1, 1, 'UTF-8');
+        for ($j = 1; $j <= $m; $j++) {
+            if ($ca === mb_substr($b, $j - 1, 1, 'UTF-8')) {
+                $cur[$j] = $prev[$j - 1] + 1;
+                if ($cur[$j] > $best) $best = $cur[$j];
+            }
+        }
+        $prev = $cur;
+    }
+    return $best;
+}
+
+/** 同一個 ISBN 上的兩筆,是否真的是同一作品(僅用於 ISBN_NOT_UNIQUE_SOURCES)。
+ *
+ *  ★ 2026-09-14 放寬:第一版只認「模糊鍵相同」與「簡繁同字數」,結果把**正常的
+ *    跨站合併也擋掉了**(dry-run 擋了 30 次,其中 26 次是誤擋)——別站的書名常
+ *    帶書系前綴或副標:「腓立比書」vs「麥種聖經註釋:腓立比書」、
+ *    「保羅神學聖靈論」vs「保羅神學:聖靈論」。這個防線的本分是「書名明顯對不上時
+ *    才攔」,不是「書名不完全一樣就攔」。
+ *
+ *  四條判準,任一成立即視為同一作品:
+ *   (1) 書名+第一作者的模糊鍵相同
+ *   (2) 去標點後一方包含另一方(書系前綴/副標/冊次)
+ *   (3) 最長共同子字串 ≥3 字且占短書名一半以上
+ *       (「以賽亞書註釋」vs「以賽亞書(下)-麥種聖經註釋(NICOT)」共同「以賽亞書」4/6)
+ *   (4) 簡繁同書:字數相同且逐字四成以上相同(簡繁差的是字形不是字數)
+ *       —— 這條不能少:「聖經的偉大教義」vs「圣经的伟大教义」共同子字串只有 1 字,
+ *          過不了 (3),但它們確實是同一本。
+ *
+ *  站方真正抄錯的那幾組四條全過不了:「真正的快樂」vs「現代神學精髓」、
+ *  「舊約歷史書手冊」vs「主耶穌的比喻」、「喜樂平安的人生」vs「當主耶穌面對世界」
+ *  ——共同子字串 ≤1 字、字數也不同。
+ */
+function same_work(?string $t1, ?string $a1, ?string $t2, ?string $a2): bool
+{
+    $k1 = fuzzy_key($t1, $a1);
+    $k2 = fuzzy_key($t2, $a2);
+    if ($k1 !== null && $k1 === $k2) return true;                       // (1)
+
+    $norm = fn($s) => (string) preg_replace('/[\s\p{P}\p{S}]+/u', '', strip_script_tag($s));
+    $s1 = $norm($t1);
+    $s2 = $norm($t2);
+    if ($s1 === '' || $s2 === '') return false;
+    if ($s1 === $s2) return true;
+
+    if (mb_strpos($s1, $s2, 0, 'UTF-8') !== false                       // (2)
+        || mb_strpos($s2, $s1, 0, 'UTF-8') !== false) return true;
+
+    $l1  = mb_strlen($s1, 'UTF-8');
+    $l2  = mb_strlen($s2, 'UTF-8');
+    $min = min($l1, $l2);
+    $lcs = lcs_len($s1, $s2);
+    if ($lcs >= 3 && $min > 0 && $lcs / $min >= 0.5) return true;       // (3)
+
+    if ($l1 !== $l2) return false;                                      // (4)
+    $same = 0;
+    for ($i = 0; $i < $l1; $i++) {
+        if (mb_substr($s1, $i, 1, 'UTF-8') === mb_substr($s2, $i, 1, 'UTF-8')) $same++;
+    }
+    return $l1 > 0 && $same / $l1 >= 0.4;
+}
+
 /** 重量「850克」→ 850 */
 function weight_g(?string $s): ?int
 {
@@ -338,12 +435,16 @@ foreach ($pdo->query(
 }
 $fuzzyMap = [];
 $bookIsbn = [];   // book_id → isbn13(模糊命中時判斷可否合併用)
+$bookWork = [];   // book_id → [title, 第一作者](ISBN 不唯一來源的同作品判定用)
 foreach ($pdo->query("SELECT book_id, title, author, isbn13 FROM books") as $r) {
     $bookIsbn[(int) $r['book_id']] = $r['isbn13'] ?: null;
     $first = split_names($r['author'])[0]['name'] ?? null;
+    $bookWork[(int) $r['book_id']] = ['title' => $r['title'], 'author' => $first];
     $k = fuzzy_key($r['title'], $first);
     if ($k) $fuzzyMap[$k] = (int) $r['book_id'];
 }
+// 同一次匯入裡已出現過的 ISBN → 該筆的書名/作者(同檔內撞號時要比對的對象)
+$isbnSeen = [];
 $personMap = [];
 foreach ($pdo->query("SELECT person_id, name FROM persons") as $r) {
     $personMap[$r['name']] = (int) $r['person_id'];
@@ -364,7 +465,10 @@ echo "預載:editions " . count($doneUrls) . "、isbn " . count($isbnMap)
 $stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merged' => 0, 'edition' => 0,
           // dry-run 合併明細(8/21 起):合併率異常高時要能當場分辨
           // 「ISBN 命中」與「書名+第一作者模糊比對」,後者才是誤併風險所在。
-          'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0];
+          'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0,
+          // 站方 ISBN 不唯一而擋下的合併(akow)——正常應該只有個位數,
+          // 若某次突然變多,代表站方又批次抄錯,要回頭看來源不是看程式
+          'isbn_conflict' => 0];
 $fuzzySamples = [];   // dry-run:模糊命中的前 N 筆,供人眼核對
 $fh = fopen($file, 'r');
 $batch = 0;
@@ -405,20 +509,56 @@ while (($line = fgets($fh)) !== false) {
     //   「links(link_type='buy') + books.buy_links(平面後備)」兩邊聯集,
     //   漏掉平面欄位一樣會在書目頁長出點下去買不到書的假購書按鈕。
     $hasBuy = !in_array($source, NO_BUY_SOURCES, true);
-    $buyPlatform = $platformName
-                 . ($source === 'grace' && $isEbook ? '(電子書)'
-                    : (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans']) ? '(簡體)' : ''));
+    // 購書連結的平台名要標出版本,否則同一本書下掛兩條連結時看不出差別。
+    // 2026-09-14 加入 akow:麥種同一作品常有正體/簡體兩版,爬蟲已判定 script(hant/hans)。
+    //   ★ 麥種的簡體版一律另編 ISBN(已知 4/4 案例),所以多數情況下簡繁是兩本書、
+    //     各自只有一條連結;但站方偶有簡繁共用同一個 ISBN 的情形(如麥種基督教要義),
+    //     那時兩版會併成同一本書、掛兩條連結 —— 就是靠這個標註分辨。
+    $variantTag = '';
+    if ($source === 'grace' && $isEbook) {
+        $variantTag = '(電子書)';
+    } elseif (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans'])) {
+        $variantTag = '(簡體)';
+    } elseif ($source === 'akow') {
+        $variantTag = (($raw['script'] ?? '') === 'hans') ? '(簡體)' : '(正體)';
+    }
+    $buyPlatform = $platformName . $variantTag;
 
     // 1. 找/建 book(Work)
     $bookId = null;
     $isMerge = false;
     $mergeVia = null;                 // 'isbn' | 'fuzzy' | 'infile'(dry-run 明細用)
+    $isbnBlocked = false;             // ISBN 命中但判定不是同一作品(見下)
     if ($m['isbn13'] && isset($isbnMap[$m['isbn13']])) {
         $bookId = $isbnMap[$m['isbn13']];
         $isMerge = true;
         // dry-run 時新書會以 -1 佔位,故 -1 代表「同一檔案內重複的 ISBN」而非在庫命中
         $mergeVia = $bookId === -1 ? 'infile' : 'isbn';
-    } else {
+        // ★ 站方 ISBN 不唯一的來源(akow):ISBN 命中不算硬證據,要再確認是同一作品。
+        //   同檔內撞號比 $isbnSeen,在庫命中比 $bookWork;判不出來就不合併也不寫 isbn13。
+        if (in_array($source, ISBN_NOT_UNIQUE_SOURCES, true)) {
+            $other = $bookId === -1 ? ($isbnSeen[$m['isbn13']] ?? null)
+                                    : ($bookWork[$bookId] ?? null);
+            if ($other !== null
+                && !same_work($m['title'], $m['authors'][0]['name'] ?? null,
+                              $other['title'] ?? null, $other['author'] ?? null)) {
+                echo "  [ISBN 不唯一] {$m['isbn13']}:「{$m['title']}」≠「{$other['title']}」"
+                   . "→ 不合併,本筆不寫 isbn13(原值仍在 extra)\n";
+                $m['isbn13'] = null;
+                $m['isbn10'] = null;
+                $bookId   = null;
+                $isMerge  = false;
+                $mergeVia = null;
+                $isbnBlocked = true;
+                $stats['isbn_conflict']++;
+            }
+        }
+    }
+    // ★ $isbnBlocked 時直接當新書:剛剛已判定「不是同一作品」,
+    //   再跑模糊比對只會用同一組書名+作者再比一次,沒有意義。
+    //   注意這裡一定要用旗標而不是「isbn13 為 null」——絕大多數來源的書本來就沒有 ISBN,
+    //   那些必須照常走模糊比對。
+    if ($bookId === null && !$isbnBlocked) {
         // 模糊比對(書名+第一作者)。2026-08-02 修:帶 ISBN 的紀錄也要比——
         // 「A 站有 ISBN、B 站同書無 ISBN」曾因此拆成兩筆(525 組)。
         // 僅當既有書無 ISBN 或同 ISBN 才合併;異 ISBN 存疑不合併(交 merge 工具)。
@@ -435,6 +575,12 @@ while (($line = fgets($fh)) !== false) {
                 $mergeVia = 'fuzzy';
             }
         }
+    }
+
+    // 記住本次匯入已出現過的 ISBN(同檔內撞號時要拿來比對是不是同一作品)
+    if ($m['isbn13'] && !isset($isbnSeen[$m['isbn13']])) {
+        $isbnSeen[$m['isbn13']] = ['title'  => $m['title'],
+                                   'author' => $m['authors'][0]['name'] ?? null];
     }
 
     $extraRec = $raw;

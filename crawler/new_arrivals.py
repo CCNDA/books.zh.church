@@ -63,6 +63,7 @@ import pctpress_crawler as pctpress
 import methodist_crawler as methodist
 import tiendao_crawler as tiendao
 import btproduct_crawler as btproduct
+import akow_crawler as akow
 import osb_crawler as osb
 import taosheng_crawler as taosheng
 import wdbook_crawler as wdbook
@@ -598,6 +599,34 @@ def collect_tiendao(writer, max_pages: int, dry_run: bool,
     return _parse_new(new_keys, parse, writer, dry_run)
 
 
+def collect_akow(writer, max_pages: int, dry_run: bool) -> list[dict] | None:
+    """麥種傳道會(WooCommerce Store API):orderby=date 倒序取最新,API 一次給完整欄位。
+
+    ═══ 為什麼不必像天道/突破那樣每週全掃對帳(2026-09-14 實測)═══
+    本站**有 sitemap 且等於全站量**:sitemap 144 = Store API 144 = shop 頁 144,
+    URL 逐筆比對零差集 —— 這是十七站以來唯一一個權威清單三方一致的來源。
+    加上全站只有 144 本(每頁 100,兩次請求就掃完),全量掃描的成本與增量幾乎相同,
+    所以**這裡直接走 orderby=date 即可**,不需要天道 105 那種「手動推薦位會永久漏」的防護。
+    ★ 但這個結論的前提是 sitemap 仍然等於全站量;若哪天 akow 書目量長大,
+      要回頭驗一次再決定是否改成全掃(驗法:python3 akow_crawler.py --probe 的 B 段)。
+    """
+    recs = akow.collect_new(max_pages=max(1, min(max_pages or 2, 3)))
+    if not recs:
+        print("麥種:清單抓到 0 件 —— 站方可能改版或 Store API 關閉,視為失敗,"
+              "不要當成無新書", flush=True)
+        return None            # 供 main 判別失敗(結束碼 2)
+    new = [r for r in recs if not writer.has(r["pid"])]
+    if not new:
+        print("[akow] 無新書", flush=True)
+        return []
+    print(f"[akow] 偵測到 {len(new)} 本新書", flush=True)
+    for r in new:
+        print(f"  +新書:{r.get('title')}", flush=True)
+        if not dry_run:
+            writer.write(r)
+    return new
+
+
 def collect_btproduct(writer, max_pages: int, dry_run: bool,
                       full_scan: bool = False) -> list[dict] | None:
     """突破機構:每日走 type=new 前 2 頁(42 件),偵測到新 pid 才補走 cat/ser 取分類歸屬。
@@ -679,7 +708,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
                              "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress",
-                             "tiendao", "btproduct"])
+                             "tiendao", "btproduct", "akow"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -765,6 +794,12 @@ def main():
     elif args.source == "pctpress":
         writer = _writer("pctpress_books.jsonl", "pid")
         fresh = collect_pctpress(writer, args.max_pages, args.dry_run)
+    elif args.source == "akow":
+        writer = _writer("akow_books.jsonl", "pid")
+        fresh = collect_akow(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
     elif args.source == "twgbr":
         writer = _writer("twgbr_books.jsonl", "handle")
         fresh = collect_twgbr(writer, args.max_pages, args.dry_run)
