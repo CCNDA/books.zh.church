@@ -184,28 +184,57 @@ function get_books(): never
     $category  = (int) ($_GET['category'] ?? 0);
     $person    = (int) ($_GET['person'] ?? 0);     // 作者/貢獻者 person_id 篩選
     $publisher = (int) ($_GET['publisher'] ?? 0);  // 出版社 publisher_id 篩選
+    $yearFrom  = trim((string) ($_GET['year_from'] ?? ''));  // 出版年下限(YYYY)
+    $yearTo    = trim((string) ($_GET['year_to'] ?? ''));    // 出版年上限(YYYY)
+    $source    = trim((string) ($_GET['source'] ?? ''));     // 來源書房代碼(logos/campus/…)
+    $deep      = ($_GET['deep'] ?? '') === '1';              // 1=關鍵字也搜摘要內文(慢)
     $page      = max(1, (int) ($_GET['page'] ?? 1));
     $perPage   = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
 
     $where  = ['v.is_published = 1'];
     $params = [];
+    $joins  = '';   // 額外 JOIN;關鍵字搜尋會接上 book_search 瘦表(見下方說明)
 
     if ($q !== '') {
-        // 注意:原生預備語句不可重複使用同名參數,故逐一編號
-        $like = '%' . $q . '%';
-        $isbn = str_replace('-', '', $q);
-        $where[] = '(v.title LIKE :q1 OR v.subtitle LIKE :q2 OR v.author LIKE :q3
-                     OR v.translator LIKE :q4 OR v.publisher LIKE :q5
-                     OR v.summary LIKE :q6 OR v.isbn13 = :isbn1 OR b.isbn10 = :isbn2
-                     OR EXISTS (SELECT 1 FROM identifiers i
-                                JOIN editions e ON e.edition_id = i.edition_id
-                                WHERE e.book_id = v.book_id AND i.id_value = :isbn3))';
-        for ($i = 1; $i <= 6; $i++) {
-            $params[":q$i"] = $like;
+        // 2026-09-17(M1-B):原本對 v.title/subtitle/author/translator/publisher/summary
+        // 六欄各做一次 LIKE。而 author/translator/publisher 在 v_book_list 裡是
+        // 「相關子查詢 + GROUP_CONCAT」→ 每一列都要執行子查詢,65,290 列 × 6 個,
+        // 這就是搜尋慢的真因(2026-08-17 判定,2026-09-16 由 view DDL 證實)。
+        // 改查 books.search_text 單欄(由 tools/build_search_text.php 維護),
+        // 該欄已涵蓋 書名/副標/原文名/作者/譯者/出版社/系列/關鍵字/摘要/ISBN/商品代碼,
+        // 因此原本的 isbn13 精確比對與 identifiers EXISTS 都已被涵蓋,一併移除。
+        // ★ 不用 FULLTEXT:MariaDB 無 ngram 分詞,對中文無效。
+        // ★ 為什麼是兩個 LIKE 而不是一個:搜尋欄裡的 ISBN 沒有連字號,
+        //   而使用者可能輸入「978-986-6674-49-5」,故另備一個去連字號的樣式。
+        //   注意:原生預備語句不可重複使用同名參數,故逐一編號。
+        //
+        // ★★ 2026-09-17 改為預設查 search_key(不含摘要)。實測原因:
+        //   `search_text LIKE '%…%'` 是 type=ALL 全表掃描(LIKE 中間比對用不到索引),
+        //   而 search_text 平均 463 字 × 65,290 列 ≈ 90MB 文字 → 實測 4,946 ms。
+        //   瓶頸不在 v_book_list(COUNT 走 view 5,644ms vs 走 books 4,946ms,只差 12%)。
+        //   search_key 不含摘要、平均僅 59 字(比值 7.85)→ 預期約 630 ms。
+        //   需要搜摘要內文時帶 deep=1,代價是回到數秒級。
+        //
+        // ★★★ 2026-09-17 第三輪(前兩輪的假設都被實測推翻,記在這裡避免重蹈):
+        //   ✗ 假設 v_book_list 被具體化 → EXPLAIN 證明是 MERGE,子查詢都走索引 rows=1
+        //   ✗ 假設 search_text 太長 → 拆出 91 字的 search_key 後線上仍 12 秒
+        //   ✓ 真因:books 表 DATA_LENGTH **501 MB**(每列 7.7KB,大頭是 extra/summary/
+        //     buy_links)。InnoDB 全表掃描以 page 為單位**讀整列**,成本由整列大小決定,
+        //     與搜尋欄長度幾乎無關(掃 search_key 4,738ms vs search_text 5,316ms,只差 12%)。
+        //   ⇒ 解法是把搜尋欄搬到只有兩欄的 book_search 瘦表(14 MB):
+        //     同一個查詢 4,543ms → **389ms**(11.7 倍)。
+        //
+        // ★ 必須寫成 JOIN 而不是 EXISTS:JOIN 讓最佳化器可以拿 14MB 的瘦表當驅動表,
+        //   掃出少數 book_id 後用 PRIMARY 回 books 取那幾列;
+        //   寫成 EXISTS 會變成對 books 每一列執行子查詢 = 又掃 501 MB。
+        if ($deep) {
+            $where[] = '(b.search_text LIKE :q1 OR b.search_text LIKE :q2)';
+        } else {
+            $joins   = ' JOIN book_search bs ON bs.book_id = v.book_id';
+            $where[] = '(bs.search_key LIKE :q1 OR bs.search_key LIKE :q2)';
         }
-        $params[':isbn1'] = $isbn;
-        $params[':isbn2'] = $isbn;
-        $params[':isbn3'] = $isbn;
+        $params[':q1'] = '%' . $q . '%';
+        $params[':q2'] = '%' . str_replace('-', '', $q) . '%';
     }
     if ($category > 0) {
         $where[] = 'v.category_id = :cat';
@@ -228,11 +257,37 @@ function get_books(): never
         $where[] = "EXISTS (SELECT 1 FROM editions e2
                             WHERE e2.book_id = v.book_id AND e2.publisher_id IN ($inList))";
     }
+    // ── 2026-09-17(M1-B)出版年範圍篩選 ───────────────────────
+    // 用 v.publish_date 而非 b.publish_date,為的是與列表顯示的年份**同源**:
+    //   view 取「最新有值的 edition 日期」,fallback 才是 books 平面欄。
+    //   ★ 若改用 b.publish_date,會出現「篩 2020–2026 卻顯示 2015」的不一致 ——
+    //     一致性比省那點查詢成本重要。
+    // 格式混用 YYYY / YYYY-MM / YYYY-MM-DD,故用字串比對(前綴語意):
+    //   '2020' >= '2020' ✓、'2026-12' <= '2026-12-31' ✓
+    //   ★ 絕不可用 YEAR() 等函式包欄位,索引會失效。
+    if ($yearFrom !== '' && preg_match('/^\d{4}$/', $yearFrom)) {
+        $where[] = 'v.publish_date >= :yf';
+        $params[':yf'] = $yearFrom;
+    }
+    if ($yearTo !== '' && preg_match('/^\d{4}$/', $yearTo)) {
+        $where[] = 'v.publish_date <= :yt';
+        $params[':yt'] = $yearTo . '-12-31';
+    }
+    // ── 2026-09-17(M1-B)來源書房篩選 ───────────────────────
+    // ★ 不可用 v.source:那是 books.source 平面欄(單值),
+    //   一本書被多家書房收錄時只會有一個值 → 會漏掉跨站書
+    //   (全站 65,290 本裡有 16,164 本掛 2 個以上來源)。
+    //   必須查 editions,走 idx_ed_book_source (book_id, source)。
+    if ($source !== '') {
+        $where[] = 'EXISTS (SELECT 1 FROM editions es
+                            WHERE es.book_id = v.book_id AND es.source = :src)';
+        $params[':src'] = $source;
+    }
     $whereSql = implode(' AND ', $where);
 
     $stmt = db()->prepare(
         "SELECT COUNT(*) FROM v_book_list v
-         JOIN books b ON b.book_id = v.book_id
+         JOIN books b ON b.book_id = v.book_id$joins
          WHERE $whereSql"
     );
     $stmt->execute($params);
@@ -243,7 +298,7 @@ function get_books(): never
                    v.publisher, v.publish_date, v.isbn13, v.cover_url,
                    v.summary_short, v.summary, v.category_id, c.name AS category_name
             FROM v_book_list v
-            JOIN books b ON b.book_id = v.book_id
+            JOIN books b ON b.book_id = v.book_id$joins
             LEFT JOIN categories c ON c.category_id = v.category_id
             WHERE $whereSql
             ORDER BY v.created_at DESC, v.book_id DESC
