@@ -162,5 +162,24 @@ else
   log "[警告] 找不到 $CLASSIFY,略過分類回填"
 fi
 
+# ── 搜尋欄補值:替本次新匯入的書建 search_key / search_text ──
+# ★★ 2026-09-19 補上(M1-B)。少了這一行會是**靜默失敗**:
+#   API 的關鍵字搜尋查的是 book_search 瘦表(api/index.php get_books()),
+#   新書若沒進瘦表,就「搜不到」,但書目頁、分類頁、首頁、cron log 全部正常 ——
+#   沒有任何外部徵兆,只有有人剛好搜那本書才會發現。
+# 預設即 --missing(只補空值,冪等可重跑);工具結尾會自行回查 DB 對帳,
+#   book_search 筆數 ≠ books 筆數時印警告。
+SEARCHTEXT="$ROOT/tools/build_search_text.php"
+if [ -f "$SEARCHTEXT" ]; then
+  log "--- 搜尋欄補值:新書 search_key/search_text ---"
+  if php "$SEARCHTEXT" --missing >>"$LOG" 2>&1; then
+    log "搜尋欄補值完成"
+  else
+    log "[錯誤] 搜尋欄補值失敗 —— **新書會搜不到**,請手動重跑 php tools/build_search_text.php --missing"
+  fi
+else
+  log "[警告] 找不到 $SEARCHTEXT,略過搜尋欄補值(新書將搜不到)"
+fi
+
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書複核見 runbook 待辦。

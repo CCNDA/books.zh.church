@@ -191,7 +191,10 @@ function get_books(): never
     $page      = max(1, (int) ($_GET['page'] ?? 1));
     $perPage   = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
 
-    $where  = ['v.is_published = 1'];
+    // ★★ 2026-09-19:篩選與計數一律以 books b 為基準,**完全不碰 v_book_list**。
+    //   理由見下方 COUNT 前的註解。v_book_list 只在「拿到本頁 20 個 book_id 之後」
+    //   用來取顯示欄位(eq_ref 20 列),不再參與過濾。
+    $where  = ['b.is_published = 1'];
     $params = [];
     $joins  = '';   // 額外 JOIN;關鍵字搜尋會接上 book_search 瘦表(見下方說明)
 
@@ -227,22 +230,25 @@ function get_books(): never
         // ★ 必須寫成 JOIN 而不是 EXISTS:JOIN 讓最佳化器可以拿 14MB 的瘦表當驅動表,
         //   掃出少數 book_id 後用 PRIMARY 回 books 取那幾列;
         //   寫成 EXISTS 會變成對 books 每一列執行子查詢 = 又掃 501 MB。
+        //   ★ 2026-09-19:但瘦表當驅動表的前提是查詢裡沒有 v_book_list(見 COUNT 註解)。
         if ($deep) {
             $where[] = '(b.search_text LIKE :q1 OR b.search_text LIKE :q2)';
         } else {
-            $joins   = ' JOIN book_search bs ON bs.book_id = v.book_id';
+            $joins   = ' JOIN book_search bs ON bs.book_id = b.book_id';
             $where[] = '(bs.search_key LIKE :q1 OR bs.search_key LIKE :q2)';
         }
         $params[':q1'] = '%' . $q . '%';
         $params[':q2'] = '%' . str_replace('-', '', $q) . '%';
     }
     if ($category > 0) {
-        $where[] = 'v.category_id = :cat';
+        // ★ v_book_list 的 category_id 就是 b.category_id 原樣輸出(2026-07-16 view DDL 第 36 行),
+        //   改用 b.category_id **語意完全相同**,不是近似。
+        $where[] = 'b.category_id = :cat';
         $params[':cat'] = $category;
     }
     if ($person > 0) {
         $where[] = 'EXISTS (SELECT 1 FROM book_persons bp
-                            WHERE bp.book_id = v.book_id AND bp.person_id = :person)';
+                            WHERE bp.book_id = b.book_id AND bp.person_id = :person)';
         $params[':person'] = $person;
     }
     if ($publisher > 0) {
@@ -255,22 +261,37 @@ function get_books(): never
         $pubIds = array_map('intval', $pst->fetchAll(PDO::FETCH_COLUMN));
         $inList = $pubIds ? implode(',', $pubIds) : (string) (int) $publisher;  // 皆為整數,無注入風險
         $where[] = "EXISTS (SELECT 1 FROM editions e2
-                            WHERE e2.book_id = v.book_id AND e2.publisher_id IN ($inList))";
+                            WHERE e2.book_id = b.book_id AND e2.publisher_id IN ($inList))";
     }
     // ── 2026-09-17(M1-B)出版年範圍篩選 ───────────────────────
-    // 用 v.publish_date 而非 b.publish_date,為的是與列表顯示的年份**同源**:
-    //   view 取「最新有值的 edition 日期」,fallback 才是 books 平面欄。
-    //   ★ 若改用 b.publish_date,會出現「篩 2020–2026 卻顯示 2015」的不一致 ——
-    //     一致性比省那點查詢成本重要。
+    // 年份必須與列表顯示的年份**同源**,否則會出現「篩 2020–2026 卻顯示 2015」。
+    // 顯示值來自 v_book_list,其定義(2026-07-16 view DDL 第 25-27 行)是:
+    //   coalesce((select e.publish_date from editions e
+    //             where e.book_id = b.book_id and e.publish_date is not null
+    //             order by e.publish_date desc limit 1), b.publish_date)
+    //
+    // ★★ 2026-09-19:原本直接寫 v.publish_date,代價是只要帶 year_from/year_to,
+    //   COUNT 就被迫回去碰 v_book_list,438ms 的好處全部消失(見 COUNT 前註解)。
+    //   這裡改成在 books 上**原地重建同一個運算式**:
+    //     MAX(publish_date) ≡ 「order by publish_date desc limit 1」
+    //       —— 欄位是 varchar(10),兩者同為字典序;MAX 本身忽略 NULL,
+    //          因此 view 裡的 `is not null` 條件是多餘的,拿掉不改變結果。
+    //     外層 COALESCE 保留 books 平面欄 fallback —— ★ 這一層不能省:
+    //       只寫 EXISTS(editions …) 會漏掉「只有 books.publish_date 有值」的書,
+    //       是會靜默少算筆數的改法。
+    //   走 idx_ed_book_pubdate (book_id, publish_date),相關子查詢只對候選列執行。
+    //
     // 格式混用 YYYY / YYYY-MM / YYYY-MM-DD,故用字串比對(前綴語意):
     //   '2020' >= '2020' ✓、'2026-12' <= '2026-12-31' ✓
     //   ★ 絕不可用 YEAR() 等函式包欄位,索引會失效。
+    $pubDateExpr = 'COALESCE((SELECT MAX(ey.publish_date) FROM editions ey
+                              WHERE ey.book_id = b.book_id), b.publish_date)';
     if ($yearFrom !== '' && preg_match('/^\d{4}$/', $yearFrom)) {
-        $where[] = 'v.publish_date >= :yf';
+        $where[] = "$pubDateExpr >= :yf";
         $params[':yf'] = $yearFrom;
     }
     if ($yearTo !== '' && preg_match('/^\d{4}$/', $yearTo)) {
-        $where[] = 'v.publish_date <= :yt';
+        $where[] = "$pubDateExpr <= :yt";
         $params[':yt'] = $yearTo . '-12-31';
     }
     // ── 2026-09-17(M1-B)來源書房篩選 ───────────────────────
@@ -280,37 +301,120 @@ function get_books(): never
     //   必須查 editions,走 idx_ed_book_source (book_id, source)。
     if ($source !== '') {
         $where[] = 'EXISTS (SELECT 1 FROM editions es
-                            WHERE es.book_id = v.book_id AND es.source = :src)';
+                            WHERE es.book_id = b.book_id AND es.source = :src)';
         $params[':src'] = $source;
     }
     $whereSql = implode(' AND ', $where);
 
-    $stmt = db()->prepare(
-        "SELECT COUNT(*) FROM v_book_list v
-         JOIN books b ON b.book_id = v.book_id$joins
-         WHERE $whereSql"
-    );
+    // ══ ★★ 2026-09-19:查詢改成兩段,關鍵是「過濾階段不碰 v_book_list」 ══
+    //
+    // 【真因】原本寫 `FROM v_book_list v JOIN books b ON b.book_id = v.book_id`。
+    //   v_book_list 是 MERGE 演算法,展開後自己就是 `FROM books`,外面又 JOIN 一次
+    //   → **books 被 JOIN 了兩次**。EXPLAIN:
+    //       id=1 PRIMARY b  type=ALL   rows=53251   ← 全表掃描(501 MB)
+    //       id=1 PRIMARY b  eq_ref PRIMARY 1        ← 同一張 books 又出現一次
+    //       id=1 PRIMARY bs eq_ref PRIMARY 1
+    //   那個 `JOIN books b` 是歷史遺留(原本 q 要用 b.isbn10),改掉 q 之後只剩負擔。
+    //
+    // 【實測 2026-09-17,同樣命中 3 筆】
+    //   ① 原寫法(JOIN view + JOIN 瘦表)          5,239 ms
+    //   ② 改 IN 子查詢,但仍 JOIN view            5,285 ms
+    //   ③ 純 books + 瘦表,完全不碰 view            438 ms   ← 本次採用
+    //   ⇒ 關鍵不是 JOIN vs IN,是**碰不碰 v_book_list**。
+    //
+    // 【為什麼可以不碰】過濾用到的欄位在 view 裡全是 books 原樣輸出:
+    //   is_published / category_id / created_at / book_id ——
+    //   唯一的例外是 publish_date(coalesce 最新版日期),已在上面原地重建同一運算式。
+    //
+    // 【顯示欄位仍然走 view】第二段用本頁的 ≤50 個 book_id 去 view 取
+    //   author/translator/publisher/isbn13/cover_url(那些才是 view 存在的理由),
+    //   走 PRIMARY eq_ref,子查詢只執行 20 次,不是 65,290 次。
+    // COUNT 沒有 ORDER BY,最佳化器本來就會拿瘦表當驅動表 —— 實測 0.288s,維持原形不動。
+    $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins WHERE $whereSql");
     $stmt->execute($params);
     $total = (int) $stmt->fetchColumn();
 
+    // ══ ★★★ 2026-09-19 第五輪:ORDER BY + LIMIT 會讓最佳化器翻轉執行計畫 ══
+    //
+    // 同樣的 WHERE、同樣命中 3 筆,只差一個
+    // `ORDER BY b.created_at DESC, b.book_id DESC LIMIT 20`:
+    //     COUNT(無 ORDER BY)                0.288 s
+    //     取 book_id(有 ORDER BY)          4.776 s   ← 差 16 倍
+    //     同一句把 ORDER BY 拿掉             0.153 s   ← 證明問題出在 ORDER BY
+    //
+    // 排序 3 筆不可能花 4.5 秒。EXPLAIN 顯示最佳化器把驅動表從 13.5 MB 的 book_search
+    // 換成了 511 MB 的 books(type=ALL rows=50323, Using filesort)——
+    // 它以為「照 created_at 掃 books 可以早點湊滿 20 筆」,而符合的只有 3 筆 → 一路掃到底。
+    //
+    // 【三個候選解的實測(命中 3 筆)】
+    //   ① STRAIGHT_JOIN 強制瘦表當驅動表     0.167 s   ← 採用
+    //   ② IN 子查詢                         4.793 s
+    //   ③ 衍生表先過濾                       5.208 s
+    //   ★ ②③ 都沒用,因為最佳化器一樣會翻轉;只有 STRAIGHT_JOIN 是命令而非建議。
+    //   ★ 另以命中 447 筆的關鍵字複測 ①:0.388 s(只有 3 筆時「早停」佔不到便宜,
+    //     所以一定要用命中多的詞再測一次,否則會高估)。
+    //
+    // ★ STRAIGHT_JOIN 依 FROM 的書寫順序決定 join 順序 → book_search 必須寫在前面。
+    //   只在「有關鍵字且非 deep」時套用;沒有瘦表可 JOIN 時用 hint 沒有意義。
+    //   deep=1 那條路仍需 books(search_text 在那),維持原樣、接受慢。
+    if ($joins !== '') {
+        $fromRows = 'book_search bs JOIN books b ON b.book_id = bs.book_id';
+        $hint     = 'STRAIGHT_JOIN ';
+    } else {
+        // 無關鍵字的瀏覽/篩選:單表,靠 idx_pub_created (is_published, created_at, book_id)
+        //   實測 建索引前 5.004 s → 建索引後 0.0004 s(Using index,filesort 消失)。
+        $fromRows = 'books b';
+        $hint     = '';
+    }
+
     $offset = ($page - 1) * $perPage;
-    $sql = "SELECT v.book_id, v.title, v.subtitle, v.original_title, v.author, v.translator,
-                   v.publisher, v.publish_date, v.isbn13, v.cover_url,
-                   v.summary_short, v.summary, v.category_id, c.name AS category_name
-            FROM v_book_list v
-            JOIN books b ON b.book_id = v.book_id$joins
-            LEFT JOIN categories c ON c.category_id = v.category_id
-            WHERE $whereSql
-            ORDER BY v.created_at DESC, v.book_id DESC
-            LIMIT :limit OFFSET :offset";
-    $stmt = db()->prepare($sql);
+    // 第一段:只取本頁的 book_id(不碰 view)
+    //   ORDER BY b.created_at ≡ 原本的 v.created_at(view 第 39 行為 b.created_at 原樣輸出)
+    $stmt = db()->prepare(
+        "SELECT {$hint}b.book_id FROM $fromRows
+         WHERE $whereSql
+         ORDER BY b.created_at DESC, b.book_id DESC
+         LIMIT :limit OFFSET :offset"
+    );
     foreach ($params as $k => $v) {
         $stmt->bindValue($k, $v);
     }
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
-    $rows = finish_cards($stmt->fetchAll());
+    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+    // 第二段:用這幾個 id 去 view 取顯示欄位
+    $rows = [];
+    if ($ids) {
+        $ph = [];
+        foreach ($ids as $i => $_) {
+            $ph[] = ':b' . $i;   // ★ EMULATE_PREPARES=false,參數不可同名,逐一編號
+        }
+        $stmt = db()->prepare(
+            "SELECT v.book_id, v.title, v.subtitle, v.original_title, v.author, v.translator,
+                    v.publisher, v.publish_date, v.isbn13, v.cover_url,
+                    v.summary_short, v.summary, v.category_id, c.name AS category_name
+               FROM v_book_list v
+               LEFT JOIN categories c ON c.category_id = v.category_id
+              WHERE v.book_id IN (" . implode(',', $ph) . ")"
+        );
+        foreach ($ids as $i => $id) {
+            $stmt->bindValue(':b' . $i, $id, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+        // IN 不保證回傳順序 → 依第一段的 id 順序重排,排序語意才不會被悄悄改掉
+        $byId = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $byId[(int) $r['book_id']] = $r;
+        }
+        foreach ($ids as $id) {
+            if (isset($byId[$id])) {
+                $rows[] = $byId[$id];
+            }
+        }
+        $rows = finish_cards($rows);
+    }
 
     // 篩選標籤(供前端顯示「作者/出版社:XXX 的書」標題)
     $filter = null;
