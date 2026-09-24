@@ -112,8 +112,10 @@ const DEFAULT_CURRENCY = 'TWD';
 //   → links.link_type 寫 'official' 而非 'buy',api/index.php 的購書彙整就不會撈到它,
 //     前端也就不會長出一個點下去買不到書的假購書按鈕。
 //   突破機構 buy.php 只是批發聯絡資訊頁(電話/傳真/電郵),不是購物車。
-//   浸信會(bappress)之後可能沿用同一作法(待該站偵察確認)—— 這也讓海外共通決議 B 項
-//   (「無購書連結要顯示什麼文字」)變成不需要:不顯示文字,直接給連結。
+//   ★ 2026-09-21 更正:浸信會(bappress)**不屬於此列**。票上與本註解原本都推測它
+//     「無購書管道、可沿用突破機構作法」,9/20–9/21 實測推翻:shop.bappress.org 是
+//     Yii SSR 網上書店,有 addtocart、會員與運費計算,幣別 HKD → 購書連結照常寫 'buy'。
+//     (這已是本專案第三次「票上的站台描述是建票當時的推測」被實測推翻。)
 //   ★ 2026-09-13 更正:麥種(akow)**不屬於此列**。原票假設它只有訂購頁,
 //     實測是完整的 WooCommerce 購物車(USD 結帳),購書連結照常寫 'buy'。
 const NO_BUY_SOURCES = ['btproduct'];
@@ -470,6 +472,7 @@ $stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merg
           // 若某次突然變多,代表站方又批次抄錯,要回頭看來源不是看程式
           'isbn_conflict' => 0];
 $fuzzySamples = [];   // dry-run:模糊命中的前 N 筆,供人眼核對
+$newSamples   = [];   // dry-run:判定為新書的全部筆數,供抽查「新書真的是新書」
 $fh = fopen($file, 'r');
 $batch = 0;
 if (!$dry) $pdo->beginTransaction();
@@ -508,14 +511,30 @@ while (($line = fgets($fh)) !== false) {
     //   只改 links.link_type 是不夠的 —— api/index.php:499 的購書彙整是
     //   「links(link_type='buy') + books.buy_links(平面後備)」兩邊聯集,
     //   漏掉平面欄位一樣會在書目頁長出點下去買不到書的假購書按鈕。
-    $hasBuy = !in_array($source, NO_BUY_SOURCES, true);
+    // ★ 2026-09-22(熊哥裁示):站方重複建檔的那一筆不掛購書連結。
+    //   起於 bappress 的 `-D####` 貨號:同書名、同 Barcode、同 ISBN、同定價、同分類,
+    //   頁面上沒有任何版本標記 —— 兩條連結掛上去只會是兩顆看不出差別的按鈕。
+    //   ★ 旗標由爬蟲判定並寫在資料裡(is_dup_listing),**不是這裡用貨號長相去猜**:
+    //     -D 後綴只有在「主貨號也確實存在」時才算重複,否則它就是唯一一筆,
+    //     拿掉連結會讓那本書一條購書管道都沒有。
+    //   商品代碼仍照常寫進 identifiers(STORE),對帳不受影響。
+    $hasBuy = !in_array($source, NO_BUY_SOURCES, true) && empty($raw['is_dup_listing']);
     // 購書連結的平台名要標出版本,否則同一本書下掛兩條連結時看不出差別。
     // 2026-09-14 加入 akow:麥種同一作品常有正體/簡體兩版,爬蟲已判定 script(hant/hans)。
     //   ★ 麥種的簡體版一律另編 ISBN(已知 4/4 案例),所以多數情況下簡繁是兩本書、
     //     各自只有一條連結;但站方偶有簡繁共用同一個 ISBN 的情形(如麥種基督教要義),
     //     那時兩版會併成同一本書、掛兩條連結 —— 就是靠這個標註分辨。
+    // ★ 2026-09-22(熊哥裁示):通用版本標註。爬蟲判定得出差異就寫在 variant_tag,
+    //   這裡直接採用,不必為每個來源再加一條 source 分支。
+    //   起於 bappress:同一個 ISBN 掛著「19克超薄和合本皮面聖經-藍色」與「-紅色」
+    //   兩個商品(而 /books/{該ISBN} 本身是 404),併成一本後另一色的書名會消失,
+    //   兩條連結若不標註就完全看不出差別。
+    //   ★ 爬蟲那邊的判準是「同 ISBN 有多筆且書名不同時才抽差異詞」——
+    //     不是看到顏色詞就標,否則《藍色的天空》也會被標成「(藍色)」。
     $variantTag = '';
-    if ($source === 'grace' && $isEbook) {
+    if (!empty($raw['variant_tag'])) {
+        $variantTag = '(' . tidy((string) $raw['variant_tag']) . ')';
+    } elseif ($source === 'grace' && $isEbook) {
         $variantTag = '(電子書)';
     } elseif (in_array($source, ['wdbook', 'methodist'], true) && !empty($raw['is_hans'])) {
         $variantTag = '(簡體)';
@@ -587,6 +606,11 @@ while (($line = fgets($fh)) !== false) {
     if ($dry) {
         if (!$bookId) {
             $stats['new_book']++;
+            // ★ 2026-09-22:新書要能逐筆查核。
+            //   「新書 N」只代表**沒比對到**,不代表站上沒有 —— 麥種那次報「新書 100」,
+            //   實際 95 本是站上已有的書(fuzzy_key 沒有作者就不比對)。
+            //   沒有清單就沒辦法抽查書名,那個 N 就只是個不能引用的數字。
+            $newSamples[] = [$m['title'], $m['authors'][0]['name'] ?? '', $m['isbn13'] ?? ''];
         } else {
             $stats['merged']++;
             $stats['merge_' . $mergeVia]++;
@@ -746,12 +770,21 @@ while (($line = fgets($fh)) !== false) {
 
     // 7. 來源連結(版本層;天恩電子書標示「天恩出版社(電子書)」)
     //    無購書管道的來源寫 'official'(見檔頭 NO_BUY_SOURCES),其餘寫 'buy'。
-    $linkType = in_array($source, NO_BUY_SOURCES, true) ? 'official' : 'buy';
-    $st = $pdo->prepare(
-        "INSERT INTO links (edition_id, link_type, platform, url)
-         VALUES (:e, :lt, :pf, :u)");
-    $st->execute([':e' => $editionId, ':lt' => $linkType,
-                  ':pf' => $buyPlatform, ':u' => $m['source_url']]);
+    // ★★ 2026-09-22 修:站方重複建檔的那一筆**整條 links 都不寫**。
+    //    第一版只改了上面的 $hasBuy(那管的是 books.buy_links 平面欄),
+    //    這裡照樣寫了 buy link → 11 筆 -D 重複建檔全部還是掛了連結,
+    //    實查 links 3,704 筆(預期 3,693)才發現。
+    //    ★ 本檔自己的註解早就寫過「只改 links.link_type 是不夠的,兩邊是聯集」——
+    //      反過來也成立:只改平面欄一樣不夠。**兩處都要改,而且要回查資料庫驗。**
+    //    identifiers(商品代碼)仍照常寫,對帳不受影響。
+    if (empty($raw['is_dup_listing'])) {
+        $linkType = in_array($source, NO_BUY_SOURCES, true) ? 'official' : 'buy';
+        $st = $pdo->prepare(
+            "INSERT INTO links (edition_id, link_type, platform, url)
+             VALUES (:e, :lt, :pf, :u)");
+        $st->execute([':e' => $editionId, ':lt' => $linkType,
+                      ':pf' => $buyPlatform, ':u' => $m['source_url']]);
+    }
 
     // 8. 封面(先記來源網址;R2 轉存腳本後續更新 url_or_path 與 books.cover_url)
     if ($m['cover_url']) {
@@ -811,5 +844,23 @@ if ($dry) {
                . "      ↔ #{$bid}「" . ($e['title'] ?? '?') . "」/" . ($e['author'] ?? '')
                . ' ' . ($e['isbn13'] ?? '') . "\n";
         }
+    }
+
+    /* ★★ 新書清單:全部列出,供「新書真的是新書」的抽查。
+     * 麥種 2026-09-15 那次報「新書 100」,實際 95 本是站上已有的書
+     * (fuzzy_key 第一行「沒有作者就不比對」,而該站 46% 的書沒作者欄)。
+     * 「新書 N」只代表**沒比對到**,不代表站上沒有 —— 沒有清單就無法抽查,
+     * 那個 N 就是個不能對外引用的數字。
+     * 這裡順便把「沒有 ISBN」的標出來:那些是只能靠模糊比對的,風險最高。 */
+    if ($newSamples) {
+        $noIsbn = array_values(array_filter($newSamples, fn($r) => $r[2] === ''));
+        echo "\n  新書清單(" . count($newSamples) . " 筆;其中無 ISBN "
+           . count($noIsbn) . " 筆 ← 只能靠模糊比對,誤判風險最高):\n";
+        foreach ($newSamples as [$t, $a, $i]) {
+            echo "    " . ($i !== '' ? $i : '(無ISBN)      ') . "  「{$t}」/"
+               . ($a !== '' ? $a : '(無作者)') . "\n";
+        }
+        echo "  ★ 匯入前請用書名在站上搜幾本,確認不是已有的書;"
+           . "無 ISBN 那幾筆務必逐筆看。\n";
     }
 }

@@ -22,11 +22,17 @@ if (PHP_SAPI !== 'cli') {
 }
 require dirname(__DIR__) . '/api/lib/db.php';
 
+/* --source 可接受的來源白名單(不影響不帶參數的全站轉存,只擋單來源指定)。
+ * ★ 這張清單原本寫死在兩個地方(驗證陣列 + 錯誤訊息字串),結果 btproduct 自 v1.12.0
+ *   起漏登、收 akow 時才發現。改成單一常數,兩處都由它產生,不會再各說各話。
+ * 新增來源時只改這一行。 */
+const COVER_SOURCES = ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist',
+                       'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr',
+                       'pctpress', 'tiendao', 'btproduct', 'akow', 'bappress'];
+
 $opt   = getopt('', ['limit::', 'dry-run', 'source::']);
 $limit = (int) ($opt['limit'] ?? 0);
-$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress|tiendao|btproduct|akow)
-                                               // ★ 2026-09-14:btproduct 自 v1.12.0 起就漏登在這張白名單(不影響全站轉存,
-                                               //   但下 --source=btproduct 會被擋);收 akow 時一併補上
+$srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(見 COVER_SOURCES)
 $dry   = array_key_exists('dry-run', $opt);
 
 $r2 = app_config()['r2'] ?? null;
@@ -199,8 +205,8 @@ function fetch_image(string $url, ?string &$why = null): ?array
 $pdo = db();
 $srcCond = '';
 if ($srcFilter !== '') {
-    if (!in_array($srcFilter, ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist', 'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr', 'pctpress', 'tiendao', 'btproduct', 'akow'], true)) {
-        exit("--source 只接受 campus|logos|elim|grace|wdbook|methodist|osb|taosheng|cclm|cosmiccare|mezu|twgbr|pctpress|tiendao|btproduct|akow\n");
+    if (!in_array($srcFilter, COVER_SOURCES, true)) {
+        exit("--source 只接受 " . implode('|', COVER_SOURCES) . "\n");
     }
     $srcCond = " AND e.source = " . $pdo->quote($srcFilter);
 }

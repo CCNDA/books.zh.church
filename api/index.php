@@ -29,7 +29,11 @@ const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 Book
                              'mezu' => '真哪噠',
                              'twgbr' => '福音書房',
                              'pctpress' => '教會公報社',
-                             'tiendao' => '天道書樓'];  // 海外第 1 站(香港,v1.11.0)
+                             // 海外(2026-09 起,一站一版 v1.11.0～v1.16.0)
+                             'tiendao' => '天道書樓',      // 香港,v1.11.0
+                             'akow' => '麥種傳道會',        // 美國,v1.13.0
+                             'bappress' => '浸信會出版社',  // 香港,v1.15.0
+                             'rockhouse' => '海天書樓'];    // 香港,v1.16.0(先登錄備用)
 // 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
 const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
                              'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5,
@@ -43,7 +47,18 @@ const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '
                              'twgbr' => 13, '福音書房' => 13,
                              'pctpress' => 14, '教會公報社' => 14,
                              // 海外站排在台灣站之後(讀者多數在台灣,台灣購書管道優先顯示)
-                             'tiendao' => 15, '天道書樓' => 15];
+                             'tiendao' => 15, '天道書樓' => 15,
+                             // ★ 2026-09-22 補登。麥種(v1.13.0)自上線起就沒登錄過,
+                             //   而未登錄者的預設值是 9 → 麥種的購書連結一直被排在
+                             //   「道聲」那一格,混在台灣書房中間,與上面那條註解的意圖相反。
+                             //   ★ 變體標註的字串要各自登錄:匯入器寫進 links.platform 的是
+                             //     「麥種傳道會(正體)」這種**完整字串**,不是代碼;
+                             //     少登一種就會落回預設值(天恩(電子書)、微讀書城(簡體)
+                             //     早就是這樣處理的)。
+                             'akow' => 16, '麥種傳道會' => 16,
+                             '麥種傳道會(正體)' => 16, '麥種傳道會(簡體)' => 16,
+                             'bappress' => 17, '浸信會出版社' => 17,
+                             'rockhouse' => 18, '海天書樓' => 18];
 
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, X-Api-Key, Authorization');
@@ -691,9 +706,13 @@ function get_book(int $id): never
         }
     }
     $buy = array_values($buy);
+    // ★ 2026-09-22:預設值由 9 改為 99。
+    //   9 是「道聲」的排序值,等於**沒登錄的平台會被靜默插進台灣書房中間**
+    //   (麥種自 v1.13.0 上線起就是這樣)。沒登錄代表我們不知道它該排哪,
+    //   正確行為是排到最後、讓它顯眼,而不是躲在中間看不出來。
     usort($buy, static fn (array $a, array $b): int =>
-        [BUY_PLATFORM_ORDER[$a['platform']] ?? 9, $a['label']]
-        <=> [BUY_PLATFORM_ORDER[$b['platform']] ?? 9, $b['label']]);
+        [BUY_PLATFORM_ORDER[$a['platform']] ?? 99, $a['label']]
+        <=> [BUY_PLATFORM_ORDER[$b['platform']] ?? 99, $b['label']]);
     $book['buy_links'] = $buy;    // 所有購書來源(校園/基道/未來新增)
     $book['links']     = $others; // 延伸連結(已排除購書,避免與按鈕重複)
 
