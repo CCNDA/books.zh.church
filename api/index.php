@@ -299,15 +299,62 @@ function get_books(): never
     // 格式混用 YYYY / YYYY-MM / YYYY-MM-DD,故用字串比對(前綴語意):
     //   '2020' >= '2020' ✓、'2026-12' <= '2026-12-31' ✓
     //   ★ 絕不可用 YEAR() 等函式包欄位,索引會失效。
-    $pubDateExpr = 'COALESCE((SELECT MAX(ey.publish_date) FROM editions ey
-                              WHERE ey.book_id = b.book_id), b.publish_date)';
+    // ══ ★★ 2026-09-28 第七輪:年份條件改成 JOIN 一個「先彙總、先篩過」的衍生表 ══
+    //
+    // 【為什麼要改】上面那個 COALESCE(相關子查詢) 寫法,**COUNT 一句就要 5.14 秒**,
+    //   而線上整條 API 才 5.07 秒 —— 年份篩選的時間幾乎全部花在 COUNT。
+    //   COUNT 沒有 LIMIT,必須對五萬多本上架書各跑一次那個子查詢。
+    //   ★ 這與前三輪的盲點正好相反(前三輪只量 COUNT 沒量取列,本題反而是 COUNT)。
+    //     先用線上黑箱分離出來(per_page=1 也要 4.1 秒 → 有一筆與取列數無關的固定成本),
+    //     再用主機計時查詢證實。
+    //
+    // 【四個寫法都量過才選的】2026-09-28 主機實測(見 database/migrations/
+    //   2026-09-25_search_perf_round7_year.sql 與當日 Asana 1218643959919910 留言):
+    //     A 原 COALESCE 相關子查詢        COUNT 5,140.7 ms
+    //     B LEFT JOIN 衍生表 + COALESCE   COUNT 5,011.4 ms   ← 幾乎沒改善,淘汰
+    //     C JOIN + HAVING 下推(本寫法)   COUNT   167.2 ms   ← 快 31 倍
+    //     D EXISTS OR NOT EXISTS 拆解      COUNT 5,094.0 ms   ← 淘汰
+    //     editions 彙總本身(65,585 組)    只要   151.6 ms
+    //   ⇒ 貴的從來不是彙總,是「對 books 每一列各跑一次子查詢」。
+    //     B 沒救的原因:LEFT JOIN + COALESCE 讓條件下不到衍生表裡,仍逐列評估全表。
+    //     C 把條件下推到 HAVING,JOIN 的一邊先縮到約一萬列,只比純彙總多 15 ms。
+    //   year_to 288.7 ms、深分頁(OFFSET 8000)228.2 ms,皆在 300 ms 內。
+    //
+    // ★★★【本寫法拿掉了平面欄後備層 —— 刻意的,但它靠的是資料現況,不是語意等價】
+    //   原式 COALESCE(MAX(editions.publish_date), books.publish_date) 有第二層後備,
+    //   本寫法只看 editions。兩者在今天的資料上輸出**完全相同**:
+    //     2026-09-28 實查:上架 54,783 本,其中「沒有任何 edition 日期、卻有 books
+    //     平面欄日期」= **0 本**;A/B/C/D 四種寫法的 COUNT、第 1 頁、深分頁、
+    //     關鍵字+年份的 book_id 逐筆相同。
+    //   為什麼是 0:tools/import.php 的 parse_date() 回傳 [books 用, edition 用] 兩個值,
+    //   要嘛都有值、要嘛都是 null,且同一次匯入同時寫入兩張表
+    //   → 不會產生「只有平面欄有日期」的書。
+    //   ★ 但這是**現行匯入程式的行為,不是資料庫層的保證**。哪天有工具只更新
+    //     books.publish_date(手動 SQL、單表 reparse…),這裡就會**靜默漏書**。
+    //     守住它的對帳查詢寫在 database/migrations/2026-09-28_year_fallback_guard.sql,
+    //     **尚未**併入每日排程(登記在「對帳守門員」任務 1218194268650259)。
+    //
+    // ★ 格式混用 YYYY / YYYY-MM / YYYY-MM-DD,仍用字串比對(前綴語意),
+    //   '2020' >= '2020' ✓、'2026-12' <= '2026-12-31' ✓;絕不可用 YEAR() 包欄位。
+    // ★ HAVING 用 select 別名 pd,與實測 SQL 形狀完全一致 —— 換成 MAX(publish_date)
+    //   雖然語意相同,但那是沒量過的形狀,不要順手改。
+    $yearHaving = [];
     if ($yearFrom !== '' && preg_match('/^\d{4}$/', $yearFrom)) {
-        $where[] = "$pubDateExpr >= :yf";
+        $yearHaving[]  = 'pd >= :yf';
         $params[':yf'] = $yearFrom;
     }
     if ($yearTo !== '' && preg_match('/^\d{4}$/', $yearTo)) {
-        $where[] = "$pubDateExpr <= :yt";
+        $yearHaving[]  = 'pd <= :yt';
         $params[':yt'] = $yearTo . '-12-31';
+    }
+    $yearJoin = '';
+    if ($yearHaving) {
+        $yearJoin = ' JOIN (SELECT book_id, MAX(publish_date) AS pd
+                              FROM editions
+                             WHERE publish_date IS NOT NULL
+                             GROUP BY book_id
+                            HAVING ' . implode(' AND ', $yearHaving) . ') yr
+                           ON yr.book_id = b.book_id';
     }
     // ── 2026-09-17(M1-B)來源書房篩選 ───────────────────────
     // ★ 不可用 v.source:那是 books.source 平面欄(單值),
@@ -345,7 +392,9 @@ function get_books(): never
     //   author/translator/publisher/isbn13/cover_url(那些才是 view 存在的理由),
     //   走 PRIMARY eq_ref,子查詢只執行 20 次,不是 65,290 次。
     // COUNT 沒有 ORDER BY,最佳化器本來就會拿瘦表當驅動表 —— 實測 0.288s,維持原形不動。
-    $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins WHERE $whereSql");
+    // ★ 2026-09-28:$yearJoin 接在 $joins 之後(年份條件已下推到它的 HAVING 裡,
+    //   不再出現在 $whereSql)。沒帶年份參數時 $yearJoin 是空字串,這句與改版前完全相同。
+    $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins$yearJoin WHERE $whereSql");
     $stmt->execute($params);
     $total = (int) $stmt->fetchColumn();
 
@@ -372,13 +421,16 @@ function get_books(): never
     // ★ STRAIGHT_JOIN 依 FROM 的書寫順序決定 join 順序 → book_search 必須寫在前面。
     //   只在「有關鍵字且非 deep」時套用;沒有瘦表可 JOIN 時用 hint 沒有意義。
     //   deep=1 那條路仍需 books(search_text 在那),維持原樣、接受慢。
+    // ★ 2026-09-28:兩種形狀都要接上 $yearJoin。
+    //   STRAIGHT_JOIN 依書寫順序決定 join 順序 → bs(瘦表)→ books → 年份衍生表,
+    //   瘦表仍是驅動表,第五輪的結論不受影響。
     if ($joins !== '') {
-        $fromRows = 'book_search bs JOIN books b ON b.book_id = bs.book_id';
+        $fromRows = 'book_search bs JOIN books b ON b.book_id = bs.book_id' . $yearJoin;
         $hint     = 'STRAIGHT_JOIN ';
     } else {
         // 無關鍵字的瀏覽/篩選:單表,靠 idx_pub_created (is_published, created_at, book_id)
         //   實測 建索引前 5.004 s → 建索引後 0.0004 s(Using index,filesort 消失)。
-        $fromRows = 'books b';
+        $fromRows = 'books b' . $yearJoin;
         $hint     = '';
     }
 
