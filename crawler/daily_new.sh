@@ -181,5 +181,26 @@ else
   log "[警告] 找不到 $SEARCHTEXT,略過搜尋欄補值(新書將搜不到)"
 fi
 
+# ── 年份後備層守門:確認「有平面欄日期卻沒有任何 edition 日期」的書仍是 0 本 ──
+# ★★ 2026-09-28 補上(v1.15.1,Asana 1218643959919910)。
+#   API 的年份篩選改成只看 editions.publish_date(COUNT 5,140ms → 167ms),
+#   **沒有 books.publish_date 那層後備**。它之所以等價,是因為現行 import.php
+#   一律把日期同時寫進兩張表 —— 那是程式行為,不是資料庫約束。
+#   哪天有工具只更新 books.publish_date,那些書會從年份篩選裡**靜默消失**:
+#   網站照跑、書目頁照常顯示出版年,使用者看得到年份卻篩不到,不會有人回報。
+#   這一行是那件事唯一的徵兆來源。
+# 唯讀,不改任何資料;正常回 0 本並 exit 0,發現問題才 exit 1 並列出書目與來源分布。
+YEARGUARD="$ROOT/tools/check_year_fallback.php"
+if [ -f "$YEARGUARD" ]; then
+  log "--- 年份後備層守門 ---"
+  if php "$YEARGUARD" >>"$LOG" 2>&1; then
+    log "年份後備層守門:通過(0 本)"
+  else
+    log "[錯誤] 年份後備層守門:**發現後備層書,年份篩選會漏掉它們**,詳見上方清單"
+  fi
+else
+  log "[警告] 找不到 $YEARGUARD,略過年份後備層守門"
+fi
+
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書複核見 runbook 待辦。
