@@ -79,6 +79,9 @@ if (PHP_SAPI !== 'cli') {
     exit("CLI only\n");
 }
 require dirname(__DIR__) . '/api/lib/db.php';
+// 書名促銷詞剝除規則。與 tools/check_title_promo.php **共用同一份** ——
+// 那支是這條規則的驗證者(產 dry-run 對照表給人勾),兩邊各寫一份會悄悄分家。
+require_once __DIR__ . '/lib_title.php';
 
 /**
  * 來源 → 幣別對映(2026-09-01 決議 A,海外五站前置)。
@@ -374,7 +377,12 @@ function map_record(string $source, array $r): array
     $names = fn(?string $s): array => split_names(
         $source === 'elim' && $s !== null ? str_replace('/', '、', $s) : $s);
     $m = [
-        'title'          => cap(tidy($r['title'] ?? null), 255),
+        // ★ 2026-09-29:剝掉站方寫進商品名稱的促銷詞(（新書79折）、(特價)、【瑕疵…】…)。
+        //   書名是 fuzzy_key() 的輸入,促銷尾註會讓跨站比對比不中 → 站上長出重複書
+        //   (已實測:79674↔45452↔83271、79675↔102456、88945↔62842)。
+        //   規則不確定時 strip_title_promo() 回 hold 並退回原值,**絕不半套**。
+        //   站方原始書名不必另存:$extraRec = $raw 整筆進 books.extra[來源],原值一直在。
+        'title'          => cap(strip_title_promo(tidy($r['title'] ?? null))['clean'], 255),
         'original_title' => cap(tidy($r['title_en'] ?? null), 255),
         'authors'        => $names($r['authors_raw'] ?? null),
         'translators'    => $names($r['translators_raw'] ?? null),
