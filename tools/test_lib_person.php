@@ -96,7 +96,6 @@ $tails = [
     '某某某等'   => '某某某',
     '王小明編著' => '王小明',
     '王小明合著' => '王小明',
-    '王小明譯者' => '王小明',
 ];
 foreach ($tails as $in => $want) {
     $r = normalize_person_name($in);
@@ -230,7 +229,6 @@ $tails2 = [
     '徐淑貞 等合著'       => '徐淑貞',
     '榮鳳,保羅合編著'     => '榮鳳,保羅',
     '漆立平&漆哈拿合著'   => '漆立平&漆哈拿',
-    '賴倍偉/張蘭玉合著'   => '賴倍偉/張蘭玉',
     '王正中主編'          => '王正中',
     '唐佑之著'            => '唐佑之',
     '潘秋松審訂'          => '潘秋松',
@@ -240,6 +238,13 @@ foreach ($tails2 as $in => $want) {
     ok($r['clean'] === $want && !$r['hold'], "「{$in}」應剝成「{$want}」",
        $r['clean'] . ' hold=' . implode('|', $r['hold']));
 }
+// ★ 剝完還帶斜線的不給改名(「賴倍偉/張蘭玉」仍是兩個人黏在一起,改成那樣只是換個垃圾)。
+//   代價是這類轉進人工清單;`.` 與 `&` 不在守門名單裡 —— 它們在單一署名裡也會出現,
+//   而 `/` `\\` `:` 是站方用來分隔「一筆」與「下一筆」的結構符號。這條線是這樣畫的。
+$r = normalize_person_name('賴倍偉/張蘭玉合著');
+ok($r['hold'] !== [] && $r['clean'] === '賴倍偉/張蘭玉合著', '剝完還帶斜線 → hold,不給改名', $r['clean']);
+ok(normalize_person_name('漆立平&漆哈拿合著')['clean'] === '漆立平&漆哈拿', '`&` 不在守門名單裡');
+
 // ★★ 「黃伯和」的「和」是名字的字 —— 這就是為什麼「和著」「和編」不可以進字尾清單:
 //    它們比「編」長會先命中,「黃伯和編」會被剝成「黃伯」。(2026-10-03 自己踩過一次。)
 ok(normalize_person_name('黃伯和主編')['clean'] === '黃伯和', '「黃伯和主編」不可剝成「黃伯」');
@@ -288,6 +293,193 @@ foreach ([['恒','恆'], ['托','託'], ['于','於'], ['奥','奧'], ['眞','�
 }
 foreach ([['常','長'], ['義','文'], ['倪','巴'], ['如','茹'], ['明','民'], ['聖','圣'], ['馬','马']] as [$a, $b]) {
     ok(!pn_same_variant($a, $b), "★ {$a}/{$b} **不是**異體字(可能是錯字或兩個人,要人工)");
+}
+
+echo "\n== 16. ★★ 會切成多個人的列,不可以走「改名」那條路 ==\n";
+// 2026-10-03 第二輪主機實測抓到的汙染型 bug:
+// check_person_names 用的是 normalize_person_name(單一人名),它不會切。
+// 「文:江淑文\圖:陳嘉鈴」只剝掉開頭標籤 →「江淑文\圖:陳嘉鈴」被當成新名字去改名,
+// **比原本更糟**。這類必須判成 needs_resplit,交 fix_person_names.php 重切。
+$multi = [
+    '文：江淑文\圖：陳嘉鈴',
+    '文：鄭和茵 \ 圖：蔡兆倫',
+    '圖/那信 文/贖君',
+    '文/吳昭誼 圖/林育如',
+    '文:姜蜜&游紫玲\圖:禧平',
+    '文:南希．葛絲瑞/圖:珍妮．布雷克',
+    '文／避雨，圖／那羊',
+    '文/安德蕾．普蘭&圖/馬帝歐．朗彭',
+    '圖/劉芳 文/陳進隆',
+    '文/吳盈光姊妹 圖/林佳怡姊妹',
+    "甲\u{FF1B}乙",
+];
+// 三種 kind 的處置相同(都走 fix_person_names.php 重切),差別只在標籤哪個比較具體
+$resplitKinds = ['needs_resplit', 'fullwidth_semi', 'entity'];
+foreach ($multi as $in) {
+    $r = normalize_person_name($in);
+    ok(in_array($r['kind'], $resplitKinds, true) && $r['clean'] === $in && $r['hold'] !== [],
+       "「{$in}」應判成要重切並退回原值", "kind={$r['kind']} clean={$r['clean']}");
+    ok(count(pn_split_names($in)) >= 2, "「{$in}」pn_split_names 要切得出 2 個以上", (string) count(pn_split_names($in)));
+}
+// ★ 單一個人不可以被誤判成要重切
+foreach (['文：江淑文', '文、圖:王小明', '梁家麟著', '黃伯和編', '陳志文', '文子梁',
+          '漆立平&漆哈拿合著', '邱林川&阮耀啟', '亨利.克勞德/約翰.湯森德'] as $in) {
+    ok(normalize_person_name($in)['kind'] !== 'needs_resplit',
+       "「{$in}」不可被判成要重切", normalize_person_name($in)['kind']);
+}
+
+echo "\n== 17. 署名在後的角色詞(「巴刻著 趙中輝譯」這一大批) ==\n";
+$suffixPairs = [
+    '巴刻著 趙中輝譯'      => [['巴刻', 'author'], ['趙中輝', 'translator']],
+    '華德.凱瑟著 潘秋松譯' => [['華德.凱瑟', 'author'], ['潘秋松', 'translator']],
+    '傑克.海福德著 呂妙芬譯' => [['傑克.海福德', 'author'], ['呂妙芬', 'translator']],
+    '陸艾文著/高鳳仙譯'    => [['陸艾文', 'author'], ['高鳳仙', 'translator']],
+    '唐諾.古特立著 高以峰等譯' => [['唐諾.古特立', 'author'], ['高以峰', 'translator']],
+    '史考基著 呂瑞玉\ 譯'  => [['史考基', 'author'], ['呂瑞玉', 'translator']],
+];
+foreach ($suffixPairs as $in => $want) {
+    $r = pn_split_names($in);
+    $got = array_map(fn($x) => [$x['name'], $x['role']], $r);
+    ok($got === $want, "切「{$in}」", json_encode($got, JSON_UNESCAPED_UNICODE));
+}
+// ★★ 「等」不是切點:它的意思是「與其他人」,不是一個署名的結束。
+//    「王小明 等 李四」切開會憑空斷定那是兩個人 —— 沒有證據就不切。
+ok(count(pn_split_names('王小明 等 李四')) === 1, '★「等」後面有分隔符也不可以當切點',
+   json_encode(array_column(pn_split_names('王小明 等 李四'), 'name'), JSON_UNESCAPED_UNICODE));
+ok(count(pn_split_names('趙曉彤 等 雷日昇')) === 1, '★ 同上');
+// ★ 複合註記的角色要查得到:「等譯」的角色是譯者,不是沿用欄位的 author
+$r = pn_split_names('唐諾.古特立著 高以峰等譯');
+ok($r[1]['role'] === 'translator', '「高以峰等譯」的角色應為 translator', (string) $r[1]['role']);
+ok(normalize_person_name('王小明等編')['role'] === 'editor', '「等編」的角色應為 editor',
+   (string) normalize_person_name('王小明等編')['role']);
+
+// ★ 不可誤切:註記詞後面不是分隔符就不是切點
+ok(array_column(pn_split_names('黃伯和編輯'), 'name') === ['黃伯和'], '「黃伯和編輯」不可被切開');
+ok(array_column(pn_split_names('梁淑儀 編'), 'name') === ['梁淑儀'], '「梁淑儀 編」不可被切開');
+ok(array_column(pn_split_names('伊爾文等著'), 'name') === ['伊爾文'], '「伊爾文等著」不可被切開');
+
+echo "\n== 18. 名字後面用空白或連字號掛角色詞 ==\n";
+$trailing = [
+    '雅樹 文'      => ['雅樹', 'author'],
+    '棗田 圖'      => ['棗田', 'illustrator'],
+    '游紫玲-文'    => ['游紫玲', 'author'],
+    '禧平-圖'      => ['禧平', 'illustrator'],
+    '飯嶌玲子 繪'  => ['飯嶌玲子', 'illustrator'],
+    '雷日昇 攝影'  => ['雷日昇', 'illustrator'],
+];
+foreach ($trailing as $in => [$wn, $wr]) {
+    $r = pn_split_names($in);
+    ok(count($r) === 1 && $r[0]['name'] === $wn && $r[0]['role'] === $wr,
+       "「{$in}」→「{$wn}」/{$wr}", json_encode(array_map(fn($x)=>[$x['name'],$x['role']], $r), JSON_UNESCAPED_UNICODE));
+}
+// ★ 沒有分隔符就不准剝(這是「陳志文」活下來的理由)
+foreach (['陳志文', '李文', '文子梁', '金玉梅', '王大文'] as $in) {
+    ok(pn_split_names($in)[0]['name'] === $in, "「{$in}」不可被剝");
+}
+
+echo "\n== 19. ★第三輪主機實測:三個新誤傷 ==\n";
+
+// ── 19a. 「原著」「新編」比「著」「編」長,要排在前面,否則「原」「新」會被留下 ──
+$compound = [
+    '李懷光原著'   => ['李懷光', 'author'],
+    '某某某新譯'   => ['某某某', 'translator'],
+    '王小明改寫'   => ['王小明', 'author'],
+    '王小明審校'   => ['王小明', 'editor'],
+];
+foreach ($compound as $in => [$wn, $wr]) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $wn && !$r['hold'], "「{$in}」應剝成「{$wn}」", $r['clean'] . ' ' . implode('|', $r['hold']));
+}
+// ★ 「邱瓊苑新編」不剝:「吳小新編」與「侯士庭新編」在規則上分不出來
+//   (一個是「吳小新」+「編」,一個是「侯士庭」+「新編」)→ 交人工,不猜。
+ok(array_column(pn_split_names('李懷光原著/邱瓊苑新編'), 'name') === ['李懷光', '邱瓊苑新編'],
+   '「原著」照剝,「新編」交人工',
+   json_encode(array_column(pn_split_names('李懷光原著/邱瓊苑新編'), 'name'), JSON_UNESCAPED_UNICODE));
+
+// ── 19b. ★★ 註記詞後面接括號 → 那是同一個人的英文名,**不是**下一個人 ──
+//    「約珥．薩頓 主編 (Joel Sutton)」被切開會憑空生出一個叫「(Joel Sutton)」的人。
+//    這是本輪新加的切法自己造出來的傷,不是舊資料的問題。
+foreach (['約珥．薩頓 主編 (Joel Sutton)', '董家驊主編 (12位作者合著)',
+          '柏饒齊 著 (Walter C. Kaiser Jr.)'] as $in) {
+    ok(count(pn_split_names($in)) === 1, "「{$in}」不可被切開(括號裡是同一人的註記)",
+       json_encode(array_column(pn_split_names($in), 'name'), JSON_UNESCAPED_UNICODE));
+}
+// 但後面不是括號就照切
+ok(count(pn_split_names('巴刻著 趙中輝譯')) === 2, '後面不是括號還是要切');
+
+// ── 19c. ★ 剝完的結果若還帶著結構符號(冒號/斜線/反斜線)→ 不是乾淨的人名,一律 hold ──
+//    「圖/賽卓．卡利耶羅 編文/道格．莫斯」剝掉開頭的「圖/」之後,
+//    剩下的「賽卓．卡利耶羅 編文/道格．莫斯」被當成新名字拿去改名 —— 又是改成垃圾。
+foreach (['圖/賽卓．卡利耶羅 編文/道格．莫斯',
+          '主編:邱林川&阮耀啟／圖:某某'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] || $r['kind'] === 'needs_resplit',
+       "「{$in}」剝完還帶結構符號 → 不可產生改名計畫", "kind={$r['kind']} clean={$r['clean']}");
+}
+// ★ 但「沒有要改」的列不受影響:本來就含斜線又剝不出東西的,維持原樣不重新分類
+$r = normalize_person_name('亨利.克勞德/約翰.湯森德');
+ok($r['kind'] === 'clean' && $r['clean'] === '亨利.克勞德/約翰.湯森德',
+   '沒有要改的列不因為含斜線就被重新分類', "kind={$r['kind']}");
+
+echo "\n== 20. ★★第四輪:剝除詞分布表抓出來的誤傷 ==\n";
+// 這一批全部是「剝壞真名」,不是覆蓋率不足 —— 分布表的「併入既有列比例」把它們釣出來:
+// 剝完的名字站上一列都沒有,就是剝出了一個根本不存在的人。
+
+// ── 20a. 「翻譯者」「創作者」的結尾就是註記詞本身(與「陳志文」同型) ──
+$glued = [
+    '創造科學翻譯者',      // 「翻譯者」不是「翻」+「譯者」
+    '傳月刊靈修作者',      // 「靈修作者」
+    '胖手收   插畫創作者',  // 「插畫創作者」
+    '吳小新編',            // ★「吳小新」是人名,「編」才是註記
+    '侯士庭新編',          // ★ 跟上一個在規則上分不出來 → 兩個都交人工
+];
+foreach ($glued as $in) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $in, "「{$in}」沒有分隔符 → 一個字都不准剝", $r['clean']);
+}
+// 有分隔符就照剝
+foreach (['李安琴 譯者' => '李安琴', '劉怡君 改寫' => '劉怡君', '張晉霖 改編' => '張晉霖',
+          '蕭恩松 審校' => '蕭恩松'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」有分隔符 → 剝成「{$want}」",
+       normalize_person_name($in)['clean']);
+}
+// 「原著」不需要分隔符(「賈禮榮原著」實測 78% 併得進既有列)
+ok(normalize_person_name('賈禮榮原著')['clean'] === '賈禮榮', '「賈禮榮原著」照剝');
+
+// ── 20b. 更長的註記詞要補進來,否則殘尾是半截 ──
+foreach (['錢錕 總審訂' => '錢錕', '保羅．梅爾原文編譯' => '保羅．梅爾'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」→「{$want}」",
+       normalize_person_name($in)['clean']);
+}
+
+// ── 20c. 剝完殘尾是符號 → hold ──
+foreach (['田頌恩◎審訂', '郭承天..等 編著'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」剝完殘尾是符號 → hold", $r['clean']);
+}
+
+// ── 20d. 中段署名的分隔符要含頓號與點 ──
+$r = normalize_person_name('孫揚光口述.吳淑玲編撰');
+ok($r['hold'] !== [] || $r['kind'] === 'needs_resplit',
+   '「孫揚光口述.吳淑玲編撰」中段有「口述」→ 兩個人,不可只剝字尾', "kind={$r['kind']} clean={$r['clean']}");
+// ★ 但名字裡的點不可誤判成中段署名
+ok(normalize_person_name('華德.凱瑟著')['clean'] === '華德.凱瑟', '「華德.凱瑟著」的點在名字裡,照剝');
+ok(normalize_person_name('漆立平.漆哈拿編著')['clean'] === '漆立平.漆哈拿', '同上');
+
+echo "\n== 21. ★整段都是角色詞的片段,不是人 ==\n";
+// 2026-10-03 第五輪(--resplit-only dry-run 實測):「文/圖」被建成一個叫「文/圖」的 person。
+// 原因:剝掉前綴「文/」之後只剩「圖」一個字 → 太短判 hold → 照原值走 → 建人。
+// 整段拆開後每一塊都是角色詞,那整段就不是人。
+foreach (['文/圖', '文／圖', '文、圖', '圖/文', '著/譯', '編/繪', '文\圖'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['kind'] === 'role_word' && $r['clean'] === '',
+       "「{$in}」整段都是角色詞 → 不是人", "kind={$r['kind']} clean={$r['clean']}");
+    ok(pn_split_names($in) === [], "「{$in}」不該切出任何人", json_encode(array_column(pn_split_names($in), 'name'), JSON_UNESCAPED_UNICODE));
+}
+// ★ 防誤傷:有一塊不是角色詞就不算
+foreach (['文/王小明', '文子梁', '陳志文', '圖們江', '作慕容'] as $in) {
+    ok(normalize_person_name($in)['kind'] !== 'role_word', "「{$in}」不可被當成純角色標籤",
+       normalize_person_name($in)['kind']);
 }
 
 echo "\n────────────────────────────\n";

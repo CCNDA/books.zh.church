@@ -45,7 +45,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
 require __DIR__ . '/../api/lib/db.php';
 require_once __DIR__ . '/lib_person.php';
 
-const CPN_REV = '2026-10-03.3';
+const CPN_REV = '2026-10-03.7';
 
 /** 以**顯示寬度**補空白(printf 的 %-Ns 算的是位元組,中文會歪掉) */
 function cpn_pad(string $s, int $w): string
@@ -55,7 +55,7 @@ function cpn_pad(string $s, int $w): string
 }          // ★ 版本戳記:FTP 沒蓋到時唯一能當場抓出來的辦法
 
 $opt      = getopt('', ['limit::', 'tsv::', 'emit-sql::', 'variants', 'guard', 'min-books::',
-                        'var-minor::', 'var-major::', 'var-all']);
+                        'var-minor::', 'var-major::', 'var-all', 'notes::']);
 $limit    = max(1, (int) ($opt['limit'] ?? 30));
 $minBooks = max(0, (int) ($opt['min-books'] ?? 1));   // 變體候選:兩邊都要至少幾本書
 $onlyVar  = array_key_exists('variants', $opt);
@@ -66,6 +66,19 @@ $guard    = array_key_exists('guard', $opt);
 $varMinor = max(0, (int) ($opt['var-minor'] ?? 2));    // 少的那邊 ≤ 幾本
 $varMajor = max(0, (int) ($opt['var-major'] ?? 10));   // 多的那邊 ≥ 幾本
 $varAll   = array_key_exists('var-all', $opt);
+
+// ★★ 合併/改名要逐詞放行。
+//    2026-10-03 實測:tail_note 有 2,400 列,沒有人會一列一列看,
+//    而「剝除詞分布表」顯示**不同的詞品質差很多**(「著」653 列 73% vs
+//    「繪」73 列 22%)。所以 B/C 兩段**預設一列都不產** ——
+//    熊哥看過分布表、勾了哪幾個詞,才用 --notes= 把那幾個詞放行。
+//    一次放行一批、跑完回查,比一次送 2,400 列安全得多。
+//    (--notes=all 是逃生門,平常不要用。)
+$notesOpt  = trim((string) ($opt['notes'] ?? ''));
+$notesAll  = $notesOpt === 'all';
+$notesPass = $notesOpt === '' || $notesAll
+    ? []
+    : array_values(array_filter(array_map('trim', explode(',', $notesOpt)), fn($x) => $x !== ''));
 
 echo "check_person_names rev " . CPN_REV . "\n";
 
@@ -89,10 +102,11 @@ $byName = [];
 foreach ($rows as $r) $byName[$r['name']][] = $r;
 
 // ── 2. 逐列套規則 ────────────────────────────────────────────────────────
-$bucket = ['fullwidth_semi'=>[], 'entity'=>[], 'role_word'=>[], 'filler'=>[],
+$bucket = ['needs_resplit'=>[], 'fullwidth_semi'=>[], 'entity'=>[], 'role_word'=>[], 'filler'=>[],
            'tail_note'=>[], 'role_prefix'=>[], 'long_text'=>[], 'clean'=>[]];
 foreach ($rows as $r) {
     $n = normalize_person_name($r['name']);
+    $r['_strip'] = implode('+', $n['stripped']);
     $r['_kind']  = $n['kind'];
     $r['_clean'] = $n['clean'];
     $r['_role']  = $n['role'];
@@ -167,6 +181,10 @@ uasort($varShown, fn($x, $y) => [$y['known'], $y['major']] <=> [$x['known'], $x[
 
 // ── 5. 輸出 ──────────────────────────────────────────────────────────────
 $label = [
+    // ★★ 這三類的處置相同:**重切**,絕不可改名。
+    //    2026-10-03 第二輪實測的汙染型 bug 就出在這裡 ——「文:江淑文\\圖:陳嘉鈴」
+    //    被當成「剝掉前綴後改名」,改出來的新名字是「江淑文\\圖:陳嘉鈴」,比原本更糟。
+    'needs_resplit'  => '這一列其實是好幾個人 → fix_person_names.php(**不可改名**)',
     'fullwidth_semi' => '全形分號沒被拆(多人擠同一列)→ fix_person_names.php',
     'entity'         => 'HTML entity 殘骸 → fix_person_names.php',
     'role_word'      => '整列就是角色詞,不是人 → 刪',
@@ -186,7 +204,10 @@ if (!$onlyVar) {
     }
     printf("  %-15s %6d 列\n", 'clean', count($bucket['clean']));
     echo "  ──────────────────────────\n";
-    printf("  髒列合計        %6d 列\n\n", $sum);
+    printf("  髒列合計        %6d 列\n", $sum);
+    // ★ 這個數字要跟 --emit-sql 印的「未放行」對得起來;對不上就是分類與計畫不同步。
+    printf("  其中待逐詞放行  %6d 列(tail_note + role_prefix,見最後的剝除詞分布)\n\n",
+        count($bucket['tail_note']) + count($bucket['role_prefix']));
 
     // ★ 任何一類「應該有值卻是 0」都要當場追(陷阱 27)。票上 9/8 實測
     //   fullwidth_semi 56、role_word 6、entity 11 都是非 0 —— 這裡變成 0
@@ -212,6 +233,34 @@ if (!$onlyVar) {
         }
         echo "\n";
     }
+}
+
+// ── 剝除詞分布 ──────────────────────────────────────────────────────────
+// ★ 2,400 列沒有人會一列一列看。按「剝掉了哪個詞」分組之後,異常一眼就看得出來:
+//   某個詞的列數突然很多、或某個詞剝完全都找不到正規列,就是那條規則有問題。
+//   (「李懷光原著 → 李懷光原」就是這樣被發現的 —— 不在分布表裡會被 2,400 列淹掉。)
+if (!$onlyVar) {
+    $byNote = [];
+    foreach (['tail_note', 'role_prefix'] as $k) {
+        foreach ($bucket[$k] as $r) {
+            $w = $r['_strip'] !== '' ? $r['_strip'] : '(未記錄)';
+            $byNote[$w]['n'] = ($byNote[$w]['n'] ?? 0) + 1;
+            $byNote[$w]['merge'] = ($byNote[$w]['merge'] ?? 0)
+                + (isset($plan[(int) $r['person_id']]['target']) && $plan[(int) $r['person_id']]['target'] ? 1 : 0);
+            if (count($byNote[$w]['eg'] ?? []) < 3) $byNote[$w]['eg'][] = $r['name'] . ' → ' . $r['_clean'];
+        }
+    }
+    uasort($byNote, fn($a, $b) => $b['n'] <=> $a['n']);
+    echo "═══ 剝除詞分布(tail_note + role_prefix,共 " . array_sum(array_column($byNote, 'n')) . " 列) ═══\n";
+    echo "  ★ 「併入既有列」比例偏低的那幾個詞要特別看 —— 剝出來的名字站上沒有,\n";
+    echo "    有可能是剝錯了(剝完的字串根本不是人名)。\n\n";
+    printf("  %s %6s %8s  %s\n", cpn_pad('剝掉的詞', 16), '列數', '併入既有', '例子');
+    foreach ($byNote as $w => $v) {
+        printf("  %s %6d %7d%%  %s\n", cpn_pad($w, 16), $v['n'],
+            (int) round(100 * $v['merge'] / max(1, $v['n'])),
+            cpn_pad(implode('  /  ', $v['eg']), 76));
+    }
+    echo "\n";
 }
 
 echo "═══ 異體字候選(同長度、只差一個字) ═══\n";
@@ -261,6 +310,15 @@ if (!empty($opt['emit-sql'])) {
     $f = fopen((string) $opt['emit-sql'], 'w');
     $q = fn(string $s): string => "'" . str_replace("'", "''", $s) . "'";
 
+    // ★ 放行過濾要在寫檔頭之前算好 —— 檔頭要寫「有幾列沒放行」。
+    //   (2026-10-03:原本算在 B 段,檔頭先用到 $skipped → PHP Warning,
+    //    而且那一行提示**靜默沒印出來**,看起來像功能沒做。)
+    $passed = array_filter($plan, function ($p) use ($notesAll, $notesPass) {
+        if ($notesAll) return true;
+        return in_array($p['row']['_strip'], $notesPass, true);
+    });
+    $skipped = count($plan) - count($passed);
+
     fwrite($f, "-- persons 表清理 —— 由 tools/check_person_names.php rev " . CPN_REV . " 產生\n");
     fwrite($f, "-- 產生時間:" . date('Y-m-d H:i:s') . "    Asana 1218277971470042\n");
     fwrite($f, "--\n");
@@ -268,6 +326,14 @@ if (!empty($opt['emit-sql'])) {
     fwrite($f, "-- ★ book_persons 對 persons 有 ON DELETE CASCADE,所以 DELETE FROM persons\n");
     fwrite($f, "--   會順手清掉 UPDATE IGNORE 撞 uq_book_person_role 而留下的那幾列。這是刻意的。\n");
     fwrite($f, "-- ★ 本檔**不含** long_text 與「未知差異」的變體 —— 那兩類沒有安全的自動解,人工處理。\n");
+    fwrite($f, "-- ★★ 合併/改名(B、C 段)只含**放行過的剝除詞**:"
+             . ($notesAll ? 'all(全部放行)' : ($notesPass ? implode('、', $notesPass) : '(無,兩段都是空的)'))
+             . "\n");
+    if (!$notesAll && $skipped > 0) {
+        fwrite($f, "--    另有 {$skipped} 列因為剝除詞未放行而**沒有**產生 SQL。\n");
+        fwrite($f, "--    放行方式:看過報表最後那張「剝除詞分布」,挑比例高、例子無誤的詞,\n");
+        fwrite($f, "--    再跑 --notes=著,主編,編著 這樣(詞之間用逗號)。\n");
+    }
     fwrite($f, "-- ★ 本檔**不改 book_persons.role**:「黃伯和編」併進「黃伯和」之後,那 3 筆關聯\n");
     fwrite($f, "--   仍然記成 author(它本來就是從 authors_raw 進來的)。角色正確化只對\n");
     fwrite($f, "--   **之後新匯入的書**生效(import.php 改用署名裡的角色)。既有關聯的角色\n");
@@ -304,9 +370,9 @@ if (!empty($opt['emit-sql'])) {
             (int) $r['person_id'], str_replace("\n", ' ', $r['name']), (int) $r['n_books']));
     }
 
-    // (B) 併:尾註 / 角色前綴
-    $merge  = array_filter($plan, fn($p) => $p['target'] !== null);
-    $rename = array_filter($plan, fn($p) => $p['target'] === null);
+    // (B) 併:尾註 / 角色前綴 —— **只處理放行過的剝除詞**($passed 在檔頭前就算好了)
+    $merge  = array_filter($passed, fn($p) => $p['target'] !== null);
+    $rename = array_filter($passed, fn($p) => $p['target'] === null);
     // ★ 兩列剝乾淨後同名、而資料庫裡又沒有那個正規列(「邁爾著」「邁爾編」都 → 「邁爾」):
     //   兩列都 UPDATE name 就會憑空多出一組同名重複列 —— persons.name **沒有 UNIQUE**,
     //   資料庫不會擋,只會靜默多一列。所以同名的只留書最多的那列改名,其餘併過去。
@@ -389,13 +455,21 @@ if (!empty($opt['emit-sql'])) {
     echo "已寫出清理 SQL:{$opt['emit-sql']}\n";
     echo "  A 刪 " . count($del) . " 列、B 併 " . count($merge) . " 列、C 改名 " . count($rename)
        . " 列、D 異體字 " . count($known) . " 對(預設註解掉)\n";
+    if (!$notesAll && $skipped > 0) {
+        echo "  ★ 另有 {$skipped} 列因剝除詞未放行而未產生 SQL(--notes= 放行,見分布表)\n";
+    }
+    if (!$notesAll && !$notesPass) {
+        echo "  ★ 目前 B/C 兩段是空的 —— 這是預設行為,不是出錯。\n"
+           . "    先跑只含 A 段的這一份(刪角色詞/填充詞),回查數字對了再逐批放行剝除詞。\n";
+    }
     echo "  ★ 本檔要另存一份到本機 database/migrations/ —— 主機上產的 SQL,Navicat 開不到。\n";
 }
 
 if ($guard) {
     $dirty = count($bucket['role_word']) + count($bucket['filler'])
            + count($bucket['tail_note']) + count($bucket['role_prefix'])
-           + count($bucket['fullwidth_semi']) + count($bucket['entity']);
+           + count($bucket['fullwidth_semi']) + count($bucket['entity'])
+           + count($bucket['needs_resplit']);
     if ($dirty > 0) {
         echo "\n★ 守門員:可自動處理的髒列 {$dirty} 列 → exit 1\n";
         exit(1);
