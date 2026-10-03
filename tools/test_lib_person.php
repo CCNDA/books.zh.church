@@ -205,6 +205,91 @@ $warned = [];
 $r = pn_split_names('甲(乙;丙', function ($s) use (&$warned) { $warned[] = $s; });
 ok($warned !== [], '括號不成對要大聲失敗');
 
+echo "\n== 13. ★主機實測回來的真實資料(2026-10-03 第一次 dry-run 抓到的三個缺陷) ==\n";
+
+// ── 13a. entity 誤判:「& + 字母」不是 entity ──────────────────────────
+//    第一版用寬鬆樣式盤出 43 列,票上 9/8 量的是 11 —— 對不上就是判準太寬。
+foreach (['Corrine L. Carvalho&Paul V. Niskanen', 'CLOUD&TOWNSEND', 'Tony&Tina牧師',
+          'BENSON&FRIENDS', 'Gary Ezzo&Ro', '約書亞樂團&HILLSONG Y&F',
+          '賴特 & 伯德 (N.T. Wright&Michael F. Bird)'] as $n) {
+    ok(person_entity_fragment($n) === null, "「{$n}」只是人名中間一個 & 號,不是 entity",
+       (string) person_entity_fragment($n));
+    ok(normalize_person_name($n)['kind'] !== 'entity', "「{$n}」不可判成 entity");
+}
+foreach (['傅堂恩&amp' => '&amp', '古倫神父（Anselm Gr&uuml' => '&uuml',
+          '克雷梅爾（Michael Kr&auml' => '&auml', '葛德&bull' => '&bull',
+          '葛德‧泰森 (Gerd Thei&szlig' => '&szlig', '安德魯．布查(Andr&eacute' => '&eacute',
+          '約格．辛克（J&ouml' => '&ouml'] as $n => $want) {
+    ok(person_entity_fragment($n) === $want, "「{$n}」是真的 entity 殘骸", (string) person_entity_fragment($n));
+}
+
+// ── 13b. 字尾註記:剝完不可以留下半截連接詞 ────────────────────────────
+$tails2 = [
+    '伊爾文等著'          => '伊爾文',
+    '威廉．克萊因 等合著' => '威廉．克萊因',
+    '徐淑貞 等合著'       => '徐淑貞',
+    '榮鳳,保羅合編著'     => '榮鳳,保羅',
+    '漆立平&漆哈拿合著'   => '漆立平&漆哈拿',
+    '賴倍偉/張蘭玉合著'   => '賴倍偉/張蘭玉',
+    '王正中主編'          => '王正中',
+    '唐佑之著'            => '唐佑之',
+    '潘秋松審訂'          => '潘秋松',
+];
+foreach ($tails2 as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && !$r['hold'], "「{$in}」應剝成「{$want}」",
+       $r['clean'] . ' hold=' . implode('|', $r['hold']));
+}
+// ★★ 「黃伯和」的「和」是名字的字 —— 這就是為什麼「和著」「和編」不可以進字尾清單:
+//    它們比「編」長會先命中,「黃伯和編」會被剝成「黃伯」。(2026-10-03 自己踩過一次。)
+ok(normalize_person_name('黃伯和主編')['clean'] === '黃伯和', '「黃伯和主編」不可剝成「黃伯」');
+ok(normalize_person_name('黃伯和編')['clean'] === '黃伯和', '★「黃伯和編」不可剝成「黃伯」');
+ok(normalize_person_name('黃伯和編輯')['clean'] === '黃伯和', '「黃伯和編輯」不可剝成「黃伯」');
+// 代價:前面有空格的「… 和著」只能判 hold 交人工 —— 寧可不剝,不可吃掉名字裡的字
+$r = normalize_person_name('蔡春曦.蔡黃玉珍 和著');
+ok($r['hold'] !== [] && $r['clean'] === '蔡春曦.蔡黃玉珍 和著',
+   '「… 和著」剝完殘尾是半截連接詞 → hold 退回原值', $r['clean']);
+
+// ── 13c. 兩個人黏在同一列,沒有分隔符可切 → hold,不可只剝最後一個註記 ──
+foreach (['傑克.海福德著 呂妙芬譯', '戈登費依著 顧添祥譯', 'R.C.BRIGGS著 葉約翰譯',
+          '邁爾著 鐘越娜譯'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」兩個人黏一起,應 hold 並退回原值",
+       $r['clean'] . ' hold=' . implode('|', $r['hold']));
+}
+
+echo "\n== 14. ★站方用 \\ 與斜線分隔署名(實測 109 列) ==\n";
+$slash = [
+    '文：江淑文\圖：陳嘉鈴'           => ['江淑文', '陳嘉鈴'],
+    '文:南希．葛絲瑞/圖:珍妮．布雷克' => ['南希．葛絲瑞', '珍妮．布雷克'],
+    '文／懶鬼KK；圖／懶鬼漫畫部同事s' => ['懶鬼KK', '懶鬼漫畫部同事s'],
+    '文:姜蜜&游紫玲\圖:禧平'          => ['姜蜜&游紫玲', '禧平'],
+    '波特/主編'                        => ['波特'],
+    '主編：陳廷忠'                     => ['陳廷忠'],
+    '文\圖:陳嘉鈴'                     => ['陳嘉鈴', '陳嘉鈴'],   // 複合標籤 → 同一人兩個角色
+];
+foreach ($slash as $in => $want) {
+    $got = array_column(pn_split_names($in), 'name');
+    ok($got === $want, "切「{$in}」應得 [" . implode(', ', $want) . ']', '[' . implode(', ', $got) . ']');
+}
+// ★★ 斜線不可以無條件當分隔符:「江淑文」的「文」前面不是分隔符,不准腰斬
+ok(array_column(pn_split_names('亨利.克勞德/約翰.湯森德'), 'name') === ['亨利.克勞德/約翰.湯森德'],
+   '沒有角色詞時斜線不可當分隔符(寧可不拆也不可拆錯)');
+ok(array_column(pn_split_names('江淑文'), 'name') === ['江淑文'], '「江淑文」不可被腰斬成「江淑」');
+// 角色要跟著標籤走
+$r = pn_split_names('文：江淑文\圖：陳嘉鈴');
+ok(array_column($r, 'role') === ['author', 'illustrator'], '斜線分隔時角色也要對',
+   implode(',', array_map(fn($x) => (string) $x, array_column($r, 'role'))));
+
+echo "\n== 15. 異體字:實測命中的那幾對 ==\n";
+foreach ([['恒','恆'], ['托','託'], ['于','於'], ['奥','奧'], ['眞','真'], ['啓','啟'],
+          ['杰','傑'], ['昇','升'], ['衛','衞'], ['峰','峯'], ['黃','黄'], ['臺','台']] as [$a, $b]) {
+    ok(pn_same_variant($a, $b), "{$a}/{$b} 應判為異體字");
+}
+foreach ([['常','長'], ['義','文'], ['倪','巴'], ['如','茹'], ['明','民'], ['聖','圣'], ['馬','马']] as [$a, $b]) {
+    ok(!pn_same_variant($a, $b), "★ {$a}/{$b} **不是**異體字(可能是錯字或兩個人,要人工)");
+}
+
 echo "\n────────────────────────────\n";
 echo ($fail === 0 ? "全綠:{$pass} 項通過\n" : "**{$fail} 項失敗**(通過 {$pass})\n");
 exit($fail === 0 ? 0 : 1);

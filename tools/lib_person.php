@@ -90,11 +90,29 @@ const PN_ROLE_WORDS = [
  * ★ 長的排前面 —— 比對順序就是這個陣列的順序(見檔頭第 3 點)。
  */
 const PN_TAIL_NOTES = [
-    '責任編輯', '總編輯',
-    '編輯', '主編', '編著', '合著', '編譯', '譯著', '編撰', '編寫',
-    '校訂', '審訂', '選編', '彙編', '口述', '著者', '作者', '編者', '譯者',
+    // ★★ 複合尾註要排在最前面(2026-10-03 主機實測補上)。
+    //    沒有這一批,「伊爾文等著」只會剝掉「著」變成「伊爾文等」、
+    //    「威廉．克萊因 等合著」變成「威廉．克萊因 等」、
+    //    「榮鳳,保羅合編著」變成「榮鳳,保羅合」—— 查髒資料的工具自己造髒資料。
+    '等人合著', '等人合編', '合編著', '等合著', '等合編', '等編著',
+    // ★★ 「和著」「和編」**不可以放進來**(2026-10-03 自己踩過):
+    //    它們比「編」長,會先命中 →「黃伯和編」被剝成「黃伯」。
+    //    「蔡春曦.蔡黃玉珍 和著」那種前面有空格的,改由「著」+ PN_DANGLING 擋成 hold,
+    //    交人工判 —— 寧可不剝,也不可以把人家名字裡的字吃掉。
+    '責任編輯', '總編輯', '等主編', '等著', '等編', '等譯',
+    '編輯', '主編', '編著', '合著', '合編', '編譯', '譯著', '編撰', '編寫',
+    '校訂', '審訂', '審譯', '選編', '彙編', '口述', '著者', '作者', '編者', '譯者',
     '著', '編', '譯', '等',
 ];
+
+/**
+ * 剝完之後**不可以**留在字尾的字:它們是連接詞的半截,不是名字的結尾。
+ * ★ 一律要求前面有分隔符才算 —— 「黃伯和」的「和」是名字的字,
+ *   「蔡黃玉珍 和」的「和」前面有空格,那才是半截的「和著」。
+ *   這條是 lib_title.php 的 TP_DANGLING 同一招:**剝完殘尾不像名字就 hold,
+ *   不自作聰明多吃幾個字**。
+ */
+const PN_DANGLING = '(?:[\s\x{3000}][\x{7B49}\x{5408}\x{548C}\x{8207}\x{53CA}\x{66A8}]|[,\x{FF0C}\x{3001}\x{FF1B};\/\x{FF0F}\\\\\-\x{FF0D}\x{2014}])$';
 
 /**
  * 整列就是這些 → **不是人**,不建 persons 列。
@@ -137,16 +155,42 @@ function decode_person_entities(?string $s): string
     return str_replace($guard, '&semi;', $s);
 }
 
+/** 所有合法的 HTML entity 名稱(由 PHP 自己的表建,不是手列的) */
+function pn_entity_names(): array
+{
+    static $names = null;
+    if ($names !== null) return $names;
+    $names = [];
+    foreach (get_html_translation_table(HTML_ENTITIES, ENT_QUOTES | ENT_HTML5, 'UTF-8') as $ent) {
+        $names[trim($ent, '&;')] = true;
+    }
+    return $names;
+}
+
 /**
  * 字串裡還有沒有沒解掉的 entity。
- * ★ 結尾的 `;` 寫成可有可無,是為了抓**被分隔符切斷的殘骸**
+ *
+ * ★ 結尾的 `;` 可有可無,是為了抓**被分隔符切斷的殘骸**
  *   —— `Anselm Gr&uuml` 正是分號被當成分隔符吃掉後留下的半截。
+ *
+ * ★★ 但「& + 字母」**不等於 entity**。2026-10-03 主機實測:用那個寬鬆樣式盤出 43 列,
+ *    其中三十列是「Corrine L. Carvalho&Paul V. Niskanen」「CLOUD&TOWNSEND」
+ *    「Tony&Tina牧師」這種**兩個人名中間一個 & 號**,根本沒有 entity。
+ *    票上 9/8 量的是 11 筆 —— 數字對不上就是判準太寬。
+ *    → 沒有分號的殘骸,**名稱必須真的在 HTML entity 表裡**才算。
+ *    (有分號的本來就會被 decode 掉,走到這裡還留著的才是真殘骸。)
  */
 function person_entity_fragment(?string $s): ?string
 {
     $s = (string) $s;
-    if (preg_match('/&(?:[a-zA-Z][a-zA-Z0-9]{1,30}|#\d{1,6}|#x[0-9a-fA-F]{1,6});?/u', $s, $m)) {
-        return $m[0];
+    if (!preg_match_all('/&(#\d{1,6};?|#x[0-9a-fA-F]{1,6};?|[a-zA-Z][a-zA-Z0-9]{1,30};?)/u', $s, $ms)) {
+        return null;
+    }
+    $valid = pn_entity_names();
+    foreach ($ms[1] as $i => $body) {
+        if ($body[0] === '#') return $ms[0][$i];              // 數值型一律算
+        $name = rtrim($body, ';');
+        if (isset($valid[$name])) return $ms[0][$i];
     }
     return null;
 }
@@ -172,7 +216,7 @@ function pn_label_roles(string $label): ?array
 {
     $label = (string) preg_replace('/[\s\x{3000}]+/u', '', $label);
     if ($label === '') return null;
-    $parts = preg_split('/[\/\x{FF0F}\x{3001}\x{FF1B};,\x{FF0C}&\x{FF06}]/u', $label, -1, PREG_SPLIT_NO_EMPTY);
+    $parts = preg_split('/[\/\x{FF0F}\\\\\x{3001}\x{FF1B};,\x{FF0C}&\x{FF06}]/u', $label, -1, PREG_SPLIT_NO_EMPTY);
     if (!$parts) return null;
     $roles = [];
     foreach ($parts as $p) {
@@ -180,6 +224,26 @@ function pn_label_roles(string $label): ?array
         $roles[] = PN_ROLE_WORDS[$p];
     }
     return $roles;
+}
+
+/**
+ * 比對「角色標籤 + 分隔 + 其餘」。
+ *
+ * ★★ 斜線在這份資料裡是**兩種角色**,順序因此不能顛倒:
+ *    (a) 標籤內的連接號 ——「文/圖:王小明」的斜線連接兩個角色詞
+ *    (b) 代替冒號 ——「文／懶鬼KK」的斜線就是冒號
+ *    所以**先試冒號**(此時標籤內允許有斜線,(a) 才成立),
+ *    沒有冒號再試斜線當冒號((b))。順序反了「文/圖:王小明」會被切成「圖:王小明」。
+ *
+ * @return array{0:string,1:string,2:string}|null [全部, 標籤, 其餘]
+ */
+function pn_match_role_label(string $s): ?array
+{
+    // (a) 冒號當分隔;標籤內可含斜線與反斜線
+    if (preg_match('/^([^:\x{FF1A}]{1,12})[:\x{FF1A}][ \t\x{3000}]*(.+)$/u', $s, $m)) return $m;
+    // (b) 沒有冒號 → 斜線代冒號;此時標籤內不可再有斜線
+    if (preg_match('/^([^:\x{FF1A}\/\x{FF0F}]{1,12})[\/\x{FF0F}][ \t\x{3000}]*(.+)$/u', $s, $m)) return $m;
+    return null;
 }
 
 /**
@@ -196,7 +260,7 @@ function strip_person_role_prefix(?string $raw): array
     $out = ['clean' => $s, 'role' => null, 'stripped' => [], 'hold' => []];
     if ($s === '') return $out;
 
-    if (!preg_match('/^([^:\x{FF1A}]{1,8})[:\x{FF1A}][ \t\x{3000}]*(.+)$/u', $s, $m)) {
+    if (($m = pn_match_role_label($s)) === null) {
         return $out;
     }
     $roles = pn_label_roles($m[1]);
@@ -229,6 +293,14 @@ function strip_person_tail_note(?string $raw): array
     $out = ['clean' => $s, 'role' => null, 'stripped' => [], 'hold' => []];
     if ($s === '') return $out;
 
+    // ★ 中段還有另一個署名 → 這一列是兩個人黏在一起,剝字尾救不了。
+    //   「傑克.海福德著 呂妙芬譯」只剝掉最後的「譯」會得到
+    //   「傑克.海福德著 呂妙芬」—— 比原本更糟。沒有分隔符可切,只能交給人。
+    if (($mid = pn_mid_credit($s)) !== null) {
+        $out['hold'][] = '中段還有署名「' . $mid . '」→ 兩個以上的人黏在同一列,要人工拆';
+        return $out;
+    }
+
     foreach (PN_TAIL_NOTES as $note) {
         $re = '/' . PN_TAIL_GLUE . preg_quote($note, '/') . '$/u';
         if (!preg_match($re, $s, $m)) continue;
@@ -245,12 +317,33 @@ function strip_person_tail_note(?string $raw): array
             $out['hold'][] = '字尾「' . $note . '」剝完剩「' . $cand . '」,本身還是角色詞';
             return $out;
         }
+        if (preg_match('/' . PN_DANGLING . '/u', $cand)) {
+            $out['hold'][] = '字尾「' . $note . '」剝完殘尾「'
+                           . mb_substr($cand, -3, 3, 'UTF-8') . '」不像名字結尾,要人工看';
+            return $out;
+        }
         $out['clean']    = $cand;
         $out['role']     = PN_ROLE_WORDS[$note] ?? null;
         $out['stripped'] = [trim($m[0])];
         return $out;
     }
     return $out;
+}
+
+/**
+ * 字串**中段**(不是結尾)是不是還有一個角色註記,後面又接著別的字。
+ * 「傑克.海福德著 呂妙芬譯」的「著 」就是;「黃伯和編輯」的「編」後面接「輯」不是。
+ *
+ * @return string|null 命中的註記詞
+ */
+function pn_mid_credit(string $s): ?string
+{
+    foreach (PN_TAIL_NOTES as $note) {
+        // 註記詞 + 分隔符 + 還有東西 → 中段署名
+        $re = '/' . preg_quote($note, '/') . '[\s\x{3000}\x{FF0F}\/\\\\]+\S/u';
+        if (preg_match($re, $s)) return $note;
+    }
+    return null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -321,6 +414,7 @@ const PN_VARIANTS = [
     '褚' => ['禇'], '昇' => ['升'], '於' => ['于'], '絕' => ['絶'],
     '麼' => ['麽'], '瑯' => ['琅'], '冰' => ['氷'], '戶' => ['户'],
     '污' => ['汙'], '緣' => ['縁'], '每' => ['毎'], '叟' => ['叜'],
+    '臺' => ['台'],   // 2026-10-03 實測命中:臺灣福音書房編輯部 vs 台灣福音書房編輯部
 ];
 
 /** 字 → 正規寫法(由 PN_VARIANTS 反查建表) */
@@ -499,7 +593,7 @@ function pn_split_delims(string $s, ?callable $warn = null): array
  */
 function pn_strip_leading_role_label(string $s): ?array
 {
-    if (!preg_match('/^([^:\x{FF1A}]{1,12})[:\x{FF1A}][ \t\x{3000}]*(.+)$/u', $s, $m)) return null;
+    if (($m = pn_match_role_label($s)) === null) return null;
     $roles = pn_label_roles($m[1]);
     if ($roles === null || count($roles) < 2) return null;     // 單一角色走逐段那條路就夠了
     $rest = trim($m[2]);
@@ -511,6 +605,45 @@ function pn_strip_leading_role_label(string $s): ?array
         }
     }
     return ['roles' => array_values(array_unique($roles)), 'rest' => $rest];
+}
+
+/** 角色詞的 regex 選項(長的排前面,否則「總編輯」會先被「編」吃掉) */
+function pn_role_alt(): string
+{
+    static $alt = null;
+    if ($alt !== null) return $alt;
+    $words = array_keys(PN_ROLE_WORDS);
+    usort($words, fn($a, $b) => mb_strlen($b, 'UTF-8') <=> mb_strlen($a, 'UTF-8'));
+    $alt = implode('|', array_map(fn($w) => preg_quote($w, '/'), $words));
+    return $alt;
+}
+
+/**
+ * 在「角色詞 + 冒號或斜線」的邊界再切一刀。
+ *
+ * ★ 為什麼需要(2026-10-03 主機實測):站方用 `\`、`/`、`／` 當人名分隔符,
+ *   「文:江淑文\圖:陳嘉鈴」「文:南希．葛絲瑞/圖:珍妮．布雷克」這種寫法有 109 列。
+ *   這些字元**不能**無條件當分隔符 ——「亨利.克勞德/約翰.湯森德」是兩個人沒錯,
+ *   但「文／懶鬼KK」的斜線卻是代替冒號的。**無法從字元本身判斷**。
+ *
+ * ★ 所以只切在一個可以證明的位置:**角色詞緊接冒號或斜線,而且它前面是開頭或分隔符**。
+ *   這條件下切點必定是一個新署名的開頭。
+ *   「江淑文／圖:陳」的「文」前面是「淑」不是分隔符 → 不切(名字不會被腰斬)。
+ */
+function pn_split_role_boundaries(string $s): array
+{
+    $re = '/(?=(?:^|(?<=[;\x{FF1B}\x{3001}\\\\\/\x{FF0F}\s\x{3000}]))(?:' . pn_role_alt()
+        . ')[:\x{FF1A}\/\x{FF0F}])/u';
+    $parts = preg_split($re, $s, -1, PREG_SPLIT_NO_EMPTY);
+    return $parts === false || !$parts ? [$s] : $parts;
+}
+
+/** 切出來的片段,頭尾的分隔符殘渣要去掉(「文:江淑文\」的那個反斜線) */
+function pn_trim_segment(string $s): string
+{
+    return (string) preg_replace(
+        '/^[\s\x{3000},\x{FF0C}\x{3001};\x{FF1B}\/\x{FF0F}\\\\]+|[\s\x{3000},\x{FF0C}\x{3001};\x{FF1B}\/\x{FF0F}\\\\]+$/u',
+        '', $s);
 }
 
 /**
@@ -542,8 +675,12 @@ function pn_split_names(?string $raw, ?callable $warn = null): array
     }
 
     $out = [];
+    $segs = [];
     foreach (pn_split_delims($raw, $warn) as $p) {
-        $p = trim($p);
+        foreach (pn_split_role_boundaries($p) as $q) $segs[] = $q;
+    }
+    foreach ($segs as $p) {
+        $p = pn_trim_segment(trim($p));
         if ($p === '') continue;
         $n = normalize_person_name($p);
         // 整段就是角色詞(「文、圖:王小明」切開後自成一列的那個「文」)→ 不是人,不建列

@@ -45,7 +45,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
 require __DIR__ . '/../api/lib/db.php';
 require_once __DIR__ . '/lib_person.php';
 
-const CPN_REV = '2026-10-03.2';
+const CPN_REV = '2026-10-03.3';
 
 /** 以**顯示寬度**補空白(printf 的 %-Ns 算的是位元組,中文會歪掉) */
 function cpn_pad(string $s, int $w): string
@@ -54,11 +54,18 @@ function cpn_pad(string $s, int $w): string
     return $s . str_repeat(' ', max(0, $w - mb_strwidth($s, 'UTF-8')));
 }          // ★ 版本戳記:FTP 沒蓋到時唯一能當場抓出來的辦法
 
-$opt      = getopt('', ['limit::', 'tsv::', 'emit-sql::', 'variants', 'guard', 'min-books::']);
+$opt      = getopt('', ['limit::', 'tsv::', 'emit-sql::', 'variants', 'guard', 'min-books::',
+                        'var-minor::', 'var-major::', 'var-all']);
 $limit    = max(1, (int) ($opt['limit'] ?? 30));
 $minBooks = max(0, (int) ($opt['min-books'] ?? 1));   // 變體候選:兩邊都要至少幾本書
 $onlyVar  = array_key_exists('variants', $opt);
 $guard    = array_key_exists('guard', $opt);
+// ★ 「未知差異」原始有一萬八千對,絕大多數是兩個不相干的人(陳志明/陳志民)。
+//   可用的訊號是**錯字的形狀**:一邊掛很多本、另一邊只掛一兩本。
+//   預設只列這一類;--var-all 看全部(數量會爆,但不會被偷偷藏起來 —— 兩個數字都會印)。
+$varMinor = max(0, (int) ($opt['var-minor'] ?? 2));    // 少的那邊 ≤ 幾本
+$varMajor = max(0, (int) ($opt['var-major'] ?? 10));   // 多的那邊 ≥ 幾本
+$varAll   = array_key_exists('var-all', $opt);
 
 echo "check_person_names rev " . CPN_REV . "\n";
 
@@ -147,7 +154,16 @@ foreach ($wild as $group) {
         }
     }
 }
-uasort($variants, fn($x, $y) => [$y['known'], $y['n']] <=> [$x['known'], $x['n']]);
+// 錯字形狀過濾(只套用在「未知差異」;已知異體字一律全列)
+foreach ($variants as $k => $v) {
+    $v['minor'] = min((int) $v['a']['n_books'], (int) $v['b']['n_books']);
+    $v['major'] = max((int) $v['a']['n_books'], (int) $v['b']['n_books']);
+    $v['shape'] = $v['minor'] <= $varMinor && $v['major'] >= $varMajor;
+    $variants[$k] = $v;
+}
+$varShown = $varAll ? $variants
+                    : array_filter($variants, fn($v) => $v['known'] || $v['shape']);
+uasort($varShown, fn($x, $y) => [$y['known'], $y['major']] <=> [$x['known'], $x['major']]);
 
 // ── 5. 輸出 ──────────────────────────────────────────────────────────────
 $label = [
@@ -200,11 +216,14 @@ if (!$onlyVar) {
 
 echo "═══ 異體字候選(同長度、只差一個字) ═══\n";
 $knownN = count(array_filter($variants, fn($v) => $v['known']));
-printf("  已知異體字 %d 對、未知差異 %d 對(兩邊各至少 %d 本)\n", $knownN, count($variants) - $knownN, $minBooks);
-echo "  ★ 未知差異那批可能根本是兩個人(陳志明/陳志民),**一律人工過目**。\n\n";
+$shapeN = count(array_filter($varShown, fn($v) => !$v['known']));
+printf("  已知異體字 %d 對(全列);未知差異 %d 對,其中像錯字的 %d 對(少的一邊 ≤%d 本且多的一邊 ≥%d 本)\n",
+       $knownN, count($variants) - $knownN, $shapeN, $varMinor, $varMajor);
+echo "  ★ 未知差異那批可能根本是兩個人(陳志明/陳志民),**一律人工過目**。\n";
+echo "  ★ 預設只列「像錯字」的那批;--var-all 看全部,--var-minor/--var-major 調門檻。\n\n";
 $shown = 0;
-foreach ($variants as $v) {
-    if ($shown++ >= $limit) { echo "   …(共 " . count($variants) . " 對)\n"; break; }
+foreach ($varShown as $v) {
+    if ($shown++ >= $limit) { echo "   …(本批共 " . count($varShown) . " 對)\n"; break; }
     printf("   %-7d %4d 本 %s %s  %-7d %4d 本 %s\n",
         (int) $v['a']['person_id'], (int) $v['a']['n_books'], cpn_pad($v['a']['name'], 30),
         cpn_pad($v['known'] ? "[{$v['ca']}/{$v['cb']} 異體]" : "[{$v['ca']}/{$v['cb']} 未知]", 12),
@@ -228,7 +247,7 @@ if (!empty($opt['tsv'])) {
     }
     foreach ($variants as $v) {
         fwrite($fh, implode("\t", [
-            $v['known'] ? 'variant_known' : 'variant_unknown',
+            $v['known'] ? 'variant_known' : ($v['shape'] ? 'variant_typo_shape' : 'variant_unknown'),
             $v['a']['person_id'], $v['a']['name'], $v['a']['n_books'], '', $v['b']['name'],
             '', $v['b']['person_id'], $v['b']['n_books'], "{$v['ca']}/{$v['cb']}",
         ]) . "\n");
