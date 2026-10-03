@@ -82,6 +82,9 @@ require dirname(__DIR__) . '/api/lib/db.php';
 // 書名促銷詞剝除規則。與 tools/check_title_promo.php **共用同一份** ——
 // 那支是這條規則的驗證者(產 dry-run 對照表給人勾),兩邊各寫一份會悄悄分家。
 require_once __DIR__ . '/lib_title.php';
+// 人名正規化規則(entity 解碼、角色詞、字尾註記、分隔符與括號定義)。
+// 與 tools/check_person_names.php、tools/fix_person_names.php **共用同一份**。
+require_once __DIR__ . '/lib_person.php';
 
 /**
  * 來源 → 幣別對映(2026-09-01 決議 A,海外五站前置)。
@@ -213,60 +216,52 @@ function cap(?string $s, int $n): ?string
 }
 
 /**
- * 多人名拆分(半形/全形分號、頓號);保留「等」尾註於 credit_text。
+ * 多人名拆分 —— 規則本體在 tools/lib_person.php,**全專案只有那一份**。
+ * 這裡只負責套上本檔的 tidy()(舊 bug 殘值視為空)與 cap()(對照欄寬截斷)。
  *
- * 2026-09-08 修兩處(Asana「[Bug] 突破機構分類誤判 + split_names 兩缺陷」):
+ * ════════ 為什麼規則不留在這裡 ════════
+ * 2026-10-03(Asana 1218277971470042):tools/fix_person_names.php 要用
+ * **一模一樣**的切法重切既有資料。切法留在 import.php 裡,修復工具就得抄一份;
+ * 兩份只要差一點,修復工具補出來的 persons 就會跟匯入器不一致,而且不會有人發現。
+ * 本案已經為「同一組分隔符寫兩份」付過代價(全形分號兩個月沒被拆過)。
  *
- * (1) 舊版字元集的 hexdump 是 5b 3b 3b e3 80 81 5d,也就是 [ ; ; 、 ] ——
- *     **兩個半形分號(3B 3B)、沒有全形分號**。全形分號 U+FF1B(UTF-8: EF BC 9B)在某次編輯中
- *     退化成第二個半形分號,以全形分號分隔的多作者因此從未被拆開,整串寫成一個人名。
- *     這是本案第二次踩到「含全形標點的 regex 會退化」(前例:全形冒號 [::])。
- *     故分隔符與括號一律以 PHP 的 \u{} escape 書寫、不寫字面全形字元 —— escape 是純 ASCII,不會退化。
+ * ════════ 這支修過的三件事(時間順序) ════════
+ * (1) 2026-09-08 全形分號 U+FF1B 從未被拆:舊字元集的 hexdump 是 5b 3b 3b e3 80 81 5d,
+ *     也就是 [ ; ; 、 ] —— 兩個半形分號、沒有全形分號。全形分號在某次編輯中退化成
+ *     第二個半形分號,regex 照樣編譯得過,只是靜默少拆一半。
+ *     → 分隔符一律以 \u{} escape 書寫(純 ASCII,不會退化),且定義只留一份。
+ * (2) 2026-09-08 切割改為**括號感知**:括號內的分隔符不切
+ *     (「…創作小組 (彼、桀、onki、gi)」不該拆成六個人)。
+ * (3) ★★ 2026-10-03 **decode 排到切割之前**:entity 結尾的 `;` 就是分隔符,
+ *     「Anselm Gr&uuml;n」先切再解碼會變成兩個人。順序比內容重要。
+ *     同批加上角色詞與字尾註記剝除(「文」自成一列、「梁家麟著」vs「梁家麟」)。
  *
- * (2) 切割改為**括號感知**:括號內的分隔符不切。
- *     實例(突破機構 pid 29152561,book_id 105019):
- *       「彭正雄、陳碧凌、Breakazine 創作小組 (彼、桀、onki、gi)」
- *     舊版拆成六個 person,其中「Breakazine 創作小組 (彼」是殘缺髒資料。
- *     括號內的並列是同一個署名的內部結構(創作小組成員代號),不是多位作者。
- *     多值鐵律的兩面:既不可漏拆(缺陷 1),也不可過度拆分(缺陷 2)。
+ * ★ 共用邏輯改動的已知影響:split_names() 也餵給 fuzzy_key() 建 $fuzzyMap,
+ *   所以「梁家麟著 → 梁家麟」這類收斂會**讓跨站模糊比對多命中幾筆**。
+ *   這是本次要的效果,但上主機後務必先對既有來源跑一次 --dry-run,
+ *   看合併明細是「小幅增加」而不是暴增(陷阱 27:0 和暴增都要當場追)。
  */
 function split_delims(string $s): array
 {
-    // 分隔符:半形分號 3B、全形分號 U+FF1B、頓號 U+3001
-    static $delims = [';', "\u{FF1B}", "\u{3001}"];
-    // 成對括號:括號內的分隔符不切(半形 ()[]、全形 U+FF08/09、U+FF3B/3D、U+3010/3011)
-    static $open   = ['(' => 1, "\u{FF08}" => 1, '[' => 1, "\u{FF3B}" => 1, "\u{3010}" => 1];
-    static $close  = [')' => 1, "\u{FF09}" => 1, ']' => 1, "\u{FF3D}" => 1, "\u{3011}" => 1];
-
-    $depth = 0;
-    $buf   = '';
-    $out   = [];
-    foreach (preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) as $ch) {
-        if (isset($open[$ch]))  { $depth++;                   $buf .= $ch; continue; }
-        if (isset($close[$ch])) { $depth = max(0, $depth - 1); $buf .= $ch; continue; }
-        if ($depth === 0 && in_array($ch, $delims, true)) { $out[] = $buf; $buf = ''; continue; }
-        $buf .= $ch;
-    }
-    // 括號不成對(來源資料本來就殘缺)→ 大聲失敗並退回直接切割,
-    // 不讓未閉合的括號把整段後半吞成一個人名。
-    if ($depth !== 0) {
-        echo "\n  [警告] 人名括號不成對,改用直接切割:{$s}\n";
-        return explode(';', str_replace($delims, ';', $s));
-    }
-    $out[] = $buf;
-    return $out;
+    return pn_split_delims($s, function (string $raw): void {
+        echo "\n  [警告] 人名括號不成對,改用直接切割:{$raw}\n";
+    });
 }
 
 function split_names(?string $raw): array
 {
-    $raw = tidy($raw);
-    if (!$raw) return [];
+    // tidy() 判「純標籤殘值」(「出版社:」「作者&nbsp;:」)要在 decode 之後才準,
+    // 所以這裡 decode 一份**只為了做這個判斷**;真正的切割由 pn_split_names()
+    // 自己 decode —— decode 的位置是它的契約的一部分,不外包給呼叫端,
+    // 否則早晚又會有人在外面先切一刀(那正是本次要修的 bug)。
+    if (tidy(decode_person_entities($raw)) === null) return [];
     $out = [];
-    foreach (split_delims($raw) as $p) {
-        $p = trim($p);
-        if ($p === '' || $p === '等') continue;
-        $name = preg_replace('/\s*等$/u', '', $p);
-        $out[] = ['name' => cap($name, 150), 'credit' => cap($p, 255)]; // persons.name(150)/credit_text(255)
+    foreach (pn_split_names($raw) as $a) {
+        $out[] = [
+            'name'   => cap($a['name'], 150),    // persons.name(150)
+            'credit' => cap($a['credit'], 255),  // book_persons.credit_text(255)
+            'role'   => $a['role'],              // null = 沿用欄位本身的角色
+        ];
     }
     return $out;
 }
@@ -721,7 +716,10 @@ while (($line = fgets($fh)) !== false) {
                 "INSERT IGNORE INTO book_persons (book_id, person_id, role, role_order, credit_text)
                  VALUES (:b, :p, :role, :o, :c)"
             );
-            $st->execute([':b' => $bookId, ':p' => $personMap[$a['name']], ':role' => $role,
+            // 署名本身寫明了角色(「圖:李小華」出現在 authors_raw)→ 以署名為準;
+            // 沒剝到角色詞時 $a['role'] 為 null,沿用欄位本身的角色。
+            $st->execute([':b' => $bookId, ':p' => $personMap[$a['name']],
+                          ':role' => $a['role'] ?? $role,
                           ':o' => $order++, ':c' => $a['credit']]);
         }
     }
