@@ -482,6 +482,106 @@ foreach (['文/王小明', '文子梁', '陳志文', '圖們江', '作慕容'] a
        normalize_person_name($in)['kind']);
 }
 
+echo "\n== 22. ★第六輪:C 段(直接改名)前 30 列就抓到的兩個 ==\n";
+
+// 22a. 剝掉單字註記後殘尾落在連接字 → hold(不管前面有沒有空白)
+//      「曾思瀚&鄧紹光和著」剝掉「著」會剩「…鄧紹光和」——「和著」只剝掉一半。
+//      ★ 不能把「和」無條件當殘尾剝掉:「黃伯和主編 → 黃伯和」的「和」是名字的字。
+//        兩者在字形上分不開 → **一律 hold**,代價是「黃伯和著」這種也進人工清單。
+//        寧可多幾列人工,也不要改出一個不存在的人。
+// ★ 只留實測到的那一筆。另外兩個是我自己編的 —— 編出來的資料不該拿來設計規則。
+foreach (['曾思瀚&鄧紹光和著'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」剝完殘尾是連接字 → hold", $r['clean']);
+}
+// ★ 但「和」在**註記詞之前就結束**的照剝(殘尾不是連接字)
+// ★★ 這三個是票上要收斂到同一個人的那六筆,新規則一個都不准擋到
+ok(normalize_person_name('黃伯和主編')['clean'] === '黃伯和', '「黃伯和主編」照剝');
+ok(normalize_person_name('黃伯和編輯')['clean'] === '黃伯和', '「黃伯和編輯」照剝');
+ok(normalize_person_name('黃伯和編')['clean'] === '黃伯和', '★「黃伯和編」照剝(沒有多人分隔符)');
+ok(normalize_person_name('黃伯和著')['clean'] === '黃伯和', '★「黃伯和著」照剝');
+
+// 22b. 剝完仍以註記詞結尾 → 沒剝乾淨,hold
+foreach (['白立德著著', '王小明編編', '李大年譯譯'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」剝完仍以註記詞結尾 → hold", $r['clean']);
+}
+// ★ 正常的一層註記照剝
+foreach (['白立德著' => '白立德', '梁家麟著' => '梁家麟', '黃錫木主編' => '黃錫木'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」→「{$want}」", normalize_person_name($in)['clean']);
+}
+
+echo "\n== 23. ★第七輪:C 段 339 列全列審出來的「撰著」 ==\n";
+
+// 23a. 「撰著」是複合註記詞,整個剝掉。
+//      沒有這條,只會命中短的「著」→「尹可名撰著」變成「尹可名撰」,又是工具自己造髒資料。
+//      ★ 這兩筆是 2026-10-03 C 段實測資料,不是編的。
+foreach (['尹可名撰著' => '尹可名', '尹可名 撰著' => '尹可名'] as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && $r['hold'] === [], "「{$in}」→「{$want}」", $r['clean'] . ' hold=' . json_encode($r['hold'], JSON_UNESCAPED_UNICODE));
+}
+// 23b. 剝完殘尾落在「撰」這種角色字 → 沒剝乾淨,hold(攔住下一個還沒發現的複合詞)
+//      PN_TAIL_NOTES 本身沒有「撰」,所以第六輪那條殘尾檢查看不到它 → 另開一張表。
+foreach (['王小明撰編', '李大年述著'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」剝完殘尾是角色字 → hold", $r['clean']);
+}
+// 23c. ★ 防誤傷:殘尾表裡的字當成名字最後一字時絕不可以擋
+//      「陳志文」「佛洛.麥克艾文」的「文」、「詹姆斯．拉文」—— C 段實際有這幾列。
+foreach (['佛洛.麥克艾文著' => '佛洛.麥克艾文', '詹姆斯．拉文 主編' => '詹姆斯．拉文',
+          '伍謂文主編' => '伍謂文', '馮 煒 文 著' => '馮 煒 文'] as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && $r['hold'] === [], "「{$in}」→「{$want}」(名字末字是角色字,不可擋)", $r['clean']);
+}
+
+echo "\n== 24. ★第八輪:C 段 337 列整批重跑才抓到的「主編著」「共同主編」 ==\n";
+
+// 24a. 兩筆都是 2026-10-03 已經寫進生產資料才被抓到的實測資料。
+//      第七輪我只掃了自己手挑的字集(著編譯撰輯訂校選註繪圖文),沒有「主」→ 漏掉。
+foreach (['林治平主編著' => '林治平', '郭榮剛 共同主編' => '郭榮剛',
+          '郭榮剛 共同編著' => '郭榮剛'] as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && $r['hold'] === [], "「{$in}」→「{$want}」",
+       $r['clean'] . ' hold=' . json_encode($r['hold'], JSON_UNESCAPED_UNICODE));
+}
+// 24b. 殘尾落在「主」「同」→ hold(攔住下一個還沒收錄的複合詞)
+foreach (['王小明主譯'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['hold'] !== [] && $r['clean'] === $in, "「{$in}」剝完殘尾是角色字 → hold", $r['clean']);
+}
+// 24b-2. ★「同」試過又拿掉 —— 它會誤傷真人。「共同*」改用複合詞涵蓋。
+foreach (['李大年共同編' => '李大年', '郭榮剛 共同譯' => '郭榮剛'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」→「{$want}」(共同* 用複合詞)",
+       normalize_person_name($in)['clean']);
+}
+foreach (['周文同著' => '周文同', '李漢文著' => '李漢文'] as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && $r['hold'] === [], "★「{$in}」→「{$want}」(名字末字是「同」,不可擋)",
+       $r['clean'] . ' hold=' . json_encode($r['hold'], JSON_UNESCAPED_UNICODE));
+}
+// 24c. ★ 防誤傷:單獨的「主編」「編著」照剝,不可以被新規則擋掉
+foreach (['黃錫木主編' => '黃錫木', '劉立意編著' => '劉立意',
+          '蔡錦圖 編著' => '蔡錦圖', '吳小新 主編' => '吳小新'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」→「{$want}」照剝",
+       normalize_person_name($in)['clean']);
+}
+
+echo "\n== 25. ★第九輪:字間加空白的名字,不可以被當成「名字+角色標籤」 ==\n";
+
+// 「馮 煒 文 著」剝掉「著」之後剩「馮 煒 文」—— 規則還想再剝一次「文」變成「馮 煒」。
+// 站方把「馮煒文」寫成「馮 煒 文」,每個字之間都有空白,那些空白不是分隔符。
+// ★ 這一列目前靠「文 尚未放行」擋著沒出事,但 `文` 是下一批要放行的詞(33 列)。
+foreach (['馮 煒 文', '梁 淑 慧', '林 郁'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $in, "★「{$in}」整串都是單字+空白,一個字都不准剝", $r['clean']);
+}
+// ★ 防誤傷:真的是「名字 + 角色標籤」的照剝
+foreach (['某某 文' => '某某', '王小明 圖' => '王小明', '飯嶌玲子 繪' => '飯嶌玲子',
+          '雷日昇 攝影' => '雷日昇', '李 安 琴 譯' => '李 安 琴'] as $in => $want) {
+    ok(normalize_person_name($in)['clean'] === $want, "「{$in}」→「{$want}」照剝",
+       normalize_person_name($in)['clean']);
+}
+
 echo "\n────────────────────────────\n";
 echo ($fail === 0 ? "全綠:{$pass} 項通過\n" : "**{$fail} 項失敗**(通過 {$pass})\n");
 exit($fail === 0 ? 0 : 1);
