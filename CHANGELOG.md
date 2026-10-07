@@ -7,7 +7,7 @@
 - **次版本**:新增功能(例:訂閱、進階篩選、使用者書庫)
 - **修訂**:修 bug、資料修正、小調整
 
-發布流程:更新 `VERSION` → 在本檔新增版本區塊 → commit → 建 git tag `vX.Y.Z` → FTP 部署 → 同步首頁 footer 版號。
+發布流程:更新 `VERSION` → 在本檔新增版本區塊 → commit → 建 git tag `vX.Y.Z` → `git push` → 主機 `./deploy/deploy.sh` → 同步首頁 footer 版號。
 
 ---
 
@@ -367,6 +367,87 @@ B1 清理 SQL 跑完 COMMIT 之後,分類盤點的數字對不上 ——
 - **異體字合併**的 SQL 預設是註解掉的,要逐對過目才拿掉 `--`。
   「只差一個已知異體字」仍可能是兩個不同的人。
 - 清理 SQL 由工具依**當下實際資料**產生,所以本次沒有預先寫好的 migration 檔。
+
+### 2026-10-07:檔案結構正規化 + 主機改用 GitHub 部署(FTP 停用)
+
+repo 根從 `web/` 上移一層到專案根;`public/` 成為對外唯一入口;
+`api/` 拆成 `public/api/index.php`(對外)與 `app/lib/`(不對外)。
+安全模型從「nginx deny 黑名單擋」改為「白名單只開」—— config、app、tools、crawler、
+database、docs、.git 全在 web root 之外,原本那條漏一條就外洩的黑名單直接刪掉。
+
+- `d13c79e` 結構正規化(130 files changed, 25164 insertions(+), 86 deletions(-))
+- `6cd20bf` `.sh` 執行位元進版控,忽略爬蟲鎖檔
+- `cdd29a9` `deploy.sh` 抽查改打真實端點並加安全迴歸檢查
+- `c2b3b90` `deploy.sh` 包進 `main()`;禁區檢查改為非 2xx/3xx 即通過
+
+**部署方式**:本機 `git push` → 主機 `cd /home/ubuntu/books && ./deploy/deploy.sh`。
+主機改為 git clone(唯讀 deploy key,Host 別名 `github-books`),舊的 FTP 目錄保留為
+`/home/ubuntu/books.bak`。`deploy.sh` 逐段自我證明:工作區乾淨 → `git pull --ff-only` →
+VERSION/HEAD 前後對照 → 憑證檔存在 → release-notes 存在 → 排程 `.sh` 執行位元 →
+`php -l` 全掃 → 七項線上抽查(三項期望 200、四項期望被擋下)。
+
+**32 處 require 改寫**(`/api/lib/` → `/app/lib/`),另手改 `public/book.php` 退一層、
+`public/api/index.php` 退兩層。驗證靠「全 repo 殘留 `api/lib` = 0 筆」,不是看出來的。
+`app/lib/db.php` 的 `dirname(__DIR__, 2) . '/config/app.local.php'` 不必改 —— 從
+`app/lib/` 退兩層剛好還是 repo 根。
+
+#### 本輪抓到的洞(每一個都沒有外部徵兆)
+
+- ★★ **`assets/vendor/opencc-full.js` 被 gitignore 了。** 前端簡繁轉換的 1.1 MB 檔,
+  原本靠 FTP 單獨補,所以這個洞存在兩個月沒被發現。改成主機 git clone 之後它不會
+  跟著來,線上簡繁切換會死在線上。已解除忽略並進版控。
+  ★ `.gitignore` 的 Composer `vendor/` **必須寫 `/vendor/`** —— 不加斜線會連
+  `public/assets/vendor/` 一起擋掉,等於白改。
+- ★★ **主機的 `book.php` 比 repo 少了三處功能**:簡繁切換按鈕、`lang.js` 載入、
+  購書連結的 note→title tooltip。`assets/lang.js` 傳上去了、`book.php` 沒有 ——
+  **確鑿的 FTP 漏傳,log 不會說、cron 正常、網站照跑**。切換之後這三項才第一次
+  真的上線。這是改 git 部署最實際的收穫:這種漏傳在結構上不可能發生。
+- ★★ **從 Windows commit 的 `.sh` 會掉執行位元。** clone 到主機是 `-rw-rw-r--`,
+  而 cron 跑一個沒有 `x` 的腳本**不會噴錯到任何人看得到的地方**。要用
+  `git update-index --chmod=+x` 寫進 index;Windows 端再設 `core.fileMode false`,
+  否則工作區會永遠顯示那幾個檔已修改。
+- ★★ **目錄改名切換後,reload nginx 不夠,必須同時 reload php-fpm。**
+  舊 worker 與 PHP realpath 快取記住已消失的路徑 → 症狀是「有些請求 200、有些 404」,
+  最難判讀的那種。錯誤 log 的指紋是 `FastCGI sent in stderr: "Primary script unknown"`。
+- ★★ **會 `git pull` 的腳本必須整份包在 `main()` 裡再呼叫。** bash 是邊讀邊執行檔案的,
+  腳本換掉自己時會照舊的位元組位置繼續讀 —— 本輪實際發生:**拉到新版卻跑完舊版,
+  而那份「全綠報告」是舊版檢查產生的。**
+- ★ **禁區檢查不要寫死成單一狀態碼。** 期望值設成 403,依據是「路徑快取異常期間」
+  的一次觀測;穩定狀態其實是 404,於是每次部署都誤報。403/404 都算擋住,
+  只有真的被服務到(2xx/3xx)才是失敗。**會誤報的守門員等於沒有守門員。**
+- ★ **驗收指令本身也會騙人。** 用 grep 從首頁抓書號去測書籍頁,但首頁書目是 JS 載入的、
+  HTML 裡沒有書號連結 → 變數抓空、路徑退化成又測一次首頁卻回 200,
+  連「新功能是否存在」的檢查也一起誤判成通過。改成先打 API 取真實 `book_id`,
+  才真的測到 `book.php`。與 v1.15.1 的「判讀規則本身也可能錯」同型。
+- ★ **「同名同大小」不能推論整個目錄是副本。** `contents/knowledge/` 的 6 個檔確實是
+  `docs/` 的副本,但 `contents/project-instructions.md`(1,838 bytes)與 `docs/` 那份
+  (13,971 bytes)是兩個不同的檔,`README.md` 也是獨有。差點整個目錄刪掉;
+  本輪改為整個挪到 `docs/_contents-legacy/` 保留,去重另做。
+
+#### 工作目錄改為單一一份
+
+熊哥裁示只留 `Z:\DD-code\books.zh.church`,C: 已清除 —— 兩份會混淆,9/16 與 10/03
+都發生過 session 掛到舊的那一份、交付寫到他看不到的地方。作法是**從 GitHub 重新
+clone**(不是把 C: 複製過去,避免混入舊檔),再補上 GitHub 拿不到的:
+`config/*.local.*`、`history/`、`crawler/data`、`crawler/logs`。
+`crawler/cache`(1.44 GB / 48,667 檔,HTTP 快取會自己重建)與 `crawler/venv`
+(裡面寫死 `C:\...` 絕對路徑,搬過去就是壞的)刻意不搬。
+
+★ Z: 是 SMB 網路磁碟,**`safe.directory` 必須設**,否則所有 git 指令會被
+`dubious ownership` 擋下(SMB 對應不到 Windows 帳號,git 判定成別人的 repo):
+`git config --global --add safe.directory '%(prefix)///192.168.193.230/files/DD-code/books.zh.church'`
+
+#### 同日順帶查證
+
+`crawler/.logos_cat_refresh.lock` 是 `flock -n 9` 的建議鎖,**鎖檔常駐是設計如此**,
+不是「檔案存在就跳過」的旗標 → 10/6 留下的 0-byte 檔不會擋住下週的分類重爬。
+
+#### 未竟事項(寫明以免被當成做完了)
+
+`docs/_contents-legacy/` 去重、`/home/ubuntu/books.bak` 清理(觀察一週後)、
+nginx 的 `location ~ /\.` 會擋掉 `/.well-known/`(目前憑證在 `/home/ubuntu/ssl/`、
+Cloudflare Flexible,不受影響;**將來改用 certbot webroot 續約時必須加例外**,
+否則續約會無聲失敗)。→ Asana 續作票 1219262380089108
 
 ---
 
