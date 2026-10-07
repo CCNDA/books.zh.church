@@ -13,8 +13,8 @@ declare(strict_types=1);
  *                            故為「寫入需 X-Api-Key」規範之例外)
  */
 
-require __DIR__ . '/lib/db.php';
-require __DIR__ . '/lib/response.php';
+require dirname(__DIR__, 2) . '/app/lib/db.php';
+require dirname(__DIR__, 2) . '/app/lib/response.php';
 
 /**
  * 購書平台顯示名與排序(新增來源時在此擴充即可;platform 代碼由匯入器寫入

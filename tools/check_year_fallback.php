@@ -34,7 +34,7 @@ declare(strict_types=1);
  *       database/migrations/2026-09-28_year_fallback_guard.sql(同一條查詢的 SQL 版)
  */
 
-require __DIR__ . '/../api/lib/db.php';
+require __DIR__ . '/../app/lib/db.php';
 
 $opt   = getopt('', ['limit::']);
 $limit = max(1, (int) ($opt['limit'] ?? 20));

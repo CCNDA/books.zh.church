@@ -1,31 +1,33 @@
-# 環境設定(含 DB/SES 憑證,絕不進版控)
+# ── 憑證與本機設定(絕不進版控)──
 config/app.local.php
-.env
+config/deploy.local.md
 *.local.php
+.env
 
-# 相依套件
-vendor/
+# ── 相依套件 ──
+# 注意:只擋 repo 根的 Composer vendor/。
+# public/assets/vendor/ 是前端資產(opencc-full.js),必須進版控,
+# 否則主機 git clone 拿不到,線上簡繁切換會死。
+/vendor/
 node_modules/
 composer.lock
 
-# 上傳與快取
-media/uploads/
-web/uploads/
-cache/
+# ── 執行期產出 ──
+/storage/
 *.log
 
-# 系統雜訊
+# ── 爬蟲產出(原始資料與進度)──
+crawler/data/
+crawler/cache/
+crawler/logs/
+crawler/venv/
+__pycache__/
+
+# ── 每日開發日誌(刻意不進版控)──
+/history/
+
+# ── 系統雜訊 ──
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# 部署資訊(本地筆記)
-config/deploy.local.md
-
-# 爬蟲產出(原始資料與進度,不進版控)
-crawler/data/
-__pycache__/
-
-# Python venv 與日誌(不進版控)
-crawler/venv/
-crawler/logs/
+.history/

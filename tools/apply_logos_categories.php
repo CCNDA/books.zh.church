@@ -36,7 +36,7 @@ if (PHP_SAPI !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 
 $opt         = getopt('', ['dry-run', 'override-all', 'file::', 'limit::']);
 $dry         = array_key_exists('dry-run', $opt);

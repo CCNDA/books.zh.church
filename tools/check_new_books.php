@@ -28,7 +28,7 @@ declare(strict_types=1);
  *   php tools/check_new_books.php --file=... --source=... --min=6   # 前綴比對最短字數
  */
 
-require __DIR__ . '/../api/lib/db.php';
+require __DIR__ . '/../app/lib/db.php';
 
 $opt    = getopt('', ['file:', 'source:', 'out::', 'min::', 'limit::', 'split::']);
 $file   = $opt['file'] ?? null;

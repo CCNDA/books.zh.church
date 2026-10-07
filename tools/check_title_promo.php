@@ -54,7 +54,7 @@ declare(strict_types=1);
  * 相關:Asana 1218961224853655、收錄判準彙整 1218562704413649
  */
 
-require __DIR__ . '/../api/lib/db.php';
+require __DIR__ . '/../app/lib/db.php';
 
 $opt   = getopt('', ['out::', 'show::', 'limit::']);
 $out   = $opt['out']  ?? null;

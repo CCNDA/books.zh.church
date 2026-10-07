@@ -38,7 +38,7 @@ if (PHP_SAPI !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 require __DIR__ . '/lib_isbn.php';
 
 $opt       = getopt('', ['dry-run', 'file::', 'limit::', 'source::', 'skip-extra']);

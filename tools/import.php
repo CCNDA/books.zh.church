@@ -78,7 +78,7 @@ if (PHP_SAPI !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 // 書名促銷詞剝除規則。與 tools/check_title_promo.php **共用同一份** ——
 // 那支是這條規則的驗證者(產 dry-run 對照表給人勾),兩邊各寫一份會悄悄分家。
 require_once __DIR__ . '/lib_title.php';

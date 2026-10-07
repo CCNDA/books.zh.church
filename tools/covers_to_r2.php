@@ -20,7 +20,7 @@ if (PHP_SAPI !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 
 /* --source 可接受的來源白名單(不影響不帶參數的全站轉存,只擋單來源指定)。
  * ★ 這張清單原本寫死在兩個地方(驗證陣列 + 錯誤訊息字串),結果 btproduct 自 v1.12.0

@@ -42,7 +42,7 @@ if (PHP_SAPI !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 
 $opt    = getopt('', ['source::', 'out::']);
 $source = (string) ($opt['source'] ?? 'akow');

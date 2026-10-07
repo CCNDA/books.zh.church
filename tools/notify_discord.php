@@ -35,7 +35,7 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $root = dirname(__DIR__);
-require $root . '/api/lib/db.php';   // 取得 app_config()
+require $root . '/app/lib/db.php';   // 取得 app_config()
 
 const DISCORD_LIMIT = 1900;          // 保留餘裕(官方上限 2000)
 

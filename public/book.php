@@ -10,7 +10,7 @@ $id   = (int) ($_GET['id'] ?? 0);
 $book = null;
 if ($id > 0) {
     try {
-        require __DIR__ . '/api/lib/db.php';
+        require dirname(__DIR__) . '/app/lib/db.php';
         $stmt = db()->prepare(
             'SELECT v.book_id, v.title, v.subtitle, v.author, v.publisher, v.cover_url,
                     v.summary_short, b.summary

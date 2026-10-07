@@ -37,7 +37,7 @@ if (php_sapi_name() !== 'cli') {
     http_response_code(403);
     exit("CLI only\n");
 }
-require dirname(__DIR__) . '/api/lib/db.php';
+require dirname(__DIR__) . '/app/lib/db.php';
 
 $opt          = getopt('', ['all', 'missing', 'book::', 'batch::', 'limit::',
                             'summary-chars::', 'dry-run']);

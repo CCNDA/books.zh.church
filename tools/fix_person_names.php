@@ -40,7 +40,7 @@ declare(strict_types=1);
  */
 
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
-require __DIR__ . '/../api/lib/db.php';
+require __DIR__ . '/../app/lib/db.php';
 require_once __DIR__ . '/lib_person.php';
 
 const FPN_REV = '2026-10-03.4';      // ★ 版本戳記:FTP 沒蓋到時唯一能當場抓出來的辦法
