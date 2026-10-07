@@ -32,3 +32,6 @@ Thumbs.db
 desktop.ini
 .history/
 crawler/*.lock
+
+# Claude 工作階段的暫存產出(不進版控)
+/Claude outputs/
