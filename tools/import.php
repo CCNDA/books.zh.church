@@ -142,7 +142,10 @@ const NO_BUY_SOURCES = ['btproduct'];
  */
 const ISBN_NOT_UNIQUE_SOURCES = ['akow'];
 
-$opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run']);
+$opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run', 'fuzzy-all']);
+// --fuzzy-all：dry-run 時列出「全部」模糊比對命中（預設只列 30 筆樣本）。
+//   2026-10-12 海天書樓：沒有 ISBN、熊哥選「寬鬆比對，比到的先給我看過再合併」→ 要完整清單給人核對，不能只看樣本。
+$fuzzyCap = array_key_exists('fuzzy-all', $opt) ? PHP_INT_MAX : 30;
 $file   = $opt['file'] ?? null;
 $source = $opt['source'] ?? null;
 $limit  = (int) ($opt['limit'] ?? 0);
@@ -617,7 +620,7 @@ while (($line = fgets($fh)) !== false) {
         } else {
             $stats['merged']++;
             $stats['merge_' . $mergeVia]++;
-            if ($mergeVia === 'fuzzy' && count($fuzzySamples) < 30) {
+            if ($mergeVia === 'fuzzy' && count($fuzzySamples) < $fuzzyCap) {
                 $fuzzySamples[] = [$m['title'], $m['authors'][0]['name'] ?? '', (int) $bookId];
             }
         }
@@ -843,7 +846,9 @@ if ($dry) {
             $st->execute($uniq);
             foreach ($st as $r) $exist[(int) $r['book_id']] = $r;
         }
-        echo "  模糊比對樣本(最多 30 筆,請確認左右是否同一本書):\n";
+        echo $fuzzyCap === PHP_INT_MAX
+            ? "  模糊比對命中(全部 " . count($fuzzySamples) . " 筆,請確認左右是否同一本書):\n"
+            : "  模糊比對樣本(最多 30 筆,請確認左右是否同一本書;要全部加 --fuzzy-all):\n";
         foreach ($fuzzySamples as [$t, $a, $bid]) {
             $e = $exist[$bid] ?? [];
             echo "    「{$t}」/" . ($a !== '' ? $a : '(無作者)') . "\n"
