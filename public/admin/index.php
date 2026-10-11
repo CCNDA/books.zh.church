@@ -9,7 +9,10 @@ declare(strict_types=1);
  *
  * 登入：Cloudflare Access（只允許 @ccnda.org Google 帳號）＋ 本頁再驗 JWT（app/lib/cf_access.php）。
  * 資料：nonbook_guard_log 裡 hidden（A 級，已先下架）／flagged（B 級，沒動）且還沒審的書。
- * 動作：「是書，放行」→ is_published = 1、記 restored；「非書籍，下架」→ is_published = 0、記 confirmed。
+ * 動作：「上架」→ is_published = 1、記 restored；「下架」→ is_published = 0、記 confirmed。
+ *   用詞只用「上架／下架」（熊哥 2026-10-11：「要注意用詞避免誤會」）。
+ * 「已下架」分頁：所有 is_published = 0 的書（含分類對映下架、v1.16.0 批次下架），可以搜尋、按「上架」恢復。
+ *   恢復的書會被 app/lib/publish_lock.php 保護，每日的分類工具不會再把它下架。
  *   原本那筆寫上 reviewed_at／reviewed_by。已審的在「已審」分頁，可以改判。
  * 日後併入 M2-4 管理後台（1218124616097280）。
  */
@@ -41,7 +44,7 @@ function src_label(?string $code): string
     return SOURCE_LABELS[$code ?? ''] ?? (string) $code;
 }
 
-/** 只放行 http(s) 連結，其他（javascript: 之類）一律不輸出成連結。 */
+/** 只輸出 http(s) 連結，其他（javascript: 之類）一律不輸出成連結。 */
 function safe_url(?string $u): ?string
 {
     return ($u !== null && preg_match('#^https?://#i', $u)) ? $u : null;
@@ -106,28 +109,45 @@ function decide(PDO $pdo, int $bookId, string $decision, string $me): bool
 
 /**
  * 依編號下架一本書。已經在紀錄裡的（守門標記過）照一般審核走；
- * 不在紀錄裡的新增一筆 tier M（手動）的 hidden（已審）＋ confirmed，之後在「已審」頁一樣可以放行。
+ * 不在紀錄裡的新增一筆 tier M（手動）的 hidden（已審）＋ confirmed，之後在「已審」頁一樣可以上架。
  * 回 false＝書不存在或原本就已下架（不動）。
  */
 function manual_delist(PDO $pdo, int $bookId, string $reason, string $me): bool
 {
-    $b = $pdo->prepare('SELECT title, source, is_published FROM books WHERE book_id = :id');
+    $b = $pdo->prepare('SELECT is_published FROM books WHERE book_id = :id');
     $b->execute([':id' => $bookId]);
-    $book = $b->fetch();
-    if (!$book || (int) $book['is_published'] === 0) {
+    $pub = $b->fetchColumn();
+    if ($pub === false || (int) $pub === 0) {
         return false;
     }
-    if (decide($pdo, $bookId, 'delist', $me)) {
+    return set_published($pdo, $bookId, 'delist', $reason, $me);
+}
+
+/**
+ * 上架／下架任何一本書。在紀錄裡的照 decide() 走；不在紀錄裡的（例：分類對映下架、v1.16.0 批次下架的書）
+ * 補一筆 tier M 的 hidden（記原因、已審）＋ restored／confirmed，之後在「已審」頁看得到、也能改。
+ * 回 false＝書不存在。
+ */
+function set_published(PDO $pdo, int $bookId, string $decision, string $reason, string $me): bool
+{
+    if (decide($pdo, $bookId, $decision, $me)) {
         return true;
     }
+    $b = $pdo->prepare('SELECT title, source FROM books WHERE book_id = :id');
+    $b->execute([':id' => $bookId]);
+    $book = $b->fetch();
+    if (!$book) {
+        return false;
+    }
     $pdo->beginTransaction();
-    $pdo->prepare('UPDATE books SET is_published = 0 WHERE book_id = :id')->execute([':id' => $bookId]);
+    $pdo->prepare('UPDATE books SET is_published = :p WHERE book_id = :id')
+        ->execute([':p' => $decision === 'release' ? 1 : 0, ':id' => $bookId]);
     $ins = $pdo->prepare(
         "INSERT INTO nonbook_guard_log (book_id, tier, word, action, title_snapshot, source, reviewed_at, reviewed_by)
          VALUES (:id, 'M', :word, :action, :title, :src, NOW(), :by)
          ON DUPLICATE KEY UPDATE reviewed_at = NOW(), reviewed_by = VALUES(reviewed_by)"
     );
-    foreach (['hidden', 'confirmed'] as $action) {
+    foreach (['hidden', $decision === 'release' ? 'restored' : 'confirmed'] as $action) {
         $ins->execute([':id' => $bookId, ':word' => $reason, ':action' => $action,
                        ':title' => mb_substr((string) $book['title'], 0, 500), ':src' => $book['source'], ':by' => $me]);
     }
@@ -203,17 +223,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($bookId <= 0 || !in_array($decision, ['release', 'delist'], true)) {
             deny_page(400, '參數不對');
         }
-        if (!decide($pdo, $bookId, $decision, $me)) {
-            deny_page(404, "書 {$bookId} 不在待審紀錄裡");
+        $back = in_array($_POST['back'] ?? '', ['done', 'off'], true) ? $_POST['back'] : 'pending';
+        $ok = $back === 'off'
+            ? set_published($pdo, $bookId, $decision, '既有下架', $me)
+            : decide($pdo, $bookId, $decision, $me);
+        if (!$ok) {
+            deny_page(404, "找不到書 {$bookId}");
         }
-        $back = $_POST['back'] ?? 'pending';
-        header('Location: ?tab=' . ($back === 'done' ? 'done' : 'pending') . '&ok=' . $bookId . '&d=' . $decision, true, 303);
+        $keep = $back === 'off' ? '&q=' . rawurlencode((string) ($_POST['q'] ?? '')) . '&p=' . (int) ($_POST['p'] ?? 1) : '';
+        header('Location: ?tab=' . $back . $keep . '&ok=' . $bookId . '&d=' . $decision, true, 303);
         exit;
     }
 }
 
 // ── 列表 ─────────────────────────────────────────────
-$tab = isset($manualIds) ? 'manual' : (in_array($_GET['tab'] ?? '', ['done', 'manual'], true) ? $_GET['tab'] : 'pending');
+$tab = isset($manualIds) ? 'manual' : (in_array($_GET['tab'] ?? '', ['done', 'manual', 'off'], true) ? $_GET['tab'] : 'pending');
+$q = trim((string) ($_GET['q'] ?? ''));
 $page = max(1, (int) ($_GET['p'] ?? 1));
 
 $counts = $pdo->query(
@@ -240,6 +265,39 @@ if ($tab === 'manual') {
         $manualMissing = array_values(array_diff($manualIds, array_map('intval', array_column($rows, 'book_id'))));
     }
     $total = 0;
+} elseif ($tab === 'off') {
+    // 所有下架中的書；可用編號或書名搜尋。原因：在紀錄裡就顯示紀錄，不在就是分類對映或之前批次下架
+    $where = 'b.is_published = 0';
+    $args = [];
+    if ($q !== '') {
+        if (preg_match('/^\d{1,9}$/', $q)) {
+            $where .= ' AND b.book_id = :id';
+            $args[':id'] = (int) $q;
+        } else {
+            $where .= ' AND b.title LIKE :q';
+            $args[':q'] = '%' . addcslashes($q, '%_\\') . '%';
+        }
+    }
+    $c = $pdo->prepare("SELECT COUNT(*) FROM books b WHERE {$where}");
+    $c->execute($args);
+    $total = (int) $c->fetchColumn();
+    $st = $pdo->prepare(
+        "SELECT b.book_id, g.tier, g.word, g.action, g.created_at, g.reviewed_at, g.reviewed_by, b.title AS title_snapshot,
+                (SELECT r.action FROM nonbook_guard_log r WHERE r.book_id = b.book_id AND r.action IN ('restored','confirmed')
+                  ORDER BY r.reviewed_at DESC, r.log_id DESC LIMIT 1) AS result,
+                b.title, b.subtitle, b.author, b.translator, b.publisher, b.publish_date, b.isbn13, b.isbn10,
+                b.page_count, b.binding, b.series, b.cover_url, b.summary, b.buy_links, b.source, b.is_published,
+                c.name AS category
+           FROM books b
+           LEFT JOIN nonbook_guard_log g ON g.log_id = (SELECT MIN(x.log_id) FROM nonbook_guard_log x
+                                                         WHERE x.book_id = b.book_id AND x.action IN ('hidden','flagged'))
+           LEFT JOIN categories c ON c.category_id = b.category_id
+          WHERE {$where}
+          ORDER BY b.book_id DESC
+          LIMIT " . PAGE_SIZE . " OFFSET " . (($page - 1) * PAGE_SIZE)
+    );
+    $st->execute($args);
+    $rows = $st->fetchAll();
 } else {
 $st = $pdo->prepare(
     "SELECT g.book_id, g.tier, g.word, g.action, g.created_at, g.reviewed_at, g.reviewed_by, g.title_snapshot,
@@ -270,7 +328,7 @@ if ($rows) {
 
 $flash = null;
 if (isset($_GET['ok'])) {
-    $flash = '書 ' . (int) $_GET['ok'] . ' 已' . (($_GET['d'] ?? '') === 'release' ? '放行（上架）' : '確認下架');
+    $flash = '書 ' . (int) $_GET['ok'] . (($_GET['d'] ?? '') === 'release' ? ' 已上架' : ' 已下架');
 } elseif (isset($_GET['manual'])) {
     $flash = '依編號下架：已下架 ' . (int) $_GET['manual'] . ' 本（原本就下架或找不到的不會動）';
 }
@@ -355,6 +413,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <nav class="tabs">
   <a href="?tab=pending" class="<?= $tab === 'pending' ? 'on' : '' ?>">待審（<?= (int) $counts['pending'] ?>）</a>
   <a href="?tab=done" class="<?= $tab === 'done' ? 'on' : '' ?>">已審（<?= (int) $counts['done'] ?>）</a>
+  <a href="?tab=off" class="<?= $tab === 'off' ? 'on' : '' ?>">已下架</a>
   <a href="?tab=manual" class="<?= $tab === 'manual' ? 'on' : '' ?>">依編號下架</a>
 </nav>
 <?php if ($flash): ?><div class="flash"><?= e($flash) ?></div><?php endif; ?>
@@ -369,7 +428,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
     <?php foreach (MANUAL_REASONS as $rs): ?><option<?= ($manualReason ?? '') === $rs ? ' selected' : '' ?>><?= e($rs) ?></option><?php endforeach; ?>
   </select>
   <div class="act"><button>先預覽（還不會下架）</button></div>
-  <p class="note">一次最多 <?= MANUAL_MAX ?> 本。下架不會刪資料，在「已審」頁可以放行回來。</p>
+  <p class="note">一次最多 <?= MANUAL_MAX ?> 本。下架不會刪資料，在「已下架」頁可以再上架。</p>
 </form>
 <?php if (isset($manualIds)): ?>
   <?php if ($manualMissing): ?><p class="note">找不到這些編號：<?= e(implode('、', $manualMissing)) ?></p><?php endif; ?>
@@ -385,6 +444,16 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   </form>
   <?php else: ?><p>沒有可以下架的書。</p><?php endif; ?>
 <?php endif; ?>
+<?php elseif ($tab === 'off'): ?>
+<form method="get" class="box">
+  <input type="hidden" name="tab" value="off">
+  <label for="q">搜尋下架中的書（輸入編號或書名的一部分）</label>
+  <input id="q" name="q" value="<?= e($q) ?>" style="font:inherit;width:100%;max-width:560px;padding:6px 8px;border:1px solid var(--line);border-radius:6px">
+  <div class="act"><button>搜尋</button><?php if ($q !== ''): ?> <a href="?tab=off">清除</a><?php endif; ?></div>
+  <p class="note">共 <?= number_format($total) ?> 本下架中。包含每日分類對映自動下架的商品（禮品、CD、文具等）和之前批次下架的書。
+  按「上架」恢復後，每日的程式不會再把它下架。</p>
+</form>
+<?php if (!$rows): ?><p>找不到符合的書。</p><?php endif; ?>
 <?php else: ?>
 <p class="note">每日新品的書名命中非書籍關鍵字時會進來這裡。<b class="tA">A 級</b>已先自動下架；<b class="tB">B 級</b>還在上架，只是標記出來；<b class="tM">手動</b>是在「依編號下架」下架的。
 請點「原始來源」看商品頁確認，再按按鈕。</p>
@@ -403,9 +472,10 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   <div>
     <h2><?= e($title) ?><?php if ($r['subtitle']): ?> <small><?= e($r['subtitle']) ?></small><?php endif; ?></h2>
     <?php if ($r['tier'] === 'M'): ?><span class="tag tM">手動下架・<?= e($r['word']) ?></span>
+    <?php elseif ($r['tier'] === null && $tab === 'off'): ?><span class="tag pub0">分類對映或批次下架</span>
     <?php elseif ($r['tier']): ?><span class="tag t<?= e($r['tier']) ?>"><?= e($r['tier']) ?> 級・「<?= e($r['word']) ?>」</span><?php endif; ?>
     <span class="tag pub<?= (int) $r['is_published'] ?>"><?= $r['is_published'] ? '上架中' : '已下架' ?></span>
-    <?php if ($r['result']): ?><span class="tag"><?= $r['result'] === 'restored' ? '判定：放行' : '判定：下架' ?></span><?php endif; ?>
+    <?php if ($r['result']): ?><span class="tag"><?= $r['result'] === 'restored' ? '審核結果：上架' : '審核結果：下架' ?></span><?php endif; ?>
     <dl>
       <dt>編號</dt><dd><?= $id ?></dd>
       <?php if ($r['author']): ?><dt>作者</dt><dd><?= e($r['author']) ?><?= $r['translator'] ? '；譯者 ' . e($r['translator']) : '' ?></dd><?php endif; ?>
@@ -434,8 +504,9 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
       <input type="hidden" name="csrf" value="<?= e($_SESSION['csrf']) ?>">
       <input type="hidden" name="book_id" value="<?= $id ?>">
       <input type="hidden" name="back" value="<?= $tab ?>">
-      <?php if ($r['result'] !== 'restored'): ?><button class="yes" name="decision" value="release">是書，放行（上架）</button><?php endif; ?>
-      <?php if ($r['result'] !== 'confirmed'): ?><button class="no" name="decision" value="delist">非書籍，下架</button><?php endif; ?>
+      <?php if ($tab === 'off'): ?><input type="hidden" name="q" value="<?= e($q) ?>"><input type="hidden" name="p" value="<?= $page ?>"><?php endif; ?>
+      <?php if ($tab === 'off' || $r['result'] !== 'restored'): ?><button class="yes" name="decision" value="release">上架</button><?php endif; ?>
+      <?php if ($tab !== 'off' && $r['result'] !== 'confirmed'): ?><button class="no" name="decision" value="delist">下架</button><?php endif; ?>
     </form>
     <?php endif; ?>
   </div>
@@ -444,8 +515,13 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 
 <?php if ($pages > 1): ?>
 <p class="pager">
-  <?php for ($i = 1; $i <= $pages; $i++): ?>
-    <?= $i === $page ? '<span>' . $i . '</span>' : '<a href="?tab=' . $tab . '&p=' . $i . '">' . $i . '</a>' ?>
+  <?php // 已下架有上萬本：只列第一頁、最後一頁和目前頁前後 3 頁
+  $prev = 0;
+  for ($i = 1; $i <= $pages; $i++):
+      if ($i !== 1 && $i !== $pages && abs($i - $page) > 3) { continue; }
+      if ($prev && $i > $prev + 1) { echo '<span>…</span>'; }
+      $prev = $i; ?>
+    <?= $i === $page ? '<span>' . $i . '</span>' : '<a href="?tab=' . $tab . ($q !== '' ? '&q=' . rawurlencode($q) : '') . '&p=' . $i . '">' . $i . '</a>' ?>
   <?php endfor; ?>
 </p>
 <?php endif; ?>

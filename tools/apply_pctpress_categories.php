@@ -36,6 +36,7 @@ if (PHP_SAPI !== 'cli') {
     exit("CLI only\n");
 }
 require dirname(__DIR__) . '/app/lib/db.php';
+require_once dirname(__DIR__) . '/app/lib/publish_lock.php'; // 後台恢復上架的書不再下架
 
 $opt         = getopt('', ['dry-run', 'override-all', 'limit::']);
 $dry         = array_key_exists('dry-run', $opt);
@@ -93,7 +94,7 @@ if (!$dry) {
     $delCat  = $pdo->prepare("DELETE bs FROM book_subjects bs JOIN subjects s ON s.subject_id = bs.subject_id
                               WHERE bs.book_id = :b AND s.scheme = 'cat'");
     $updBook = $pdo->prepare('UPDATE books SET category_id = :cid WHERE book_id = :bid');
-    $downPub = $pdo->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid');
+    $downPub = $pdo->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid' . keep_published_sql());
 }
 $catSubjId = [];
 $catSid = function (string $name) use (&$catSubjId, &$upSubjCat, $catCode, $pdo): int {

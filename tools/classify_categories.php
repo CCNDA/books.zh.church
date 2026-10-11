@@ -26,6 +26,7 @@ declare(strict_types=1);
 
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
 require dirname(__DIR__) . '/app/lib/db.php';
+require_once dirname(__DIR__) . '/app/lib/publish_lock.php'; // 後台恢復上架的書不再下架
 
 $opt   = getopt('', ['dry-run', 'all', 'campus-only', 'orphans', 'limit::', 'dump-catchall::']);
 $dry   = array_key_exists('dry-run', $opt);
@@ -209,7 +210,7 @@ $rows = db()->query($sql)->fetchAll();
 echo ($dry ? "[dry-run] " : "") . "待處理:" . count($rows) . " 本" . ($campusOnly ? "(--campus-only 校園來源書)" : ($orphans ? "(--orphans:全部無 campus/logos 存證的上架書 —— ★會覆寫其他 12 家來源已 apply 的 primary)" : ($all ? "(--all 全部上架)" : "(僅未分類 category_id IS NULL)"))) . "\n";
 
 if (!$dry) {
-    $unpubBook = db()->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid');
+    $unpubBook = db()->prepare('UPDATE books SET is_published = 0 WHERE book_id = :bid' . keep_published_sql());
     $updBook = db()->prepare('UPDATE books SET category_id = :cid WHERE book_id = :bid');
     $delBS   = db()->prepare("DELETE bs FROM book_subjects bs JOIN subjects s ON s.subject_id=bs.subject_id
                               WHERE bs.book_id = :b AND s.scheme='cat'");

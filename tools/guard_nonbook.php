@@ -24,6 +24,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../app/lib/db.php';
 require_once __DIR__ . '/lib_nonbook.php';
+require_once __DIR__ . '/../app/lib/publish_lock.php';
 
 $opt   = getopt('', ['apply', 'all', 'flag-only', 'since::', 'out::']);
 $apply = isset($opt['apply']);
@@ -44,7 +45,8 @@ if ($since !== null && strtotime((string) $since) === false) {
 }
 
 $pdo = db();
-$where = 'b.is_published = 1';
+// 後台按過「上架」的書（最後判定 restored）不再檢查，否則 26 小時窗口內又會被下架
+$where = 'b.is_published = 1' . keep_published_sql('b.book_id');
 $params = [];
 if (!$all) {
     $where .= ' AND b.created_at >= :since';
@@ -81,7 +83,7 @@ if ($apply || $flagOnly) {
         fwrite(STDERR, "[非書籍守門] 找不到 nonbook_guard_log，先跑 migration 2026-10-11_nonbook_guard_log.sql；本次不下架\n");
         exit(1);
     }
-    $down = $pdo->prepare('UPDATE books SET is_published = 0 WHERE book_id = :id AND is_published = 1');
+    $down = $pdo->prepare('UPDATE books SET is_published = 0 WHERE book_id = :id AND is_published = 1' . keep_published_sql());
     $log  = $pdo->prepare(
         'INSERT IGNORE INTO nonbook_guard_log (book_id, tier, word, action, title_snapshot, source)
          VALUES (:id, :tier, :word, :action, :title, :src)'
