@@ -89,7 +89,8 @@ function release_note_html(string $md): string
         }
         if (preg_match('/^(#{1,4})\s+(.*)$/u', $t, $mm)) {
             $flush();
-            $lv = min(4, strlen($mm[1]) + 2); // # → h3、## → h4
+            // changelog.php 每一版的標題是 h2，說明裡從 h3 開始（標題層級不能跳，WCAG 1.3.1）
+            $lv = min(4, strlen($mm[1]) + 1); // ## → h3、### → h4（第一個 # 是標題，上面已略過）
             $html .= "<h{$lv}>" . $inline($mm[2]) . "</h{$lv}>\n";
             continue;
         }

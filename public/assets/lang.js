@@ -41,6 +41,8 @@
     var el = document.getElementById("langToggle");
     if (!el) return;
     el.textContent = lang === "hans" ? "繁體" : "简体";
+    // 語音名稱要包含畫面上的字（WCAG 2.5.3；原本固定「簡繁體切換」，報讀與畫面對不上）
+    el.setAttribute("aria-label", lang === "hans" ? "切換為繁體" : "切換為简体");
     el.setAttribute("data-no-convert", "1");
     el.title = lang === "hans" ? "切換為繁體中文" : "切换为简体中文";
     el.addEventListener("click", function (e) {
@@ -140,7 +142,7 @@
         if (tt !== document.title) document.title = tt;
         observe();
         var el = document.getElementById("langToggle");
-        if (el) el.textContent = "繁體";
+        if (el) { el.textContent = "繁體"; el.setAttribute("aria-label", "切換為繁體"); }
       })
       .catch(function () { /* 轉換器載入失敗:維持繁體顯示 */ });
   }

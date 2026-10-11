@@ -67,16 +67,23 @@ p{margin:0 0 14px}
 footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:860px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
   display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+/* 無障礙：連結不能只靠顏色區分（WCAG 1.4.1） */
+.hd-nav a,.ft a,main p a,main li a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:rgba(14,109,148,.4)}
+/* 無障礙：跳到主要內容（WCAG 2.4.1）、鍵盤焦點看得見（2.4.7） */
+.skip{position:absolute;left:-9999px;top:8px;z-index:100;background:#14303c;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">跳到主要內容</a>
 <header>
   <div class="hd-inner">
     <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <span style="color:var(--ink-soft)">關於本站</span> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
   </div>
 </header>
-<main>
+<main id="main">
   <h1 class="serif">關於「屬靈共同書目」</h1>
 
   <p>「屬靈共同書目」是一項<strong>基督徒圖書分享服務</strong>,盼望把散落各處的華文屬靈書籍資訊彙整在一起——書的基本資料、內容簡介、分類、購書管道與相關推薦——讓每一位渴慕成長的讀者,都能更快找到造就生命的下一本書。</p>

@@ -391,7 +391,7 @@ main{max-width:980px;margin:28px auto 0;padding:0 20px}
 h2{font-size:1.1rem;margin:0 0 6px;line-height:1.5}
 h2 small{font-weight:400;color:var(--ink-soft)}
 .tag{display:inline-block;font-size:.76rem;padding:0 9px;border-radius:10px;border:1px solid currentColor;margin:0 6px 2px 0}
-.tA{color:var(--danger)} .tB{color:var(--warn)} .tM{color:var(--accent)} .pub1{color:var(--ok)} .pub0{color:var(--ink-soft)}
+.tA{color:var(--danger)} .tB{color:var(--warn)} .tM{color:var(--gold)} .pub1{color:var(--ok)} .pub0{color:var(--ink-soft)}
 dl{display:grid;grid-template-columns:auto 1fr;gap:0 14px;margin:8px 0;font-size:.9rem}
 dt{color:var(--ink-soft)} dd{margin:0;overflow-wrap:anywhere}
 details{font-size:.9rem;margin:6px 0} summary{cursor:pointer;color:var(--gold)}
@@ -410,16 +410,22 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:980px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
   display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
 @media (max-width:560px){ .card{grid-template-columns:64px 1fr;padding:14px} .card img,.noimg{width:64px} .noimg{height:86px} }
+/* 無障礙（WCAG 1.4.1、2.4.1、2.4.7）：連結加淡底線、跳到主要內容、焦點看得見 */
+.hd-nav a,.ft a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:rgba(14,109,148,.4)}
+.skip{position:absolute;left:-9999px;top:8px;z-index:100;background:#14303c;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">跳到主要內容</a>
 <header>
   <div class="hd-inner">
     <h1 class="hd-title serif"><a href="/admin/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目 <small>後台</small></a></h1>
     <nav class="hd-nav"><a href="/" target="_blank" rel="noopener">回前台 ↗</a> ・ <?= e($me) ?></nav>
   </div>
 </header>
-<main>
+<main id="main">
 <nav class="tabs">
   <a href="?tab=pending" class="<?= $tab === 'pending' ? 'on' : '' ?>">待審（<?= (int) $counts['pending'] ?>）</a>
   <a href="?tab=done" class="<?= $tab === 'done' ? 'on' : '' ?>">已審（<?= (int) $counts['done'] ?>）</a>

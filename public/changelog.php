@@ -67,6 +67,7 @@ h1{font-size:1.6rem;letter-spacing:.1em;margin:0 0 10px}
 .rel.plain{padding:10px 18px}
 .rel.plain .row{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
 .note{border-top:1px solid var(--line);padding:6px 0 10px;font-size:.95rem}
+.rh{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap;margin:0;font-size:inherit;font-weight:inherit;flex:1 1 auto}
 .note h3,.note h4{font-size:1rem;margin:16px 0 6px;letter-spacing:.04em}
 .note p{margin:0 0 10px}
 .note ul{margin:0 0 10px;padding-left:1.4em}
@@ -74,16 +75,23 @@ h1{font-size:1.6rem;letter-spacing:.1em;margin:0 0 10px}
 footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:860px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
   display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+/* 無障礙：連結不能只靠顏色區分（WCAG 1.4.1） */
+.hd-nav a,.ft a,main p a,main li a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:rgba(14,109,148,.4)}
+/* 無障礙：跳到主要內容（WCAG 2.4.1）、鍵盤焦點看得見（2.4.7） */
+.skip{position:absolute;left:-9999px;top:8px;z-index:100;background:#14303c;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 </head>
 <body>
+<a class="skip" href="#main">跳到主要內容</a>
 <header>
   <div class="hd-inner">
     <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
   </div>
 </header>
-<main>
+<main id="main">
   <h1 class="serif">版本更新紀錄</h1>
   <p class="now">目前版本:<strong><?= $version !== '' ? 'v' . $h($version) : '(讀不到版本)' ?></strong></p>
 <?php if (!$releases): ?>
@@ -92,11 +100,11 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <?php foreach ($releases as $i => $r): ?>
 <?php if ($r['note'] !== null): ?>
   <details class="rel"<?= $i === 0 ? ' open' : '' ?>>
-    <summary><span class="ver">v<?= $h($r['version']) ?></span><span class="date"><?= $h($r['date'] ?? '') ?></span><span class="ttl"><?= $h($r['title']) ?></span></summary>
+    <summary><h2 class="rh"><span class="ver">v<?= $h($r['version']) ?></span><span class="date"><?= $h($r['date'] ?? '') ?></span><span class="ttl"><?= $h($r['title']) ?></span></h2></summary>
     <div class="note"><?= release_note_html($r['note']) ?></div>
   </details>
 <?php else: ?>
-  <div class="rel plain"><div class="row"><span class="ver">v<?= $h($r['version']) ?></span><span class="date"><?= $h($r['date'] ?? '') ?></span><span class="ttl"><?= $h($r['title']) ?></span></div></div>
+  <div class="rel plain"><h2 class="rh row"><span class="ver">v<?= $h($r['version']) ?></span><span class="date"><?= $h($r['date'] ?? '') ?></span><span class="ttl"><?= $h($r['title']) ?></span></h2></div>
 <?php endif; ?>
 <?php endforeach; ?>
 </main>

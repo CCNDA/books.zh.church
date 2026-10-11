@@ -252,12 +252,19 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
   .info{width:100%}
   h1{font-size:1.4rem}
 }
+/* 無障礙：連結不能只靠顏色區分（WCAG 1.4.1） */
+.hd-nav a,.ft a,main p a,main li a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:rgba(14,109,148,.4)}
+/* 無障礙：跳到主要內容（WCAG 2.4.1）、鍵盤焦點看得見（2.4.7） */
+.skip{position:absolute;left:-9999px;top:8px;z-index:100;background:#14303c;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 <?php if ($book): ?>
 <script type="application/ld+json"><?= ssr_jsonld($book, $ogUrl) ?></script>
 <?php endif; ?>
 </head>
 <body>
+<a class="skip" href="#main">跳到主要內容</a>
 <header>
   <div class="hd-inner">
     <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
