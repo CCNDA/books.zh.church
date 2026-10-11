@@ -24,6 +24,9 @@
   - 分類對映：migration `2026-10-12_rockhouse_category_map.sql`（28 列）＋ `tools/apply_rockhouse_categories.php`；
     子分類優先（「歷史‧傳記 > 傳記」多為基督徒日記與回憶錄 → 見證）。
     站方沒掛分類的《中文聖經啟導本》依書名補回同一套書的分類（標 `category_inferred`）。
+  - **每週一全量重抓**（熊哥：海天很小，不進每日新品，改每週「可以」）：`crawler/daily_new.sh` 星期一跑
+    `rockhouse_crawler.py --refresh-list`（清單不用快取、只抓新商品）→ import → apply 分類；重跑冪等（已存在的全跳過）。
+  - 恆用日曆系列 5 本照收（熊哥：「5本收」）；39 本合併熊哥看過清單：「合併的沒問題」。
 - `tools/import.php --fuzzy-all`：dry-run 列出全部模糊比對命中（預設仍只列 30 筆樣本），給沒有 ISBN 的來源做合併核對。
 
 ## [1.18.1] - 2026-10-12 —— 分類清單與關鍵字搜尋加速、migration 對帳補登

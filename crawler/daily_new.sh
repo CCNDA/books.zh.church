@@ -147,6 +147,20 @@ apply_map "天道書樓" "$ROOT/tools/apply_tiendao_categories.php"
 apply_map "突破機構" "$ROOT/tools/apply_btproduct_categories.php"
 apply_map "麥種傳道會" "$ROOT/tools/apply_akow_categories.php"
 
+# ── 海天書樓:每週一全量重抓(不進每日新品)──
+# ★ 熊哥 2026-10-12「可以」:全站只有 338 件(書 168),沒有新品頁 → 每週一重讀全站清單、只抓新商品、匯入、套分類。
+#   清單 34 頁 × 3–5 秒 ≈ 2–3 分鐘;新商品才另外抓。v1.19.0(Asana 1217984724611028)。
+if [ "$(date +%u)" = "1" ] && [ -f "$CRAWLER_DIR/rockhouse_crawler.py" ]; then
+  log "--- 海天書樓(每週一)---"
+  if (cd "$CRAWLER_DIR" && "$VENV/bin/python" -u rockhouse_crawler.py --refresh-list) >>"$LOG" 2>&1 \
+     && php "$IMPORT" --file="$CRAWLER_DIR/data/rockhouse_books.jsonl" --source=rockhouse >>"$LOG" 2>&1; then
+    log "海天書樓重抓＋匯入完成"
+    apply_map "海天書樓" "$ROOT/tools/apply_rockhouse_categories.php"
+  else
+    log "[錯誤] 海天書樓重抓或匯入失敗(可手動重跑 crawler/rockhouse_crawler.py --refresh-list 再 import)"
+  fi
+fi
+
 # ── 分類回填:替本次新匯入(category_id 仍為 NULL)的書套用分類器 ──
 # classify_categories.php 不加 --all 時只處理 category_id IS NULL 的書(即新品),
 # 校園照來源代碼、基道/新品照關鍵字;不動既有已分類書。

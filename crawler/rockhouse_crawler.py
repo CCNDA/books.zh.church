@@ -6,6 +6,7 @@ r"""海天書樓(rockhouse,香港,Java 自建站)爬蟲 —— 第十九來源,v
   venv/bin/python rockhouse_crawler.py --sample 12      # 等距抽樣 N 件解析結果,不寫檔
   venv/bin/python rockhouse_crawler.py --limit 30       # 試跑 30 件(寫 master)
   nohup venv/bin/python -u rockhouse_crawler.py > logs/rockhouse.log 2>&1 &   # 全量(可續跑,快取在 cache/rockhouse)
+  venv/bin/python rockhouse_crawler.py --refresh-list  # 每週(daily_new.sh 星期一):清單不用快取重讀,只抓新商品
 
 ━━━ 站台(2026-10-11 偵察,見票)━━━
 ・全程 http;index.do 是 frameset,內容在 showroom/model/T0135/*.do,固定帶 webId、editCurrentLanguage
@@ -50,10 +51,11 @@ MAX_PAGES = 80  # 338 件 ≈ 34 頁;保險上限,超過就是站方改版了
 # 第一層分類 → 非書籍(票上偵察：月曆／日曆／秩序單／吉儀封／音樂光碟)。實際名稱以 --probe／全量報表為準再補。
 NONBOOK_TOP = {"秩序單", "月曆", "日曆", "海天日月曆", "吉儀封", "音樂光碟", "光碟", "禮品", "卡"}
 # 2026-10-12 全量實測的書籍第一層分類（不在這裡的照收，但報表會提醒「新分類請人看過」）
-BOOK_TOP_HINT = {"聖經", "靈修‧勵志", "兒童與少年讀物", "證道‧普及神學", "新聞‧傳播專著", "歷史‧傳記", "幼兒與兒童",
+BOOK_TOP_HINT = {"聖經", "恆用日曆系列", "靈修‧勵志", "兒童與少年讀物", "證道‧普及神學", "新聞‧傳播專著", "歷史‧傳記", "幼兒與兒童",
                  "少年文學‧童話", "家庭‧生活", "小說", "世界文學名著", "禮品書", "學好英文的書", None}
-# 灰色地帶：照收但報表另列，等熊哥決定。恆用日曆系列＝每天翻一頁、有內容的桌曆（例「365聖經問題天天答」）
-GRAY_TOP = {"恆用日曆系列"}
+# 灰色地帶：照收但報表另列，等熊哥決定。
+# 恆用日曆系列（每天翻一頁、有內容的桌曆，例「365聖經問題天天答」）熊哥 2026-10-12 06:04「5本收」→ 已移到 BOOK_TOP_HINT
+GRAY_TOP: set[str] = set()
 # 沒有麵包屑時依書名補分類（站方分類代碼與名稱照抄同一套書其他版本的麵包屑）
 TITLE_CATEGORY_FALLBACK = [
     ("啟導本", [{"code": "1250582624703004926", "name": "聖經"},
@@ -235,6 +237,9 @@ def main() -> int:
     ap.add_argument("--probe", action="store_true")
     ap.add_argument("--sample", type=int, default=0)
     ap.add_argument("--limit", type=int, default=0)
+    # 每週重抓(熊哥 2026-10-12:海天很小,不進每日新品,改每週全量):清單頁一律重抓才看得到新商品;
+    # 已抓過的商品頁沿用快取、master 已有的不重寫(JsonlWriter 以 product_id 去重),新商品才發請求。
+    ap.add_argument("--refresh-list", action="store_true")
     args = ap.parse_args()
 
     if args.probe:
@@ -245,7 +250,7 @@ def main() -> int:
         return 0
 
     print("讀取全站清單(空白關鍵字搜尋)…", flush=True)
-    ids = list_all()
+    ids = list_all(force=args.refresh_list)
     print(f"全站 {len(ids)} 件", flush=True)
 
     if args.sample:
