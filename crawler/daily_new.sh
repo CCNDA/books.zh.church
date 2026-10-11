@@ -202,5 +202,24 @@ else
   log "[警告] 找不到 $YEARGUARD,略過年份後備層守門"
 fi
 
+# ── 非書籍守門:最近 26 小時新增的上架書,書名命中非書籍關鍵字就處理 ──
+# ★★ 2026-10-11 補上(v1.16.1,Asana 1219384830498351)。
+#   import.php 新書一律 is_published=1、沒有關鍵字層,下架過的 146 筆非書籍(貼紙、項鍊、播放器…)
+#   隔天新品又會原樣上架。規則在 tools/lib_nonbook.php,分兩級:
+#   A 級(上架書命中 0 本的詞)→ 先下架並記 hidden;B 級(真書名也會出現的詞)→ 不動,只記 flagged。
+#   紀錄在 nonbook_guard_log,小芯每天讀這張表把清單傳熊哥確認;誤判就改回 is_published=1。
+#   沒有紀錄表時工具 exit 1 且不下架(先跑 migration 2026-10-11_nonbook_guard_log.sql)。
+NBGUARD="$ROOT/tools/guard_nonbook.php"
+if [ -f "$NBGUARD" ]; then
+  log "--- 非書籍守門 ---"
+  if php "$NBGUARD" --apply >>"$LOG" 2>&1; then
+    log "非書籍守門完成(A 級已下架、B 級已標記,清單見上方)"
+  else
+    log "[錯誤] 非書籍守門失敗 —— **新的非書籍可能已上架**,請確認 nonbook_guard_log 存在後手動重跑 php tools/guard_nonbook.php --apply"
+  fi
+else
+  log "[警告] 找不到 $NBGUARD,略過非書籍守門"
+fi
+
 log "=== 每日新品檢查結束 ==="
-# 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書複核見 runbook 待辦。
+# 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。
