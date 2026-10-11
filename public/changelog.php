@@ -22,6 +22,13 @@ $h = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBST
 <title>版本更新紀錄|屬靈共同書目</title>
 <meta name="description" content="屬靈共同書目各版本的更新紀錄:新增的書目來源、功能與修正。">
 <link rel="canonical" href="https://books.zh.church/changelog.php">
+<meta property="og:site_name" content="屬靈共同書目">
+<meta property="og:type" content="website">
+<meta property="og:title" content="版本更新紀錄|屬靈共同書目">
+<meta property="og:description" content="屬靈共同書目各版本的更新紀錄:新增的書目來源、功能與修正。">
+<meta property="og:url" content="https://books.zh.church/changelog.php">
+<meta property="og:image" content="https://books.zh.church/assets/og-image.png">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
@@ -41,7 +48,7 @@ a{color:var(--gold);text-decoration:none}
 header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .hd-inner{max-width:860px;margin:0 auto;padding:20px 20px 14px;
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-.hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em}
+.hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em;font-weight:700;line-height:normal}
 .hd-title a{color:var(--ink);display:inline-flex;align-items:center;gap:.4em}
 .brand-logo{height:34px;width:34px;flex:0 0 auto}
 .ft-logo{width:26px;height:26px;border-radius:4px;flex:0 0 auto}
@@ -72,7 +79,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <body>
 <header>
   <div class="hd-inner">
-    <h1 class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
+    <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
   </div>
 </header>

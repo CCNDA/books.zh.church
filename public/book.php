@@ -191,7 +191,7 @@ a{color:inherit;text-decoration:none}
 header{border-bottom:3px double var(--gold-soft);background:var(--card)}
 .hd-inner{max-width:1080px;margin:0 auto;padding:20px 20px 14px;
   display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
-.hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em}
+.hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em;font-weight:700;line-height:normal}
 .hd-title a{display:inline-flex;align-items:center;gap:.4em;color:var(--ink)}
 .brand-logo{height:34px;width:34px;flex:0 0 auto}
 .hd-nav{font-size:.88rem;color:var(--ink-soft)}
@@ -260,7 +260,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <body>
 <header>
   <div class="hd-inner">
-    <h1 class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></h1>
+    <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
     <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
   </div>
 </header>
@@ -320,7 +320,8 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <section class="sec" id="secEditions"<?= $edItems !== '' ? '' : ' hidden' ?>><h2 class="serif">版本資訊</h2><div class="body"><ul class="linklist" id="bEditions"><?= $edItems ?></ul></div></section>
 <div class="msg" id="msg" hidden></div>
 <script type="application/json" id="bookData"><?= json_encode($b, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
-<?php else: ?>
+<?php elseif ($dbError): ?>
+<?php /* DB 異常：留空殼給前端重試打 API（找不到書時不輸出空殼，頁面只留一個 h1） */ ?>
 <div class="crumb" id="crumb" hidden></div>
 <div class="wrap" id="wrap" hidden>
   <div class="cover" id="cover"></div>
@@ -336,11 +337,9 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <div class="sec" id="secSummary" hidden><h2 class="serif">內容簡介</h2><div class="body summary" id="bSummary"></div></div>
 <div class="sec" id="secLinks" hidden><h2 class="serif">延伸連結</h2><div class="body"><ul class="linklist" id="bLinks"></ul></div></div>
 <div class="sec" id="secEditions" hidden><h2 class="serif">版本資訊</h2><div class="body"><ul class="linklist" id="bEditions"></ul></div></div>
-<?php if ($dbError): ?>
 <div class="msg" id="msg" hidden></div>
 <?php else: ?>
 <div class="msg" id="msg" data-notfound="1"><div class="big">📖</div><h1 style="font-size:1rem;font-weight:400;margin:0">找不到這本書,可能已下架或網址有誤。</h1><p><a href="/">← 回書目瀏覽</a></p></div>
-<?php endif; ?>
 <?php endif; ?>
 </main>
 

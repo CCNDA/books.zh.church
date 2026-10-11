@@ -32,6 +32,9 @@
 - **robots.txt**：`Content-Signal: search=yes, ai-input=yes, ai-train=yes`（熊哥：AI 訓練「要」開放）；
   擋 `/admin/`、`/api/`（爬蟲請看書目頁）；指向 sitemap。
 - **llms.txt**：給 AI 看的網站說明（收錄範圍、主要頁面、開放 API、引用方式）。
+- 每頁只留一個 `<h1>`：關於本站、書目頁、版本更新紀錄的標頭站名改成 `<div>`（樣式補 `font-weight:700;line-height:normal`，外觀不變）；
+  首頁的站名就是主標題，維持 `<h1>`。找不到書的頁面不再輸出給前端用的空殼。
+- 版本更新紀錄頁補 og／twitter 分享資訊。
 
 
 ## [1.17.0] - 2026-10-11 —— 非書籍守門、簡易後台（審核／上下架）、Google Analytics
