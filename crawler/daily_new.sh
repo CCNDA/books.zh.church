@@ -156,6 +156,12 @@ if [ "$(date +%u)" = "1" ] && [ -f "$CRAWLER_DIR/rockhouse_crawler.py" ]; then
      && php "$IMPORT" --file="$CRAWLER_DIR/data/rockhouse_books.jsonl" --source=rockhouse >>"$LOG" 2>&1; then
     log "海天書樓重抓＋匯入完成"
     apply_map "海天書樓" "$ROOT/tools/apply_rockhouse_categories.php"
+    # 海天書樓只有 http（https 憑證不符），https 頁面上的 http 圖片會被瀏覽器擋 → 封面一定要轉存 R2 才看得到
+    if php "$ROOT/tools/covers_to_r2.php" --source=rockhouse >>"$LOG" 2>&1; then
+      log "海天書樓封面轉存 R2 完成"
+    else
+      log "[錯誤] 海天書樓封面轉存 R2 失敗(可手動重跑 tools/covers_to_r2.php --source=rockhouse)"
+    fi
   else
     log "[錯誤] 海天書樓重抓或匯入失敗(可手動重跑 crawler/rockhouse_crawler.py --refresh-list 再 import)"
   fi
