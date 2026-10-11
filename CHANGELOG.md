@@ -55,6 +55,8 @@
   - 表單有 CSRF token 和 Origin 檢查；頁面不快取、不能被嵌入。
 - **`guard_nonbook.php --all --flag-only`**：全站命中的書都記成待審、一本都不下架。
   上線時跑一次，讓既有的 84 本 B 級進後台（熊哥：「這一批先保留，有後台再處理」）。
+- **Google Analytics（GA4 `G-58CPNJ5D6F`）**（熊哥：「這個網站還沒有上GA」）：
+  前台 4 頁（首頁、關於本站、書目頁、版本更新紀錄）在 `<head>` 最前面加 gtag.js；後台 `/admin/` 不裝。
 - **migration `2026-10-11_nonbook_guard_log.sql`**：建 `nonbook_guard_log`（`UNIQUE(book_id, action)`；`reviewed_at`／`reviewed_by` 給後台用，
   每日窗口重疊也不會重複記）。沒有這張表時守門 exit 1 且不下架。
 

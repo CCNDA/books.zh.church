@@ -14,6 +14,9 @@ $h = static fn(string $s): string => htmlspecialchars($s, ENT_QUOTES | ENT_SUBST
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
+<!-- Google Analytics（GA4 G-58CPNJ5D6F，熊哥 2026-10-11；Asana 1219388348551239）。只裝前台，後台 /admin/ 不裝。 -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-58CPNJ5D6F"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-58CPNJ5D6F');</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>版本更新紀錄|屬靈共同書目</title>
