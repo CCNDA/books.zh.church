@@ -15,6 +15,7 @@ declare(strict_types=1);
 
 require dirname(__DIR__, 2) . '/app/lib/db.php';
 require dirname(__DIR__, 2) . '/app/lib/response.php';
+require dirname(__DIR__, 2) . '/app/lib/release.php';
 
 /**
  * 購書平台顯示名與排序(新增來源時在此擴充即可;platform 代碼由匯入器寫入
@@ -75,6 +76,9 @@ $path = rtrim($path, '/') ?: '/';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
+    if ($method === 'GET' && $path === '/version') {
+        json_data(['version' => app_version()]);
+    }
     if ($method === 'GET' && $path === '/categories') {
         get_categories();
     }

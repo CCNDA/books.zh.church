@@ -15,6 +15,14 @@
 
 ### 新增
 
+- **版本更新紀錄頁 `public/changelog.php`，footer 版號點進去看。**
+  版本清單來自本檔的「## [x.y.z] - 日期 —— 標題」（每一版都有），有 `release-notes/vX.Y.Z.md`
+  的版本附讀者版說明（可展開）。共用函式在 `app/lib/release.php`。
+- **footer 版號改成自動讀 `VERSION`**：首頁、關於本站經 `GET /api/version`，單筆頁由 PHP 直接讀。
+  ★ 原本首頁把「v1.15」寫死在 HTML（title 還寫 1.15.0），VERSION 已是 1.15.1 卻沒人同步；
+    發布流程第 6 步「同步首頁 footer 版號」從此不必再手動做。
+  ★ 讀不到 API 時仍顯示「版本資訊」連結，不會整塊消失。
+
 - **`tools/lib_title.php`:書名促銷詞剝除規則(`strip_title_promo()`)。**
   `tools/import.php` 與 `tools/check_title_promo.php` **共用同一份** ——
   後者是這條規則的驗證者(產 dry-run 對照表給人勾),兩邊各寫一份會讓
