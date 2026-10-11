@@ -54,6 +54,11 @@ BOOK_TOP_HINT = {"聖經", "靈修‧勵志", "兒童與少年讀物", "證道�
                  "少年文學‧童話", "家庭‧生活", "小說", "世界文學名著", "禮品書", "學好英文的書", None}
 # 灰色地帶：照收但報表另列，等熊哥決定。恆用日曆系列＝每天翻一頁、有內容的桌曆（例「365聖經問題天天答」）
 GRAY_TOP = {"恆用日曆系列"}
+# 沒有麵包屑時依書名補分類（站方分類代碼與名稱照抄同一套書其他版本的麵包屑）
+TITLE_CATEGORY_FALLBACK = [
+    ("啟導本", [{"code": "1250582624703004926", "name": "聖經"},
+                {"code": "1250582693484004975", "name": "中文聖經啟導本増訂新版"}]),
+]
 # ★ None＝站方頁面就沒有分類麵包屑（例《中文聖經啟導本》9 件，ParentId 指向的分類頁也沒有名稱）。
 #   不在爬蟲裡猜分類，匯入後由 tools/classify_categories.php 依書名關鍵字歸類。
 
@@ -150,6 +155,18 @@ def parse_product(pid: str, parent_id: str, force: bool = False) -> dict:
             q = parse_qs(urlparse(a.get("href", "")).query)
             crumbs.append({"code": (q.get("ParentId") or [None])[0], "name": a.get_text(strip=True)})
 
+    # 站方頁面沒有分類麵包屑時（《中文聖經啟導本》9 件），依書名補回同一套書的站方分類，並標 category_inferred。
+    # 2026-10-12：這 9 件交 classify_categories.php 會落到「綜合其他」（它的「聖經」類只認校園來源代碼），
+    #   而同一套書的其他版本在站方就掛在「聖經 > 中文聖經啟導本増訂新版」底下。
+    inferred = False
+    if not crumbs:
+        swap = soup.find("span", class_="NavigationSwap")
+        name = swap.get_text(strip=True) if swap else ""
+        for kw, path in TITLE_CATEGORY_FALLBACK:
+            if kw in name:
+                crumbs, inferred = [dict(x) for x in path], True
+                break
+
     title_td = soup.find("td", class_="TitleArea")
     raw_title = _text(title_td).replace("\n", " ")
     code, title = (raw_title.split(" : ", 1) + [""])[:2] if " : " in raw_title else ("", raw_title)
@@ -197,6 +214,7 @@ def parse_product(pid: str, parent_id: str, force: bool = False) -> dict:
         "category_source": crumbs[-1]["code"] if crumbs else None,
         "category_text": " > ".join(c["name"] for c in crumbs) or None,
         "top_category": crumbs[0]["name"] if crumbs else None,
+        "category_inferred": inferred,
         "intro_raw": "\n".join(intro_lines) or None,
     }
     rec.update(parse_intro(intro_lines))
