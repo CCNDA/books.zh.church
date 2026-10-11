@@ -13,6 +13,21 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **書目頁伺服器端輸出書目內容**（熊哥：「屬靈共同書目要符合 AIO SEO 的最佳設定，另外還要符合視障無障礙使用」）。
+  原本 `/book/{id}` 的書名、作者、簡介都靠 JavaScript 呼叫 API 才畫出來，不執行 JS 的 AI 爬蟲
+  （GPTBot、ClaudeBot、PerplexityBot…）看到的是空頁。現在 `book.php` 直接輸出同樣的 HTML，
+  資料也嵌在頁面裡（`#bookData`），前端直接拿來用、不再多打一次 API。
+  - 取資料抽成 `app/lib/book_detail.php` 的 `book_detail()`，API `GET /api/books/{id}` 與書目頁共用（內容不會分岔；
+    重構前後 API 輸出逐位元組比對一致）。
+  - 伺服器輸出的格式照著前端 `render()` 寫：**兩邊要一起改**。
+  - 資料庫異常回 503（不再回 404，避免搜尋引擎把書目頁移出索引）。
+- **書目頁 JSON-LD**：schema.org `Book`（作者、譯者、出版社、出版日、ISBN、頁數、裝訂、語言、封面、簡介、分類）＋ `BreadcrumbList`；
+  只放資料庫真的有的欄位。
+- 書目頁內容包進 `<main>`，麵包屑改 `<nav aria-label="麵包屑">`（無障礙）。
+
+
 ## [1.17.0] - 2026-10-11 —— 非書籍守門、簡易後台（審核／上下架）、Google Analytics
 
 ### 新增

@@ -8,28 +8,131 @@ declare(strict_types=1);
 
 $id   = (int) ($_GET['id'] ?? 0);
 $book = null;
+$dbError = false;
 if ($id > 0) {
     try {
-        require dirname(__DIR__) . '/app/lib/db.php';
-        $stmt = db()->prepare(
-            'SELECT v.book_id, v.title, v.subtitle, v.author, v.publisher, v.cover_url,
-                    v.summary_short, b.summary
-             FROM v_book_list v JOIN books b ON b.book_id = v.book_id
-             WHERE v.book_id = :id AND v.is_published = 1'
-        );
-        $stmt->execute([':id' => $id]);
-        $book = $stmt->fetch() ?: null;
+        // 和 API GET /api/books/{id} 用同一個函式（app/lib/book_detail.php），伺服器輸出與 API 內容不會分岔
+        require dirname(__DIR__) . '/app/lib/book_detail.php';
+        $book = book_detail($id);
     } catch (Throwable $ex) {
         $book = null; // DB 異常時仍出頁面,由前端重試
+        $dbError = true;
     }
 }
 if (!$book) {
-    http_response_code(404);
+    // DB 異常回 503（暫時無法服務），不要回 404：404 會讓搜尋引擎把書目頁移出索引
+    http_response_code($dbError ? 503 : 404);
 }
 
 function e(?string $s): string
 {
     return htmlspecialchars((string) ($s ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+/*
+ * ── 伺服器端輸出（Asana 1219388521666079、1219388805512172）──────────────
+ * 熊哥 2026-10-11：「屬靈共同書目要符合 AIO SEO 的最佳設定，另外還要符合視障無障礙使用」。
+ * 原本內文全靠下方 JavaScript 呼叫 API 才畫出來 → 不執行 JS 的 AI 爬蟲（GPTBot、ClaudeBot、PerplexityBot…）
+ * 與部分報讀情境只看得到空頁。現在伺服器先輸出同樣的 HTML（格式照著 JS 的 render() 寫，兩邊要一起改），
+ * 資料也嵌在頁面裡（#bookData），JS 直接拿來用、不再多打一次 API。
+ */
+const SSR_ROLE_NAMES = ['author' => '作者', 'editor' => '編者', 'translator' => '譯者', 'illustrator' => '繪者',
+                        'foreword' => '序文', 'advisor' => '顧問', 'proofreader' => '校對', 'contributor' => '合著'];
+const SSR_PLATFORM_NAMES = ['campus' => '校園書房', 'logos' => '基道 BookFinder'];
+
+function ssr_meta_row(string $label, ?string $value, bool $html = false): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+    return '<div><dt>' . e($label) . '</dt><dd>' . ($html ? $value : e($value)) . '</dd></div>';
+}
+
+function ssr_contributor_rows(array $b): string
+{
+    if (!empty($b['contributors'])) {
+        $out = '';
+        foreach ($b['contributors'] as $role => $ps) {
+            $names = array_map(static function (array $p): string {
+                $label = e($p['name']) . (($p['credit_text'] ?? '') !== '' && $p['credit_text'] !== $p['name'] ? '(' . e($p['credit_text']) . ')' : '');
+                return $p['person_id'] ? '<a href="/?person=' . rawurlencode((string) $p['person_id']) . '">' . $label . '</a>' : $label;
+            }, $ps);
+            $out .= ssr_meta_row(SSR_ROLE_NAMES[$role] ?? $role, implode('、', $names), true);
+        }
+        return $out;
+    }
+    return ssr_meta_row('作者', $b['author'] ?? null) . ssr_meta_row('譯者', $b['translator'] ?? null) . ssr_meta_row('編者', $b['editors'] ?? null);
+}
+
+function ssr_publishers(array $b): array
+{
+    $seen = [];
+    foreach ($b['editions'] ?? [] as $ed) {
+        if (!empty($ed['publisher_id']) && !empty($ed['publisher_name']) && !isset($seen[$ed['publisher_id']])) {
+            $seen[$ed['publisher_id']] = $ed['publisher_name'];
+        }
+    }
+    return $seen;
+}
+
+function ssr_publisher_links(array $b): string
+{
+    $seen = ssr_publishers($b);
+    if ($seen) {
+        $out = [];
+        foreach ($seen as $pid => $name) {
+            $out[] = '<a href="/?publisher=' . rawurlencode((string) $pid) . '">' . e($name) . '</a>';
+        }
+        return implode('、', $out);
+    }
+    return ($b['publisher'] ?? '') !== '' ? e($b['publisher']) : '';
+}
+
+function ssr_series(array $b): string
+{
+    $s = implode('、', array_map(static fn(array $x): string =>
+        $x['series_name'] . ($x['series_number'] ? ' #' . $x['series_number'] : ''), $b['series_list'] ?? []));
+    return $s !== '' ? $s : (string) ($b['series'] ?? '');
+}
+
+/** schema.org JSON-LD：Book＋BreadcrumbList。只放資料庫真的有的欄位，沒有就不寫（不猜）。 */
+function ssr_jsonld(array $b, string $url): string
+{
+    $people = static function (array $b, string $role, ?string $flat): array {
+        $names = array_column($b['contributors'][$role] ?? [], 'name');
+        if (!$names && $flat) {
+            $names = preg_split('/\s*[、，,／\/]\s*/u', $flat, -1, PREG_SPLIT_NO_EMPTY);
+        }
+        return array_map(static fn(string $n): array => ['@type' => 'Person', 'name' => $n], $names);
+    };
+    $book = ['@type' => 'Book', '@id' => $url . '#book', 'url' => $url, 'name' => $b['title']];
+    if (!empty($b['subtitle'])) { $book['alternativeHeadline'] = $b['subtitle']; }
+    if ($a = $people($b, 'author', $b['author'] ?? null)) { $book['author'] = $a; }
+    if ($t = $people($b, 'translator', $b['translator'] ?? null)) { $book['translator'] = $t; }
+    $pubs = array_values(ssr_publishers($b)) ?: (($b['publisher'] ?? '') !== '' ? [$b['publisher']] : []);
+    if ($pubs) { $book['publisher'] = ['@type' => 'Organization', 'name' => $pubs[0]]; }
+    if (!empty($b['publish_date'])) { $book['datePublished'] = $b['publish_date']; }
+    if ($isbn = ($b['isbn13'] ?: ($b['isbn10'] ?? ''))) { $book['isbn'] = $isbn; }
+    if (!empty($b['page_count'])) { $book['numberOfPages'] = (int) $b['page_count']; }
+    $bind = (string) ($b['binding'] ?? '');
+    if (str_contains($bind, '精')) { $book['bookFormat'] = 'https://schema.org/Hardcover'; }
+    elseif (str_contains($bind, '平')) { $book['bookFormat'] = 'https://schema.org/Paperback'; }
+    elseif (str_contains($bind, '電子')) { $book['bookFormat'] = 'https://schema.org/EBook'; }
+    $lang = (string) ($b['language'] ?? '');
+    $book['inLanguage'] = str_contains($lang, '簡') ? 'zh-Hans' : (str_contains($lang, '英') ? 'en' : 'zh-Hant');
+    if (!empty($b['cover_url'])) { $book['image'] = $b['cover_url']; }
+    $desc = trim((string) ($b['summary_short'] ?: ($b['summary'] ?? '')));
+    if ($desc !== '') { $book['description'] = mb_substr(preg_replace('/\s+/u', ' ', $desc), 0, 300, 'UTF-8'); }
+    if (!empty($b['category_name'])) { $book['genre'] = $b['category_name']; }
+
+    $crumbs = [['@type' => 'ListItem', 'position' => 1, 'name' => '書目', 'item' => 'https://books.zh.church/']];
+    if (!empty($b['category_name'])) {
+        $crumbs[] = ['@type' => 'ListItem', 'position' => 2, 'name' => $b['category_name'], 'item' => 'https://books.zh.church/?category=' . $b['category_id']];
+    }
+    $crumbs[] = ['@type' => 'ListItem', 'position' => count($crumbs) + 1, 'name' => $b['title'], 'item' => $url];
+
+    $graph = ['@context' => 'https://schema.org', '@graph' => [$book, ['@type' => 'BreadcrumbList', 'itemListElement' => $crumbs]]];
+    return json_encode($graph, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
 }
 
 $title = $book ? $book['title'] : '找不到此書';
@@ -150,6 +253,9 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
   h1{font-size:1.4rem}
 }
 </style>
+<?php if ($book): ?>
+<script type="application/ld+json"><?= ssr_jsonld($book, $ogUrl) ?></script>
+<?php endif; ?>
 </head>
 <body>
 <header>
@@ -159,6 +265,62 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
   </div>
 </header>
 
+<main id="main">
+<?php if ($book): $b = $book; ?>
+<nav class="crumb" id="crumb" aria-label="麵包屑"><a href="/">書目</a> › <?php if ($b['category_name']): ?><a href="/?category=<?= (int) $b['category_id'] ?>"><?= e($b['category_name']) ?></a> › <?php endif; ?><?= e($b['title']) ?></nav>
+<article class="wrap" id="wrap">
+  <div class="cover" id="cover"><?php if ($b['cover_url']): ?><img src="<?= e($b['cover_url']) ?>" alt="<?= e($b['title']) ?> 封面" onerror="this.outerHTML='<div class=ph><?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?></div>'"><?php else: ?><div class="ph"><?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?></div><?php endif; ?></div>
+  <div class="info">
+    <h1 class="serif" id="bTitle"><?= e($b['title']) ?></h1>
+    <div class="subtitle" id="bSubtitle"<?= $b['subtitle'] ? '' : ' hidden' ?>><?= e($b['subtitle']) ?></div>
+    <div class="original" id="bOriginal"<?= $b['original_title'] ? '' : ' hidden' ?>><?= e($b['original_title']) ?></div>
+    <dl class="meta" id="bMeta"><?=
+        ssr_contributor_rows($b)
+      . ssr_meta_row('出版社', ssr_publisher_links($b), true)
+      . ssr_meta_row('出版日期', $b['publish_date'])
+      . ssr_meta_row('系列', ssr_series($b))
+      . ssr_meta_row('頁數', $b['page_count'] !== null ? (string) $b['page_count'] : null)
+      . ssr_meta_row('裝訂', $b['binding'])
+      . ssr_meta_row('語言', $b['language'])
+      . ssr_meta_row('ISBN', implode('、', array_filter([$b['isbn13'], $b['isbn10']])))
+      . ssr_meta_row('版本說明', $b['edition_statement'])
+    ?></dl>
+    <div class="tagrow" id="bTags"><?php
+      if ($b['category_name']) { echo '<a class="tag" href="/?category=' . (int) $b['category_id'] . '">' . e($b['category_name']) . '</a>'; }
+      foreach ($b['subjects'] ?? [] as $su) { echo '<span class="tag">' . e($su['label'] ?: $su['code']) . '</span>'; }
+    ?></div>
+    <div class="btns" id="bBtns"><?php
+      foreach ($b['buy_links'] ?? [] as $l) {
+          $url = is_string($l) ? $l : (string) ($l['url'] ?? '');
+          if ($url === '' || !preg_match('#^https?://#i', $url)) { continue; }
+          $label = is_string($l) ? '購書連結' : ($l['label'] ?: (SSR_PLATFORM_NAMES[$l['platform'] ?? ''] ?? ($l['platform'] ?: '購書連結')));
+          $note = is_string($l) ? '' : (string) ($l['note'] ?? '');
+          echo '<a class="btn primary" href="' . e($url) . '"' . ($note !== '' ? ' title="' . e($note) . '"' : '') . ' target="_blank" rel="noopener nofollow">🛒 ' . e($label) . '</a>';
+      }
+    ?><button class="btn" id="copyBtn">🔗 複製本頁連結</button></div>
+  </div>
+</article>
+<section class="sec" id="secSummary"<?= $b['summary'] ? '' : ' hidden' ?>><h2 class="serif">內容簡介</h2><div class="body summary" id="bSummary"><?= e($b['summary']) ?></div></section>
+<?php
+  $linkItems = '';
+  foreach ($b['links'] ?? [] as $l) {
+      if (!preg_match('#^https?://#i', (string) $l['url'])) { continue; }
+      $linkItems .= '<li><a href="' . e($l['url']) . '" target="_blank" rel="noopener nofollow">' . e(SSR_PLATFORM_NAMES[$l['platform'] ?? ''] ?? ($l['platform'] ?: ($l['link_type'] ?: $l['url']))) . '</a>'
+                  . ($l['note'] ? '<span class="note">' . e($l['note']) . '</span>' : '') . '</li>';
+  }
+  $edItems = '';
+  foreach ($b['editions'] ?? [] as $ed) {
+      $bits = implode('・', array_map('e', array_filter([$ed['publisher_name'], $ed['publish_date'], $ed['edition_statement'], $ed['binding'], $ed['page_count'] ? $ed['page_count'] . ' 頁' : null])));
+      $ids = implode('、', array_map(static fn($i) => e($i['type']) . ' ' . e($i['value']), $ed['identifiers'] ?? []));
+      $fps = implode('、', array_map(static fn($f) => implode(' ', array_map('e', array_filter([$f['media_type'], $f['price'] !== null ? trim(($f['currency'] ?? '') . ' ' . $f['price']) : null]))), $ed['formats'] ?? []));
+      $edItems .= '<li>' . $bits . ($ids !== '' ? '<span class="note">' . $ids . '</span>' : '') . ($fps !== '' ? '<span class="note">' . $fps . '</span>' : '') . '</li>';
+  }
+?>
+<section class="sec" id="secLinks"<?= $linkItems !== '' ? '' : ' hidden' ?>><h2 class="serif">延伸連結</h2><div class="body"><ul class="linklist" id="bLinks"><?= $linkItems ?></ul></div></section>
+<section class="sec" id="secEditions"<?= $edItems !== '' ? '' : ' hidden' ?>><h2 class="serif">版本資訊</h2><div class="body"><ul class="linklist" id="bEditions"><?= $edItems ?></ul></div></section>
+<div class="msg" id="msg" hidden></div>
+<script type="application/json" id="bookData"><?= json_encode($b, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+<?php else: ?>
 <div class="crumb" id="crumb" hidden></div>
 <div class="wrap" id="wrap" hidden>
   <div class="cover" id="cover"></div>
@@ -174,7 +336,13 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <div class="sec" id="secSummary" hidden><h2 class="serif">內容簡介</h2><div class="body summary" id="bSummary"></div></div>
 <div class="sec" id="secLinks" hidden><h2 class="serif">延伸連結</h2><div class="body"><ul class="linklist" id="bLinks"></ul></div></div>
 <div class="sec" id="secEditions" hidden><h2 class="serif">版本資訊</h2><div class="body"><ul class="linklist" id="bEditions"></ul></div></div>
+<?php if ($dbError): ?>
 <div class="msg" id="msg" hidden></div>
+<?php else: ?>
+<div class="msg" id="msg" data-notfound="1"><div class="big">📖</div><h1 style="font-size:1rem;font-weight:400;margin:0">找不到這本書,可能已下架或網址有誤。</h1><p><a href="/">← 回書目瀏覽</a></p></div>
+<?php endif; ?>
+<?php endif; ?>
+</main>
 
 <footer><div class="ft">
   <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
@@ -303,13 +471,20 @@ function render(b){
 }
 
 async function main(){
-  if (!bookId){ return fail(); }
-  let r;
-  try { r = await fetch(API + "/books/" + bookId); } catch(_){ return fail(); }
-  if (!r.ok) return fail(r.status === 404);
-  const j = await r.json();
-  if (!j.data) return fail();
-  render(j.data);
+  // 伺服器已輸出內容並嵌入資料（#bookData）：直接用，不再打 API；伺服器已判定找不到（data-notfound）就不用再查
+  const embedded = $("bookData");
+  if (embedded){
+    render(JSON.parse(embedded.textContent));
+  } else {
+    if ($("msg").dataset.notfound) return;
+    if (!bookId){ return fail(); }
+    let r;
+    try { r = await fetch(API + "/books/" + bookId); } catch(_){ return fail(); }
+    if (!r.ok) return fail(r.status === 404);
+    const j = await r.json();
+    if (!j.data) return fail();
+    render(j.data);
+  }
 
   // 點閱遙測:僅站外直達/分享進入時記(站內卡片點擊已在清單頁記過)
   const ref = document.referrer;
