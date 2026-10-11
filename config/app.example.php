@@ -16,6 +16,15 @@ return [
     'api' => [
         'write_key' => 'X_API_KEY_FOR_WRITE_ENDPOINTS',
     ],
+    'admin' => [
+        // 後台 /admin/（app/lib/cf_access.php）：Cloudflare Access 保護，PHP 再驗 JWT。
+        // access_team：Zero Trust 團隊網域；access_aud：Access 應用程式的 Application Audience (AUD) Tag（可多個）。
+        // 任何一項沒填 → 後台一律 403（不放行）。certs_file 只給開發站測試用，正式站不要設。
+        'access_team'  => 'TEAM.cloudflareaccess.com',
+        'access_aud'   => ['ACCESS_APP_AUD_TAG'],
+        'email_domain' => 'ccnda.org',
+        'emails'       => [], // 空陣列＝整個網域都可以；要限定特定人就列 email
+    ],
     'r2' => [
         // Cloudflare R2(S3 相容)— 書籍封面儲存,公開網址 + 上傳憑證
         'access_key_id'     => 'R2_ACCESS_KEY_ID',

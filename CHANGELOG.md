@@ -23,7 +23,17 @@
   兩級都記在新表 `nonbook_guard_log`，每天把清單給熊哥確認；誤判就改回上架。
   規則只有一份：`tools/lib_nonbook.php`（新增 A 級詞前要先確認全站上架書命中 0 本）。
   `--all` 可做全站盤點（只列不動）；目前全站 A 級 0 本、B 級 84 本。
-- **migration `2026-10-11_nonbook_guard_log.sql`**：建 `nonbook_guard_log`（`UNIQUE(book_id, action)`，
+- **簡易後台 `/admin/`：非書籍審核（熊哥：「可以先做一個後台處理這些有問題的資訊」）。**
+  列出守門擋下（A 級）或標記（B 級）、還沒審的書：封面、作者、出版社、ISBN、頁數、分類、簡介，
+  以及**原始來源商品頁連結**；按「是書，放行」或「非書籍，下架」，誰在什麼時候審的都記在 `nonbook_guard_log`。
+  已審的可以在「已審」分頁改判。
+  - 登入：Cloudflare Access 保護 `/admin/`，只允許協會 Google 帳號（@ccnda.org）。
+    PHP 端（`app/lib/cf_access.php`）再驗一次 Access 的 JWT（簽章、iss、aud、到期、email 網域），
+    因為主機 IP 是公開的，不能只靠 Cloudflare 擋。沒設定 `config admin` 區塊時一律 403。
+  - 表單有 CSRF token 和 Origin 檢查；頁面不快取、不能被嵌入。
+- **`guard_nonbook.php --all --flag-only`**：全站命中的書都記成待審、一本都不下架。
+  上線時跑一次，讓既有的 84 本 B 級進後台（熊哥：「這一批先保留，有後台再處理」）。
+- **migration `2026-10-11_nonbook_guard_log.sql`**：建 `nonbook_guard_log`（`UNIQUE(book_id, action)`；`reviewed_at`／`reviewed_by` 給後台用，
   每日窗口重疊也不會重複記）。沒有這張表時守門 exit 1 且不下架。
 
 ## [1.16.0] - 2026-10-11 —— 版本更新紀錄頁、「關於本站」收錄來源改即時、下架非書籍 146 筆

@@ -15,6 +15,8 @@ declare(strict_types=1);
  *   php tools/guard_nonbook.php --apply                  # 實際下架 A 級並寫紀錄（daily_new.sh 用這個）
  *   php tools/guard_nonbook.php --since="2026-10-01"     # 指定起點
  *   php tools/guard_nonbook.php --all --out=/tmp/nb.tsv  # 全站上架書盤點（只列不動，--all 不接受 --apply）
+ *   php tools/guard_nonbook.php --all --flag-only        # 全站命中的書都記成 flagged、一本都不下架
+ *                                                        # （v1.16.1 上線時跑一次，讓既有的書進後台待審；熊哥 2026-10-11「這一批先保留，有後台再處理」）
  *
  * 為什麼是 26 小時：每日排程 06:30 跑、偶爾跑到 08:xx，留兩小時重疊避免漏掉邊界上的書；
  * 重疊的書不會重複下架（只改 is_published = 1 的），紀錄有 UNIQUE(book_id, action) 也不會重複寫。
@@ -23,9 +25,14 @@ declare(strict_types=1);
 require __DIR__ . '/../app/lib/db.php';
 require_once __DIR__ . '/lib_nonbook.php';
 
-$opt   = getopt('', ['apply', 'all', 'since::', 'out::']);
+$opt   = getopt('', ['apply', 'all', 'flag-only', 'since::', 'out::']);
 $apply = isset($opt['apply']);
 $all   = isset($opt['all']);
+$flagOnly = isset($opt['flag-only']);
+if ($flagOnly && $apply) {
+    fwrite(STDERR, "--flag-only 和 --apply 只能選一個\n");
+    exit(2);
+}
 if ($all && $apply) {
     fwrite(STDERR, "--all 只能盤點，不能和 --apply 一起用（全站下架要人看過清單再決定）\n");
     exit(2);
@@ -69,7 +76,7 @@ $hasLog = (bool) $pdo->query(
 )->fetchColumn();
 
 $hidden = 0;
-if ($apply) {
+if ($apply || $flagOnly) {
     if (!$hasLog) {
         fwrite(STDERR, "[非書籍守門] 找不到 nonbook_guard_log，先跑 migration 2026-10-11_nonbook_guard_log.sql；本次不下架\n");
         exit(1);
@@ -80,8 +87,9 @@ if ($apply) {
          VALUES (:id, :tier, :word, :action, :title, :src)'
     );
     foreach (['A' => 'hidden', 'B' => 'flagged'] as $tier => $action) {
+        $action = $flagOnly ? 'flagged' : $action;
         foreach ($hits[$tier] as $h) {
-            if ($tier === 'A') {
+            if ($tier === 'A' && !$flagOnly) {
                 $down->execute([':id' => $h['book_id']]);
                 $hidden += $down->rowCount();
             }
@@ -93,7 +101,7 @@ if ($apply) {
 
 $scope = $all ? '全站上架書' : '自 ' . $params[':since'] . ' 起新增的上架書';
 printf("非書籍守門（%s）：檢查 %d 本；A 級 %d 本%s；B 級 %d 本（只列不動）\n",
-    $scope, $checked, count($hits['A']), $apply ? "，實際下架 {$hidden} 本" : '（dry-run，沒有下架）', count($hits['B']));
+    $scope, $checked, count($hits['A']), $apply ? "，實際下架 {$hidden} 本" : ($flagOnly ? '（--flag-only：只記待審，沒有下架）' : '（dry-run，沒有下架）'), count($hits['B']));
 foreach (['A', 'B'] as $tier) {
     foreach ($hits[$tier] as $h) {
         printf("  [%s] %d　%s　（%s，詞：%s）\n", $tier, $h['book_id'], $h['title'], $h['source'] ?? '-', $h['word']);

@@ -13,6 +13,8 @@
 --           restored（熊哥確認是書，已改回上架）／confirmed（熊哥確認是非書籍）
 --   UNIQUE(book_id, action)：每日排程的 26 小時窗口會重疊，同一本書不會重複記同一個動作。
 --   title_snapshot：記下當時的書名，日後書名被改也查得到為什麼被擋。
+--   reviewed_at／reviewed_by：後台 /admin/ 審核時寫入（誰、什麼時候；email 來自 Cloudflare Access 登入）。
+--     hidden／flagged 那筆 reviewed_at 是 NULL ＝ 待審。
 --
 -- 冪等：CREATE TABLE IF NOT EXISTS；INSERT 用 ON DUPLICATE KEY UPDATE。
 -- 執行方式：熊哥 Navicat 對正式庫執行（小芯沒有正式庫寫入權限）。
@@ -27,10 +29,12 @@ CREATE TABLE IF NOT EXISTS `nonbook_guard_log` (
   `title_snapshot` VARCHAR(500) NULL,
   `source`         VARCHAR(30)  NULL,
   `created_at`     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `reviewed_at`    DATETIME     NULL COMMENT '熊哥確認的時間',
+  `reviewed_at`    DATETIME     NULL COMMENT '後台審核時間；hidden/flagged 為 NULL＝待審',
+  `reviewed_by`    VARCHAR(190) NULL COMMENT '審核人 email（Cloudflare Access）',
   PRIMARY KEY (`log_id`),
   UNIQUE KEY `uq_book_action` (`book_id`, `action`),
-  KEY `idx_created` (`created_at`)
+  KEY `idx_created` (`created_at`),
+  KEY `idx_review` (`action`, `reviewed_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='非書籍守門紀錄（guard_nonbook.php）';
 
