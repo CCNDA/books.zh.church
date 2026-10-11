@@ -24,7 +24,9 @@ require dirname(__DIR__, 2) . '/app/lib/release.php';
 header('Cache-Control: no-store');
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
-header('Referrer-Policy: no-referrer');
+// same-origin：連到出版社網站時不帶後台網址；同站送表單照常帶 Origin。
+// ★ 不能用 no-referrer：Chrome 會把表單的 Origin 送成 "null"，下面的 Origin 檢查就全部擋掉（2026-10-11 熊哥實測踩到）。
+header('Referrer-Policy: same-origin');
 header("Content-Security-Policy: default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
 
 const SOURCE_LABELS = ['campus' => '校園書房', 'logos' => '基道', 'elim' => '以琳書房', 'grace' => '天恩',
@@ -176,12 +178,16 @@ $https = ($_SERVER['HTTPS'] ?? '') === 'on' || str_contains((string) ($_SERVER['
 session_name('books_admin');
 session_set_cookie_params(['path' => '/admin/', 'secure' => $https, 'httponly' => true, 'samesite' => 'Strict']);
 session_start();
-if (($_SESSION['email'] ?? '') !== $me) {
+$newSession = ($_SESSION['email'] ?? '') !== $me;
+if ($newSession) {
     session_regenerate_id(true);
     $_SESSION = ['email' => $me, 'csrf' => bin2hex(random_bytes(32))];
 }
 
 $pdo = db();
+// 審核時間用台北時間寫入、顯示（主機資料庫是 UTC；熊哥 19:10 按的會顯示成 11:10）。
+// reviewed_at 只由後台寫，所以全部是 +08:00，keep_published_sql() 的先後比較不受影響。
+$pdo->exec("SET time_zone = '+08:00'");
 $hasLog = (bool) $pdo->query(
     "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'nonbook_guard_log'"
 )->fetchColumn();
@@ -195,6 +201,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
     if (!hash_equals((string) $_SESSION['csrf'], (string) ($_POST['csrf'] ?? ''))
         || ($origin !== '' && !in_array($origin, ["https://{$host}", "http://{$host}"], true))) {
+        error_log(sprintf('[admin] 表單檢查失敗：cookie=%s new_session=%s csrf_match=%s origin=%s host=%s xfh=%s',
+            isset($_COOKIE['books_admin']) ? 'y' : 'n', $newSession ? 'y' : 'n',
+            hash_equals((string) $_SESSION['csrf'], (string) ($_POST['csrf'] ?? '')) ? 'y' : 'n',
+            $origin, $host, (string) ($_SERVER['HTTP_X_FORWARDED_HOST'] ?? '-')));
         deny_page(400, '表單已過期，請回上一頁重新整理後再按一次');
     }
     $op = (string) ($_POST['op'] ?? 'decide');

@@ -21,10 +21,19 @@ declare(strict_types=1);
  */
 function cf_access_user(array $cfg, ?string &$why = null): ?array
 {
-    $team = (string) ($cfg['access_team'] ?? '');
-    $auds = array_values(array_filter((array) ($cfg['access_aud'] ?? []), 'is_string'));
+    // 信任的發行者：主要那組（access_team／access_aud／certs_file），加上 extra_trust 裡的。
+    // ★ extra_trust 只給開發站放「自簽測試金鑰」用，讓自動測試不用切換設定
+    //   （2026-10-11 測試時切換設定，剛好擋到熊哥正在用測試站）。正式站設定不要有 extra_trust。
+    $trust = [];
+    foreach (array_merge([$cfg], (array) ($cfg['extra_trust'] ?? [])) as $t) {
+        $tt = (string) ($t['access_team'] ?? '');
+        $ta = array_values(array_filter((array) ($t['access_aud'] ?? []), 'is_string'));
+        if ($tt !== '' && $ta !== []) {
+            $trust["https://{$tt}"] = ['team' => $tt, 'auds' => $ta, 'certs_file' => $t['certs_file'] ?? null];
+        }
+    }
     $domain = strtolower((string) ($cfg['email_domain'] ?? ''));
-    if ($team === '' || $auds === [] || $domain === '') {
+    if (!isset($trust['https://' . ($cfg['access_team'] ?? '')]) || $domain === '') {
         $why = '後台登入尚未設定（config admin.access_team／access_aud／email_domain）';
         return null;
     }
@@ -45,7 +54,13 @@ function cf_access_user(array $cfg, ?string &$why = null): ?array
         return null;
     }
 
-    $pem = cf_access_cert($team, $header['kid'], $cfg['certs_file'] ?? null);
+    // 先依 iss 挑出要用哪一組驗（還沒驗簽章，所以 iss 只拿來選，不代表可信）；不在信任清單直接拒絕
+    $t = $trust[(string) ($claims['iss'] ?? '')] ?? null;
+    if ($t === null) {
+        $why = '登入憑證不是這個團隊發的';
+        return null;
+    }
+    $pem = cf_access_cert($t['team'], $header['kid'], $t['certs_file']);
     if ($pem === null || openssl_verify("{$h64}.{$p64}", $sig, $pem, OPENSSL_ALGO_SHA256) !== 1) {
         $why = '登入憑證簽章不對';
         return null;
@@ -53,11 +68,7 @@ function cf_access_user(array $cfg, ?string &$why = null): ?array
 
     $now = time();
     $tokenAud = (array) ($claims['aud'] ?? []);
-    if (($claims['iss'] ?? '') !== "https://{$team}") {
-        $why = '登入憑證不是這個團隊發的';
-        return null;
-    }
-    if (array_intersect($auds, $tokenAud) === []) {
+    if (array_intersect($t['auds'], $tokenAud) === []) {
         $why = '登入憑證不是給這個應用程式的';
         error_log('[admin] Cloudflare Access aud 不符，收到：' . implode(',', array_map('strval', $tokenAud)));
         return null;

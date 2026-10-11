@@ -43,6 +43,12 @@
   對映到非書分類就下架 —— 後台恢復的書隔天早上又會被下架；`guard_nonbook.php` 的 26 小時窗口也一樣。
   現在這 17 處下架都接上 `keep_published_sql()`：最後一次後台判定是「上架」的書一律跳過；之後在後台又按「下架」就不再保護。
   ★ 以後新增會下架書的工具，UPDATE 一定要接 `keep_published_sql()`。
+- **後台按「下架」出現「表單已過期」**（熊哥在測試站實測踩到）：原本設 `Referrer-Policy: no-referrer`，
+  Chrome 會把表單的 Origin 送成 `null`，被後台自己的 Origin 檢查擋掉。改成 `same-origin`
+  （連到出版社網站仍不帶後台網址）。表單檢查失敗時會記一行原因到 error log（不含 token）。
+- 後台審核時間改用台北時間（主機資料庫是 UTC，19:10 按的原本顯示成 11:10）。
+- `cf_access.php` 支援 `extra_trust`（只給開發站放自簽測試金鑰），自動測試不用再切換設定
+  —— 之前測試時切換設定，剛好擋到熊哥正在用測試站（「登入憑證簽章不對」）。正式站設定不要有 `extra_trust`。
   - 登入：Cloudflare Access 保護 `/admin/`，只允許協會 Google 帳號（@ccnda.org）。
     PHP 端（`app/lib/cf_access.php`）再驗一次 Access 的 JWT（簽章、iss、aud、到期、email 網域），
     因為主機 IP 是公開的，不能只靠 Cloudflare 擋。沒設定 `config admin` 區塊時一律 403。
