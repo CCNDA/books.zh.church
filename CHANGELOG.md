@@ -13,6 +13,8 @@
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-10-11 —— 非書籍守門、簡易後台（審核／上下架）、Google Analytics
+
 ### 新增
 
 - **非書籍守門 `tools/guard_nonbook.php`，排進每日新品（`crawler/daily_new.sh`）。**
@@ -20,45 +22,49 @@
   現在每日新品匯入後，檢查最近 26 小時新增的上架書：
   - A 級詞（上架書命中 0 本，例：播放器、馬克杯、手環、鋯石）→ 先下架（`is_published = 0`，不刪資料）
   - B 級詞（真的書名也會出現，例：貼紙、筆記本、項鍊、禮盒）→ 不動，只標記
-  兩級都記在新表 `nonbook_guard_log`，每天把清單給熊哥確認；誤判就改回上架。
-  規則只有一份：`tools/lib_nonbook.php`（新增 A 級詞前要先確認全站上架書命中 0 本）。
-  `--all` 可做全站盤點（只列不動）；目前全站 A 級 0 本、B 級 84 本。
-- **簡易後台 `/admin/`：非書籍審核（熊哥：「可以先做一個後台處理這些有問題的資訊」）。**
-  列出守門擋下（A 級）或標記（B 級）、還沒審的書：封面、作者、出版社、ISBN、頁數、分類、簡介，
-  以及**原始來源商品頁連結**；按「是書，放行」或「非書籍，下架」，誰在什麼時候審的都記在 `nonbook_guard_log`。
-  已審的可以在「已審」分頁改判。
+  兩級都記在新表 `nonbook_guard_log`，在後台審核。規則只有一份：`tools/lib_nonbook.php`
+  （新增 A 級詞前要先確認全站上架書命中 0 本；「十字架」試過放 B 級，命中 103 本幾乎都是神學書，所以不用）。
+  - `--all`：全站盤點（只列不動）；`--all --flag-only`：全站命中的書都記成待審、一本都不下架
+    （上線時跑一次，讓既有的 84 本 B 級進後台；熊哥：「這一批先保留，有後台再處理」）。
+- **簡易後台 `/admin/`**（熊哥：「可以先做一個後台處理這些有問題的資訊」）。
+  - **登入**：Cloudflare Access 保護 `/admin`、`/admin/*`，只允許協會 Google 帳號（@ccnda.org，不開一次性密碼）。
+    PHP 端（`app/lib/cf_access.php`）再驗一次 Access 的 JWT（簽章、iss、aud、到期、email 網域），
+    因為主機 IP 是公開的，不能只靠 Cloudflare 擋。沒設定 `config` 的 `admin` 區塊時一律 403。
+  - **待審／已審**：守門擋下（A 級）或標記（B 級）的書，顯示封面、作者、出版社、ISBN、頁數、分類、簡介，
+    以及**原始來源商品頁連結**（熊哥：「需要能看比較完整的資訊和連結到原始來源確認」）；按「上架」或「下架」，
+    誰、什麼時候審的都記在 `nonbook_guard_log`；已審的可以改判。
   - **依編號下架**（熊哥：「有些是一般商務書籍，也需要下架」「一些系列套組不是單本書或是合併本，也需要下架」）：
     貼編號或書目頁網址（一次最多 50 本）→ 先預覽完整書目 → 再按確認才下架。
-    原因可選：一般書籍（非屬靈）／套組／合輯（非單本）／非書籍／其他；紀錄的 tier 記 `M`，在「已審」一樣可以放行回來。
-    網址只取 `/book/` 後面的數字（不然 `books.ps194.net` 的 194 會被當成編號）。
-  - 版型和前台一致（熊哥：「前後台我希望能有相同的版型能一致」）：同一組色票、標頭雙金線、logo、footer 版號。
-  - **「已下架」分頁**（熊哥：「已下架的也要能有位置可以讓他上架，怕誤下架的時候可以恢復」）：
-    列出所有下架中的書（10,967 本，大多是每日分類對映自動下架的禮品、CD、文具），可用編號或書名搜尋，按「上架」恢復。
-  - 按鈕用詞只用「上架／下架」（熊哥：「要注意用詞避免誤會」）。
+    原因：一般書籍（非屬靈）／套組／合輯（非單本）／非書籍／其他；紀錄 tier 記 `M`。
+  - **已下架**（熊哥：「已下架的也要能有位置可以讓他上架，怕誤下架的時候可以恢復」）：
+    所有下架中的書（約 1 萬本，大多是每日分類對映自動下架的禮品、CD、文具），可用編號或書名搜尋，按「上架」恢復。
+  - 按鈕用詞只用「上架／下架」（熊哥：「要注意用詞避免誤會」）；版型和前台一致（熊哥：「前後台我希望能有相同的版型」）。
+  - 表單有 CSRF token 和 Origin 檢查；頁面不快取、不能被嵌入；審核時間用台北時間。
+- **Google Analytics（GA4 `G-58CPNJ5D6F`）**（熊哥：「這個網站還沒有上GA」）：
+  前台 4 頁（首頁、關於本站、書目頁、版本更新紀錄）在 `<head>` 最前面加 gtag.js；後台不裝。
+- **migration `2026-10-11_nonbook_guard_log.sql`**：建 `nonbook_guard_log`（`UNIQUE(book_id, action)`；
+  `reviewed_at`／`reviewed_by` 給後台用）。沒有這張表時守門 exit 1 且不下架。
 
 ### 修正
 
 - **後台按「上架」的書，每日程式不會再把它下架**（`app/lib/publish_lock.php`）。
-  原本每日新品會重跑 16 支分類工具（`apply_*_categories.php`、`classify_categories.php`），每天對全部書重新判斷，
+  每日新品會重跑 16 支分類工具（`apply_*_categories.php`、`classify_categories.php`），每天對全部書重新判斷，
   對映到非書分類就下架 —— 後台恢復的書隔天早上又會被下架；`guard_nonbook.php` 的 26 小時窗口也一樣。
-  現在這 17 處下架都接上 `keep_published_sql()`：最後一次後台判定是「上架」的書一律跳過；之後在後台又按「下架」就不再保護。
-  ★ 以後新增會下架書的工具，UPDATE 一定要接 `keep_published_sql()`。
-- **後台按「下架」出現「表單已過期」**（熊哥在測試站實測踩到）：原本設 `Referrer-Policy: no-referrer`，
-  Chrome 會把表單的 Origin 送成 `null`，被後台自己的 Origin 檢查擋掉。改成 `same-origin`
-  （連到出版社網站仍不帶後台網址）。表單檢查失敗時會記一行原因到 error log（不含 token）。
-- 後台審核時間改用台北時間（主機資料庫是 UTC，19:10 按的原本顯示成 11:10）。
-- `cf_access.php` 支援 `extra_trust`（只給開發站放自簽測試金鑰），自動測試不用再切換設定
-  —— 之前測試時切換設定，剛好擋到熊哥正在用測試站（「登入憑證簽章不對」）。正式站設定不要有 `extra_trust`。
-  - 登入：Cloudflare Access 保護 `/admin/`，只允許協會 Google 帳號（@ccnda.org）。
-    PHP 端（`app/lib/cf_access.php`）再驗一次 Access 的 JWT（簽章、iss、aud、到期、email 網域），
-    因為主機 IP 是公開的，不能只靠 Cloudflare 擋。沒設定 `config admin` 區塊時一律 403。
-  - 表單有 CSRF token 和 Origin 檢查；頁面不快取、不能被嵌入。
-- **`guard_nonbook.php --all --flag-only`**：全站命中的書都記成待審、一本都不下架。
-  上線時跑一次，讓既有的 84 本 B 級進後台（熊哥：「這一批先保留，有後台再處理」）。
-- **Google Analytics（GA4 `G-58CPNJ5D6F`）**（熊哥：「這個網站還沒有上GA」）：
-  前台 4 頁（首頁、關於本站、書目頁、版本更新紀錄）在 `<head>` 最前面加 gtag.js；後台 `/admin/` 不裝。
-- **migration `2026-10-11_nonbook_guard_log.sql`**：建 `nonbook_guard_log`（`UNIQUE(book_id, action)`；`reviewed_at`／`reviewed_by` 給後台用，
-  每日窗口重疊也不會重複記）。沒有這張表時守門 exit 1 且不下架。
+  現在這 17 處下架都接上 `keep_published_sql()`：最後一次後台判定是「上架」的書一律跳過；之後又按「下架」就不再保護。
+  紀錄表不存在時回空字串（舊流程照常）。★ 以後新增會下架書的工具，UPDATE 一定要接 `keep_published_sql()`。
+- 後台在測試站實測踩到的兩個問題（上線前已修）：
+  - 按「下架」出現「表單已過期」：`Referrer-Policy: no-referrer` 讓 Chrome 把表單 Origin 送成 `null`，
+    被 Origin 檢查擋掉 → 改 `same-origin`。表單檢查失敗時記一行原因到 error log（不含 token）。
+  - 「登入憑證簽章不對」：小芯的自動測試切換了測試站設定。`cf_access.php` 改成依 iss 選信任設定，
+    支援 `extra_trust`（只給開發站放自簽測試金鑰），測試不再切換設定。**正式站設定不要有 `extra_trust`。**
+
+### 發布注意（熊哥在主機上做）
+
+1. Navicat 對正式庫執行 `database/migrations/2026-10-11_nonbook_guard_log.sql`
+2. `config/app.local.php` 加 `admin` 區塊（範例見 `config/app.example.php`；正式站 AUD 見 release-notes 或 Asana 1219387164843657）
+3. `./deploy/deploy.sh`
+4. `php tools/guard_nonbook.php --all --flag-only`（既有 84 本進後台待審，不下架）
+5. `php tools/notify_discord.php --dry-run` → 確認後去掉 `--dry-run` 送出
 
 ## [1.16.0] - 2026-10-11 —— 版本更新紀錄頁、「關於本站」收錄來源改即時、下架非書籍 146 筆
 
