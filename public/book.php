@@ -119,7 +119,9 @@ function ssr_jsonld(array $b, string $url): string
     elseif (str_contains($bind, '平')) { $book['bookFormat'] = 'https://schema.org/Paperback'; }
     elseif (str_contains($bind, '電子')) { $book['bookFormat'] = 'https://schema.org/EBook'; }
     $lang = (string) ($b['language'] ?? '');
-    $book['inLanguage'] = str_contains($lang, '簡') ? 'zh-Hans' : (str_contains($lang, '英') ? 'en' : 'zh-Hant');
+    if ($lang !== '') {
+        $book['inLanguage'] = str_contains($lang, '簡') ? 'zh-Hans' : (str_contains($lang, '英') ? 'en' : 'zh-Hant');
+    }
     if (!empty($b['cover_url'])) { $book['image'] = $b['cover_url']; }
     $desc = trim((string) ($b['summary_short'] ?: ($b['summary'] ?? '')));
     if ($desc !== '') { $book['description'] = mb_substr(preg_replace('/\s+/u', ' ', $desc), 0, 300, 'UTF-8'); }
@@ -132,7 +134,7 @@ function ssr_jsonld(array $b, string $url): string
     $crumbs[] = ['@type' => 'ListItem', 'position' => count($crumbs) + 1, 'name' => $b['title'], 'item' => $url];
 
     $graph = ['@context' => 'https://schema.org', '@graph' => [$book, ['@type' => 'BreadcrumbList', 'itemListElement' => $crumbs]]];
-    return json_encode($graph, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP);
+    return json_encode($graph, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE) ?: '';
 }
 
 $title = $book ? $book['title'] : '找不到此書';
@@ -260,7 +262,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 :focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 <?php if ($book): ?>
-<script type="application/ld+json"><?= ssr_jsonld($book, $ogUrl) ?></script>
+<?php if (($ld = ssr_jsonld($book, $ogUrl)) !== ''): ?><script type="application/ld+json"><?= $ld ?></script><?php endif; ?>
 <?php endif; ?>
 </head>
 <body>
@@ -276,7 +278,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <?php if ($book): $b = $book; ?>
 <nav class="crumb" id="crumb" aria-label="麵包屑"><a href="/">書目</a> › <?php if ($b['category_name']): ?><a href="/?category=<?= (int) $b['category_id'] ?>"><?= e($b['category_name']) ?></a> › <?php endif; ?><?= e($b['title']) ?></nav>
 <article class="wrap" id="wrap">
-  <div class="cover" id="cover"><?php if ($b['cover_url']): ?><img src="<?= e($b['cover_url']) ?>" alt="<?= e($b['title']) ?> 封面" onerror="this.outerHTML='<div class=ph><?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?></div>'"><?php else: ?><div class="ph"><?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?></div><?php endif; ?></div>
+  <div class="cover" id="cover"><?php if ($b['cover_url']): ?><img src="<?= e($b['cover_url']) ?>" alt="<?= e($b['title']) ?> 封面" data-ph="<?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?>" onerror="var d=document.createElement('div');d.className='ph';d.textContent=this.dataset.ph;this.replaceWith(d)"><?php else: ?><div class="ph"><?= e(mb_substr($b['title'], 0, 1, 'UTF-8')) ?></div><?php endif; ?></div>
   <div class="info">
     <h1 class="serif" id="bTitle"><?= e($b['title']) ?></h1>
     <div class="subtitle" id="bSubtitle"<?= $b['subtitle'] ? '' : ' hidden' ?>><?= e($b['subtitle']) ?></div>
@@ -326,7 +328,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 <section class="sec" id="secLinks"<?= $linkItems !== '' ? '' : ' hidden' ?>><h2 class="serif">延伸連結</h2><div class="body"><ul class="linklist" id="bLinks"><?= $linkItems ?></ul></div></section>
 <section class="sec" id="secEditions"<?= $edItems !== '' ? '' : ' hidden' ?>><h2 class="serif">版本資訊</h2><div class="body"><ul class="linklist" id="bEditions"><?= $edItems ?></ul></div></section>
 <div class="msg" id="msg" hidden></div>
-<script type="application/json" id="bookData"><?= json_encode($b, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) ?></script>
+<script type="application/json" id="bookData"><?= json_encode($b, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_INVALID_UTF8_SUBSTITUTE) ?: 'null' ?></script>
 <?php elseif ($dbError): ?>
 <?php /* DB 異常：留空殼給前端重試打 API（找不到書時不輸出空殼，頁面只留一個 h1） */ ?>
 <div class="crumb" id="crumb" hidden></div>
@@ -412,7 +414,7 @@ function render(b){
 
   $("cover").innerHTML = b.cover_url
     ? `<img src="${esc(b.cover_url)}" alt="${esc(b.title)} 封面"
-        onerror="this.outerHTML='<div class=ph>${esc(b.title.charAt(0))}</div>'">`
+        data-ph="${esc(b.title.charAt(0))}" onerror="var d=document.createElement('div');d.className='ph';d.textContent=this.dataset.ph;this.replaceWith(d)">`
     : `<div class="ph">${esc(b.title.charAt(0))}</div>`;
 
   $("bTitle").textContent = b.title;
@@ -479,8 +481,9 @@ function render(b){
 async function main(){
   // 伺服器已輸出內容並嵌入資料（#bookData）：直接用，不再打 API；伺服器已判定找不到（data-notfound）就不用再查
   const embedded = $("bookData");
-  if (embedded){
-    render(JSON.parse(embedded.textContent));
+  const data = embedded ? JSON.parse(embedded.textContent) : null;
+  if (data){
+    render(data);
   } else {
     if ($("msg").dataset.notfound) return;
     if (!bookId){ return fail(); }

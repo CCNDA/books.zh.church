@@ -23,7 +23,7 @@ require dirname(__DIR__, 2) . '/app/lib/book_detail.php';
  * links.platform / books.buy_links[].platform,未列入者以 platform 原值當顯示名)
  */
 // BUY_PLATFORM_LABELS 已搬到 app/lib/book_detail.php（書目頁伺服器輸出也要用）
-// 「關於本站」收錄來源的地區（GET /api/sources 用）。名稱沿用上面的 BUY_PLATFORM_LABELS，
+// 「關於本站」收錄來源的地區（GET /api/sources 用）。名稱沿用 BUY_PLATFORM_LABELS（在 app/lib/book_detail.php），
 // 官網網域直接從 editions.source_url 取，不另外維護網址。
 // ★ 新來源忘了登記在這裡也不會被漏掉：API 一律列出資料庫裡有上架書的來源，沒登記的地區顯示「其他」。
 //   （2026-10-11 起改即時；原本 about.html 寫死清單，v1.11～v1.15 新增的天道、突破、浸信會、麥種都沒補上。）

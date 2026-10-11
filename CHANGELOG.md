@@ -25,12 +25,13 @@
   - 資料庫異常回 503（不再回 404，避免搜尋引擎把書目頁移出索引）。
 - **書目頁 JSON-LD**：schema.org `Book`（作者、譯者、出版社、出版日、ISBN、頁數、裝訂、語言、封面、簡介、分類）＋ `BreadcrumbList`；
   只放資料庫真的有的欄位。
+- 書目頁封面載入失敗的替代字改由 `data-ph` 帶入（原本把 HTML escape 的字串塞進 onerror 的 JS 字串，書名首字是單引號時會出錯）；沒有語言資料的書不輸出 `inLanguage`。
 - 書目頁內容包進 `<main>`，麵包屑改 `<nav aria-label="麵包屑">`（無障礙）。
 - **sitemap**：`tools/build_sitemap.php` 產生 `public/sitemap.xml`（索引）＋ `public/sitemaps/pages.xml`、`books-N.xml`
   （只列上架書，每檔最多 45,000 筆），排進每日新品最後一步（`crawler/daily_new.sh`）。產出檔不進版控。
   書目頁刻意不寫 `<lastmod>`：`books.updated_at` 每天會被分類工具碰到，不代表內容有改。
 - **robots.txt**：`Content-Signal: search=yes, ai-input=yes, ai-train=yes`（熊哥：AI 訓練「要」開放）；
-  擋 `/admin/`、`/api/`（爬蟲請看書目頁）；指向 sitemap。
+  擋 `/admin/`（`/api/` 不擋，llms.txt 有介紹開放 API）；指向 sitemap。
 - **llms.txt**：給 AI 看的網站說明（收錄範圍、主要頁面、開放 API、引用方式）。
 - 每頁只留一個 `<h1>`：關於本站、書目頁、版本更新紀錄的標頭站名改成 `<div>`（樣式補 `font-weight:700;line-height:normal`，外觀不變）；
   首頁的站名就是主標題，維持 `<h1>`。找不到書的頁面不再輸出給前端用的空殼。

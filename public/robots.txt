@@ -1,11 +1,10 @@
 # 屬靈共同書目 books.zh.church
 # 熊哥 2026-10-11：搜尋、AI 引用回答、AI 訓練都開放（Content-Signal 見 https://contentsignals.org/）
-# /admin/ 是內部後台；/api/ 是開放 API（給程式用），爬蟲請改看 /book/{id} 書目頁，避免重複內容與吃掉搜尋 API 的資源
+# /admin/ 是內部後台。/api/ 是開放 API（llms.txt 有介紹），不擋。
 
 User-agent: *
 Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 Disallow: /admin/
-Disallow: /api/
 
 Sitemap: https://books.zh.church/sitemap.xml

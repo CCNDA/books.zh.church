@@ -26,7 +26,13 @@ $dry = in_array('--dry-run', $argv, true);
 $pub = dirname(__DIR__) . '/public';
 $dir = $pub . '/sitemaps';
 
-$ids = db()->query('SELECT book_id FROM books WHERE is_published = 1 ORDER BY book_id')->fetchAll(PDO::FETCH_COLUMN);
+// 和書目頁（app/lib/book_detail.php）同一個條件：books JOIN v_book_list 且上架，才不會列出 404 的頁
+$ids = db()->query('SELECT b.book_id FROM books b JOIN v_book_list v ON v.book_id = b.book_id
+                     WHERE b.is_published = 1 ORDER BY b.book_id')->fetchAll(PDO::FETCH_COLUMN);
+if (!$ids) {
+    fwrite(STDERR, "查到 0 本上架書（資料庫異常？）—— 中止，不動既有的 sitemap\n");
+    exit(1);
+}
 $static = ['/', '/about.html', '/changelog.php'];
 $chunks = array_chunk($ids, SITEMAP_MAX);
 
