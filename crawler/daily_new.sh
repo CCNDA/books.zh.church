@@ -221,5 +221,19 @@ else
   log "[警告] 找不到 $NBGUARD,略過非書籍守門"
 fi
 
+# ── sitemap：上架書有增減就重產（tools/build_sitemap.php；Asana 1219388780554980）──
+# 放在最後：前面的守門、後台保護都跑完，上架狀態才是今天的最終結果。產出檔不進版控。
+SITEMAP="$ROOT/tools/build_sitemap.php"
+if [ -f "$SITEMAP" ]; then
+  log "--- sitemap ---"
+  if php "$SITEMAP" >>"$LOG" 2>&1; then
+    log "sitemap 更新完成"
+  else
+    log "[錯誤] sitemap 更新失敗(搜尋引擎會讀到舊的 sitemap,可手動重跑 php tools/build_sitemap.php)"
+  fi
+else
+  log "[警告] 找不到 $SITEMAP,略過 sitemap"
+fi
+
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。

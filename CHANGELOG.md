@@ -26,6 +26,12 @@
 - **書目頁 JSON-LD**：schema.org `Book`（作者、譯者、出版社、出版日、ISBN、頁數、裝訂、語言、封面、簡介、分類）＋ `BreadcrumbList`；
   只放資料庫真的有的欄位。
 - 書目頁內容包進 `<main>`，麵包屑改 `<nav aria-label="麵包屑">`（無障礙）。
+- **sitemap**：`tools/build_sitemap.php` 產生 `public/sitemap.xml`（索引）＋ `public/sitemaps/pages.xml`、`books-N.xml`
+  （只列上架書，每檔最多 45,000 筆），排進每日新品最後一步（`crawler/daily_new.sh`）。產出檔不進版控。
+  書目頁刻意不寫 `<lastmod>`：`books.updated_at` 每天會被分類工具碰到，不代表內容有改。
+- **robots.txt**：`Content-Signal: search=yes, ai-input=yes, ai-train=yes`（熊哥：AI 訓練「要」開放）；
+  擋 `/admin/`、`/api/`（爬蟲請看書目頁）；指向 sitemap。
+- **llms.txt**：給 AI 看的網站說明（收錄範圍、主要頁面、開放 API、引用方式）。
 
 
 ## [1.17.0] - 2026-10-11 —— 非書籍守門、簡易後台（審核／上下架）、Google Analytics

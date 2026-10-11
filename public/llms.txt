@@ -1,0 +1,28 @@
+# 屬靈共同書目
+
+> 華人基督教書籍的共同書目：收錄台灣、香港、馬來西亞、美國等地十多家基督教出版社與網路書房的書目資料（目前上架五萬多本），提供搜尋、分類瀏覽，並連到各書房的購書頁面。由中華基督教網路發展協會（CCNDA）建置維護。
+
+本站只收錄書籍（不收錄禮品、文具等周邊商品），書目資料來自各出版社與書房的公開網頁，購書請到各書房網站。
+
+## 主要頁面
+
+- [書目瀏覽與搜尋](https://books.zh.church/)：依書名、作者、出版社、分類查找
+- [單本書目頁](https://books.zh.church/book/38080)：網址格式為 `https://books.zh.church/book/{id}`，有書名、作者、出版社、出版日期、ISBN、內容簡介、購書連結，並附 schema.org Book 結構化資料
+- [關於本站](https://books.zh.church/about.html)：收錄的出版社與書房清單（即時更新）
+- [版本更新紀錄](https://books.zh.church/changelog.php)
+- [網站地圖](https://books.zh.church/sitemap.xml)：所有上架書目頁
+
+## 開放 API（JSON）
+
+- `GET https://books.zh.church/api/books?q={關鍵字}`：搜尋書目
+- `GET https://books.zh.church/api/books/{id}`：單本書目完整資料
+- `GET https://books.zh.church/api/categories`：分類清單
+- `GET https://books.zh.church/api/sources`：收錄的出版社／書房與各自的書目數量
+
+## 引用
+
+引用本站書目資料時，請註明出處「屬靈共同書目（books.zh.church）」，並以各出版社公布的資訊為準。
+
+## 聯絡
+
+中華基督教網路發展協會 CCNDA：https://www.ccnda.org
