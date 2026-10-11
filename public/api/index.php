@@ -35,6 +35,22 @@ const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 Book
                              'akow' => '麥種傳道會',        // 美國,v1.13.0
                              'bappress' => '浸信會出版社',  // 香港,v1.15.0
                              'rockhouse' => '海天書樓'];    // 香港,v1.16.0(先登錄備用)
+// 「關於本站」收錄來源的地區（GET /api/sources 用）。名稱沿用上面的 BUY_PLATFORM_LABELS，
+// 官網網域直接從 editions.source_url 取，不另外維護網址。
+// ★ 新來源忘了登記在這裡也不會被漏掉：API 一律列出資料庫裡有上架書的來源，沒登記的地區顯示「其他」。
+//   （2026-10-11 起改即時；原本 about.html 寫死清單，v1.11～v1.15 新增的天道、突破、浸信會、麥種都沒補上。）
+const SOURCE_REGIONS = ['campus' => '台灣', 'elim' => '台灣', 'grace' => '台灣', 'osb' => '台灣',
+                        'taosheng' => '台灣', 'cclm' => '台灣', 'cosmiccare' => '台灣', 'mezu' => '台灣',
+                        'twgbr' => '台灣', 'pctpress' => '台灣',
+                        'logos' => '香港', 'tiendao' => '香港', 'btproduct' => '香港', 'bappress' => '香港',
+                        'rockhouse' => '香港',
+                        'methodist' => '馬來西亞', 'akow' => '美國', 'wdbook' => '電子書'];
+// BUY_PLATFORM_LABELS 沒登記的來源，在「關於本站」用的名稱。只影響 /api/sources，不動購書連結的標籤。
+// ★ btproduct（突破機構）不在 BUY_PLATFORM_LABELS：2026-10-11 抽查一本突破的書（38599），購書連結裡也沒有突破，
+//   兩者是否相關留待除錯階段查，這裡先不改 BUY_PLATFORM_LABELS。
+const SOURCE_NAME_OVERRIDES = ['btproduct' => '突破機構'];
+const SOURCE_REGION_ORDER = ['台灣' => 1, '香港' => 2, '馬來西亞' => 3, '美國' => 4, '電子書' => 5, '其他' => 9];
+
 // 排序鍵同時涵蓋代碼與中文名(歷史資料 links.platform/buy_links 存的是中文名)
 const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
                              'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5,
@@ -79,6 +95,9 @@ try {
     if ($method === 'GET' && $path === '/version') {
         json_data(['version' => app_version()]);
     }
+    if ($method === 'GET' && $path === '/sources') {
+        get_sources();
+    }
     if ($method === 'GET' && $path === '/categories') {
         get_categories();
     }
@@ -107,6 +126,41 @@ try {
 } catch (PDOException $e) {
     error_log('[api] DB error: ' . $e->getMessage());
     json_error('資料庫錯誤', 500);
+}
+
+/**
+ * GET /api/sources —— 收錄來源（「關於本站」用）：每個來源的名稱、地區、官網、上架書數。
+ * 書數以 editions.source 計，同一本書被兩站收錄會各算一次（看的是「這家收了幾本」）；
+ * total 是全站上架書數（不重複）。2026-10-11 cora-lab 實測查詢 0.16 秒。
+ */
+function get_sources(): never
+{
+    $rows = db()->query(
+        "SELECT e.source,
+                COUNT(DISTINCT e.book_id) AS book_count,
+                MIN(SUBSTRING_INDEX(SUBSTRING_INDEX(e.source_url, '/', 3), '/', -1)) AS host
+           FROM editions e
+           JOIN books b ON b.book_id = e.book_id AND b.is_published = 1
+          WHERE e.source IS NOT NULL AND e.source <> ''
+          GROUP BY e.source"
+    )->fetchAll();
+    $items = [];
+    foreach ($rows as $r) {
+        $code   = (string) $r['source'];
+        $region = SOURCE_REGIONS[$code] ?? '其他';
+        $host   = (string) ($r['host'] ?? '');
+        $items[] = [
+            'code'       => $code,
+            'name'       => SOURCE_NAME_OVERRIDES[$code] ?? BUY_PLATFORM_LABELS[$code] ?? $code,
+            'region'     => $region,
+            'url'        => preg_match('/^[a-z0-9.-]+$/i', $host) ? 'https://' . $host : null,
+            'book_count' => (int) $r['book_count'],
+        ];
+    }
+    usort($items, static fn(array $a, array $b): int =>
+        [SOURCE_REGION_ORDER[$a['region']] ?? 9, -$a['book_count']] <=> [SOURCE_REGION_ORDER[$b['region']] ?? 9, -$b['book_count']]);
+    $total = (int) db()->query('SELECT COUNT(*) FROM books WHERE is_published = 1')->fetchColumn();
+    json_data(['total' => $total, 'sources' => $items]);
 }
 
 function get_categories(): never

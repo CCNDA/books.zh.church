@@ -57,6 +57,9 @@ p{margin:0 0 14px}
 .src-links{display:flex;flex-wrap:wrap;gap:10px}
 .src-links a{display:inline-block;background:var(--card);border:1px solid var(--line);
   border-radius:999px;padding:5px 16px;font-size:.92rem;color:var(--gold)}
+.src-n{color:var(--ink-soft);font-size:.8rem;margin-left:4px;font-variant-numeric:tabular-nums}
+.src-nolink{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:5px 16px;font-size:.92rem}
+.src-total{color:var(--ink-soft);font-size:.92rem;margin:6px 0 0}
 .src-links a:hover{border-color:var(--gold);background:#eaf4f9}
 footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 .ft{max-width:860px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
@@ -84,7 +87,9 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   <h2 class="serif">資料來源</h2>
   <p>書目資料彙整自各基督教出版社與網路書房的公開資訊,並由同工與網友持續補充校對。若您發現資料有誤、或希望收錄某本書,歡迎與我們聯繫。</p>
   <p>目前收錄的網路書房與出版社:</p>
-  <div class="sources">
+  <p id="srcTotal" class="src-total"></p>
+  <div class="sources" id="sources">
+    <!-- 下面是 JS 讀不到 /api/sources 時的備案（2026-10-11 依資料庫補齊 17 家）；正常會被即時清單取代 -->
     <div class="src-row"><span class="src-region">台灣</span><span class="src-links">
       <a href="https://shop.campus.org.tw" target="_blank" rel="noopener">校園書房</a>
       <a href="https://www.elimbookstore.com.tw" target="_blank" rel="noopener">以琳書房</a>
@@ -98,10 +103,16 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
       <a href="https://buy.pctpress.org" target="_blank" rel="noopener">台灣教會公報社</a>
     </span></div>
     <div class="src-row"><span class="src-region">香港</span><span class="src-links">
-      <a href="https://www.logos.com.hk/bf/" target="_blank" rel="noopener">基道 BookFinder</a>
+      <a href="https://www.logos.com.hk" target="_blank" rel="noopener">基道 BookFinder</a>
+      <a href="https://www.tiendao.org.hk" target="_blank" rel="noopener">天道書樓</a>
+      <a href="https://shop.bappress.org" target="_blank" rel="noopener">浸信會出版社</a>
+      <a href="https://www.btproduct.com" target="_blank" rel="noopener">突破</a>
     </span></div>
     <div class="src-row"><span class="src-region">馬來西亞</span><span class="src-links">
       <a href="https://methodistbookroom.com" target="_blank" rel="noopener">衛理書房</a>
+    </span></div>
+    <div class="src-row"><span class="src-region">美國</span><span class="src-links">
+      <a href="https://akow.org" target="_blank" rel="noopener">麥種傳道會</a>
     </span></div>
     <div class="src-row"><span class="src-region">電子書</span><span class="src-links">
       <a href="https://wdbook.com" target="_blank" rel="noopener">微讀書城</a>
@@ -118,6 +129,28 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   <span><a href="/api/books">開放 API</a> ・ <a href="/changelog.php" id="ftVer" title="版本更新紀錄">版本資訊</a></span>
 </div></footer>
 <script>fetch("/api/version").then(r=>r.ok?r.json():null).then(j=>{const v=j&&j.data&&j.data.version;if(v)document.getElementById("ftVer").textContent="v"+v;}).catch(()=>{});</script>
+<script>
+(function () {
+  "use strict";
+  var box = document.getElementById("sources"), tot = document.getElementById("srcTotal");
+  function esc(t) { return String(t).replace(/[&<>"']/g, function (c) { return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+  fetch("/api/sources").then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+    var d = j && j.data; if (!d || !d.sources || !d.sources.length) return;
+    var html = "", region = null;
+    d.sources.forEach(function (s) {
+      if (s.region !== region) {
+        if (region !== null) html += "</span></div>";
+        region = s.region;
+        html += '<div class="src-row"><span class="src-region">' + esc(region) + '</span><span class="src-links">';
+      }
+      var label = esc(s.name) + ' <span class="src-n">' + Number(s.book_count).toLocaleString("zh-TW") + "</span>";
+      html += s.url ? '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + label + "</a>" : "<span class=\"src-nolink\">" + label + "</span>";
+    });
+    box.innerHTML = html + "</span></div>";
+    tot.textContent = "目前收錄 " + d.sources.length + " 個網路書房與出版社，上架書目共 " + Number(d.total).toLocaleString("zh-TW") + " 本（即時統計）。";
+  }).catch(function () {});
+})();
+</script>
 <script src="/assets/lang.js"></script>
 </body>
 </html>

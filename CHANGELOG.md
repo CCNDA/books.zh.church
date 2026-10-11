@@ -22,6 +22,12 @@
   ★ 原本首頁把「v1.15」寫死在 HTML（title 還寫 1.15.0），VERSION 已是 1.15.1 卻沒人同步；
     發布流程第 6 步「同步首頁 footer 版號」從此不必再手動做。
   ★ 讀不到 API 時仍顯示「版本資訊」連結，不會整塊消失。
+- **「關於本站」的收錄來源改成即時：新增 `GET /api/sources`。**
+  名稱沿用 `BUY_PLATFORM_LABELS`、官網網域直接取自 `editions.source_url`、地區看新常數 `SOURCE_REGIONS`，
+  每家顯示上架書數，另列全站上架總數。
+  ★ 原本 about.html 寫死 13 家，v1.11～v1.15 新增的天道書樓、突破、浸信會出版社、麥種都沒補上。
+  ★ 新來源沒登記在 `SOURCE_REGIONS` 也會出現（地區「其他」），不會再被默默漏掉；
+    about.html 內的靜態清單補齊 17 家，只在 JS 讀不到 API 時當備案。
 
 - **`tools/lib_title.php`:書名促銷詞剝除規則(`strip_title_promo()`)。**
   `tools/import.php` 與 `tools/check_title_promo.php` **共用同一份** ——
