@@ -417,9 +417,16 @@ function get_books(): never
     // COUNT 沒有 ORDER BY,最佳化器本來就會拿瘦表當驅動表 —— 實測 0.288s,維持原形不動。
     // ★ 2026-09-28:$yearJoin 接在 $joins 之後(年份條件已下推到它的 HAVING 裡,
     //   不再出現在 $whereSql)。沒帶年份參數時 $yearJoin 是空字串,這句與改版前完全相同。
-    $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins$yearJoin WHERE $whereSql");
-    $stmt->execute($params);
-    $total = (int) $stmt->fetchColumn();
+    // ★ 2026-10-12（GitHub #2）：關鍵字搜尋的瓶頸是 book_search 對全表做 LIKE '%…%'，
+    //   COUNT 一次、取本頁 id 又一次 = 掃兩遍。關鍵字路徑改在下面用 COUNT(*) OVER ()
+    //   一次掃描同時拿總數與本頁（books_dev 實測：兩句合計約 360ms → 一句約 160ms）。
+    //   沒有關鍵字的瀏覽／篩選走索引、不掃全表，維持原本的 COUNT。
+    $total = null;
+    if ($joins === '') {
+        $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins$yearJoin WHERE $whereSql");
+        $stmt->execute($params);
+        $total = (int) $stmt->fetchColumn();
+    }
 
     // ══ ★★★ 2026-09-19 第五輪:ORDER BY + LIMIT 會讓最佳化器翻轉執行計畫 ══
     //
@@ -460,8 +467,9 @@ function get_books(): never
     $offset = ($page - 1) * $perPage;
     // 第一段:只取本頁的 book_id(不碰 view)
     //   ORDER BY b.created_at ≡ 原本的 v.created_at(view 第 39 行為 b.created_at 原樣輸出)
+    $withTotal = $total === null ? ', COUNT(*) OVER () AS total' : '';
     $stmt = db()->prepare(
-        "SELECT {$hint}b.book_id FROM $fromRows
+        "SELECT {$hint}b.book_id{$withTotal} FROM $fromRows
          WHERE $whereSql
          ORDER BY b.created_at DESC, b.book_id DESC
          LIMIT :limit OFFSET :offset"
@@ -472,7 +480,21 @@ function get_books(): never
     $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
-    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    $idRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $ids = array_map(static fn(array $r): int => (int) $r['book_id'], $idRows);
+    if ($total === null) {
+        if ($idRows) {
+            $total = (int) $idRows[0]['total'];
+        } else {
+            // 沒有結果，或頁數超過最後一頁：這時才補一次 COUNT（第 1 頁沒結果就是 0）
+            $total = 0;
+            if ($page > 1) {
+                $stmt = db()->prepare("SELECT COUNT(*) FROM books b$joins$yearJoin WHERE $whereSql");
+                $stmt->execute($params);
+                $total = (int) $stmt->fetchColumn();
+            }
+        }
+    }
 
     // 第二段:用這幾個 id 去 view 取顯示欄位
     $rows = [];
