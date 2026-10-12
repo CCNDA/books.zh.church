@@ -13,6 +13,9 @@
 
 ## [Unreleased]
 
+
+## [1.18.1] - 2026-10-12 —— 分類清單與關鍵字搜尋加速、migration 對帳補登
+
 ### 效能
 
 - **分類清單 `/api/categories` 8 秒 → 0.04 秒**：books 加複合索引 `(category_id, is_published)`
