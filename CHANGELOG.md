@@ -13,6 +13,20 @@
 
 ## [Unreleased]
 
+### 效能
+
+- **分類清單 `/api/categories` 8 秒 → 0.04 秒**：books 加複合索引 `(category_id, is_published)`
+  （`database/migrations/2026-10-12_idx_category_pub.sql`）。原本每次都要掃全表數各分類上架書數。
+- **關鍵字搜尋 2–3 秒 → 約 0.3 秒**：books 加窄索引 `(book_id, is_published, created_at)`
+  （`database/migrations/2026-10-12_idx_id_pub_created.sql`），搜尋取 id、排序不再回表。
+  兩支都用 `ALGORITHM=INPLACE, LOCK=NONE`，建索引期間網站照常服務。
+
+### 維運
+
+- **migration 對帳**：repo 61 支 .sql vs 正式庫 schema_migrations 43 筆，差的 18 支裡 10 支是「執行過但沒寫紀錄」，
+  回溯補登（`2026-10-12_schema_migrations_backfill.sql`，只寫紀錄表、不動資料）；另 8 支是只有查詢的診斷檔，不補登。
+  三支都跑完後正式庫 schema_migrations 應為 56 筆（43 + 10 + 本檔 1 + 兩支索引 2）。
+
 
 ## [1.18.0] - 2026-10-12 —— AI／搜尋引擎最佳化（書目頁伺服器輸出、JSON-LD、sitemap、robots、llms.txt）、視障無障礙 WCAG 2.1 AA
 
