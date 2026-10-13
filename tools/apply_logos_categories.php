@@ -79,9 +79,19 @@ $findBooks = $pdo->prepare(
        JOIN books    b ON b.book_id    = e.book_id
       WHERE i.id_type = 'STORE' AND i.id_value = :code AND e.source = 'logos'
         AND b.is_published = 1");
+// 沒對到上架書時再查一次「有收錄但下架」：有沒有收到與有沒有上架是兩件事，
+// 不分開數的話「未對照」會比 reconcile_logos_codes.php 多出下架書的數量（Asana 1218194268650259）
+$findUnpublished = $pdo->prepare(
+    "SELECT 1
+       FROM identifiers i
+       JOIN editions e ON e.edition_id = i.edition_id
+       JOIN books    b ON b.book_id    = e.book_id
+      WHERE i.id_type = 'STORE' AND i.id_value = :code AND e.source = 'logos'
+        AND b.is_published = 0
+      LIMIT 1");
 
 $byBook = [];   // book_id => ['source'=>?, 'paths'=>[path=>1], 'tops'=>[top=>1]]
-$rowsSeen = 0; $unmatchedCodes = 0;
+$rowsSeen = 0; $unmatchedCodes = 0; $unpublishedCodes = 0;
 $fh = fopen($file, 'r');
 while (($line = fgets($fh)) !== false) {
     $line = trim($line);
@@ -97,7 +107,11 @@ while (($line = fgets($fh)) !== false) {
 
     $findBooks->execute([':code' => (string) $rec['code']]);
     $books = $findBooks->fetchAll();
-    if (!$books) { $unmatchedCodes++; continue; }
+    if (!$books) {
+        $findUnpublished->execute([':code' => (string) $rec['code']]);
+        $findUnpublished->fetchColumn() !== false ? $unpublishedCodes++ : $unmatchedCodes++;
+        continue;
+    }
 
     foreach ($books as $b) {
         $bid = (int) $b['book_id'];
@@ -172,7 +186,7 @@ if (!$dry && $pdo->inTransaction()) $pdo->commit();
 arsort($stats); arsort($topStats);
 $books = count($byBook);
 echo "\n== 對照檔處理 ==\n";
-echo "讀取商品碼列:{$rowsSeen}" . ($limit ? "(--limit={$limit})" : '') . ";未對照商品碼:{$unmatchedCodes}\n";
+echo "讀取商品碼列:{$rowsSeen}" . ($limit ? "(--limit={$limit})" : '') . ";未收錄商品碼:{$unmatchedCodes};已收錄但下架:{$unpublishedCodes}(不套分類)\n";
 echo "對照到書:共 {$books} 本(logos-only {$logosBooks}、跨站合併 {$mergedBooks});多分類(>=2 站內類):{$multi}\n";
 
 echo "\n== logos 主分類命中(書數,含跨類重複)==\n";
