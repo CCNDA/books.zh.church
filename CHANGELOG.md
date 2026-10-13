@@ -13,6 +13,10 @@
 
 ## [Unreleased]
 
+### 排程
+
+- **每日新品排程留下結構化摘要**：daily_new.sh 每一步（各站抓取、分類對映、分類回填、搜尋欄補值、兩個守門、sitemap）寫一行到 crawler/logs/summary-YYYYMMDD.tsv（狀態 ok／none／fail／skip、件數、秒數），跑完寫 crawler/logs/last_run.json（結束時間、新書數、失敗步驟數），log 結尾多一行摘要。這是每日摘要信與警報信的資料來源，寄信本身等 SES 設定（Asana 1217767344711740）
+
 
 ## [1.19.1] - 2026-10-13 —— 關鍵字搜尋再加速
 

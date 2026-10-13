@@ -18,6 +18,21 @@ LOG="$LOG_DIR/new-arrivals-$(date +%Y%m%d).log"
 mkdir -p "$LOG_DIR" "$CRAWLER_DIR/data/new"
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
 
+# ── 結構化摘要(Asana 1217767344711740):每一步一行 TSV,給每日摘要信／警報信讀 ──
+# 欄位:時間 步驟 狀態(ok/none/fail/skip) 件數 秒數 備註。同一天重跑會覆蓋(只留最後一輪)。
+# 跑完寫 last_run.json(結束時間、失敗步驟數)—— 「排程本身沒跑」靠它的時間判斷。
+SUMMARY="$LOG_DIR/summary-$(date +%Y%m%d).tsv"
+printf 'time\tstep\tstatus\tcount\tsec\tnote\n' > "$SUMMARY"
+rec() { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date '+%F %T')" "$1" "$2" "${3:-0}" "${4:-0}" "${5:-}" >> "$SUMMARY"; }
+# 跑一個 php 步驟:成功記 ok、失敗記 fail;檔案不在記 skip。回傳值同指令
+step() {
+  local name="$1" file="$2"; shift 2
+  if [ ! -f "$file" ]; then rec "$name" skip 0 0 "找不到 $file"; return 2; fi
+  local t0=$SECONDS
+  if php "$file" "$@" >>"$LOG" 2>&1; then rec "$name" ok 0 $((SECONDS - t0)); return 0; fi
+  rec "$name" fail 0 $((SECONDS - t0)); return 1
+}
+
 cd "$CRAWLER_DIR" || { echo "找不到 $CRAWLER_DIR"; exit 1; }
 # 有 venv 就啟用;沒有(改用 pip --user/--break-system-packages 裝套件)則用系統 python3
 # shellcheck disable=SC1091
@@ -27,7 +42,7 @@ log "=== 每日新品檢查開始 ==="
 
 run_source() {
   local src="$1"; shift
-  local out="data/new/${src}_${TS}.jsonl"
+  local out="data/new/${src}_${TS}.jsonl" t0=$SECONDS
   log "--- $src:抓取新品 ---"
   if python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1; then
     if [ -s "$out" ]; then
@@ -35,14 +50,18 @@ run_source() {
       log "$src:偵測到 $n 本新書,匯入中…"
       if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
         log "$src:匯入完成($n 本)"
+        rec "crawl:$src" ok "$n" $((SECONDS - t0))
       else
         log "$src:[錯誤] 匯入失敗,delta 保留於 $out"
+        rec "crawl:$src" fail "$n" $((SECONDS - t0)) "匯入失敗"
       fi
     else
       log "$src:無新書"
+      rec "crawl:$src" none 0 $((SECONDS - t0))
     fi
   else
     log "$src:[錯誤] 抓取失敗(見上方 log),略過匯入"
+    rec "crawl:$src" fail 0 $((SECONDS - t0)) "抓取失敗"
   fi
 }
 
@@ -122,13 +141,14 @@ apply_map() {
   local name="$1" tool="$2"
   if [ -f "$tool" ]; then
     log "--- ${name}分類套用(對映表)---"
-    if php "$tool" >>"$LOG" 2>&1; then
+    if step "map:$name" "$tool"; then
       log "${name}分類套用完成"
     else
       log "[錯誤] ${name}分類套用失敗(可手動重跑 php $tool)"
     fi
   else
     log "[警告] 找不到 $tool,略過${name}分類套用"
+    rec "map:$name" skip 0 0 "找不到 $tool"
   fi
 }
 apply_map "基道" "$ROOT/tools/apply_logos_categories.php"
@@ -155,15 +175,17 @@ if [ "$(date +%u)" = "1" ] && [ -f "$CRAWLER_DIR/rockhouse_crawler.py" ]; then
   if (cd "$CRAWLER_DIR" && "$VENV/bin/python" -u rockhouse_crawler.py --refresh-list) >>"$LOG" 2>&1 \
      && php "$IMPORT" --file="$CRAWLER_DIR/data/rockhouse_books.jsonl" --source=rockhouse >>"$LOG" 2>&1; then
     log "海天書樓重抓＋匯入完成"
+    rec "crawl:rockhouse" ok 0 0 "每週一全量"
     apply_map "海天書樓" "$ROOT/tools/apply_rockhouse_categories.php"
     # 海天書樓只有 http（https 憑證不符），https 頁面上的 http 圖片會被瀏覽器擋 → 封面一定要轉存 R2 才看得到
-    if php "$ROOT/tools/covers_to_r2.php" --source=rockhouse >>"$LOG" 2>&1; then
+    if step "covers:rockhouse" "$ROOT/tools/covers_to_r2.php" --source=rockhouse; then
       log "海天書樓封面轉存 R2 完成"
     else
       log "[錯誤] 海天書樓封面轉存 R2 失敗(可手動重跑 tools/covers_to_r2.php --source=rockhouse)"
     fi
   else
     log "[錯誤] 海天書樓重抓或匯入失敗(可手動重跑 crawler/rockhouse_crawler.py --refresh-list 再 import)"
+    rec "crawl:rockhouse" fail 0 0 "重抓或匯入失敗"
   fi
 fi
 
@@ -173,13 +195,14 @@ fi
 CLASSIFY="$ROOT/tools/classify_categories.php"
 if [ -f "$CLASSIFY" ]; then
   log "--- 分類回填:未分類新書 ---"
-  if php "$CLASSIFY" >>"$LOG" 2>&1; then
+  if step "classify" "$CLASSIFY"; then
     log "分類回填完成"
   else
     log "[錯誤] 分類回填失敗(新書仍為未分類,可手動重跑 php tools/classify_categories.php)"
   fi
 else
   log "[警告] 找不到 $CLASSIFY,略過分類回填"
+  rec "classify" skip 0 0 "找不到 $CLASSIFY"
 fi
 
 # ── 搜尋欄補值:替本次新匯入的書建 search_key / search_text ──
@@ -192,13 +215,14 @@ fi
 SEARCHTEXT="$ROOT/tools/build_search_text.php"
 if [ -f "$SEARCHTEXT" ]; then
   log "--- 搜尋欄補值:新書 search_key/search_text ---"
-  if php "$SEARCHTEXT" --missing >>"$LOG" 2>&1; then
+  if step "search_text" "$SEARCHTEXT" --missing; then
     log "搜尋欄補值完成"
   else
     log "[錯誤] 搜尋欄補值失敗 —— **新書會搜不到**,請手動重跑 php tools/build_search_text.php --missing"
   fi
 else
   log "[警告] 找不到 $SEARCHTEXT,略過搜尋欄補值(新書將搜不到)"
+  rec "search_text" skip 0 0 "找不到 $SEARCHTEXT"
 fi
 
 # ── 年份後備層守門:確認「有平面欄日期卻沒有任何 edition 日期」的書仍是 0 本 ──
@@ -213,13 +237,14 @@ fi
 YEARGUARD="$ROOT/tools/check_year_fallback.php"
 if [ -f "$YEARGUARD" ]; then
   log "--- 年份後備層守門 ---"
-  if php "$YEARGUARD" >>"$LOG" 2>&1; then
+  if step "guard:year" "$YEARGUARD"; then
     log "年份後備層守門:通過(0 本)"
   else
     log "[錯誤] 年份後備層守門:**發現後備層書,年份篩選會漏掉它們**,詳見上方清單"
   fi
 else
   log "[警告] 找不到 $YEARGUARD,略過年份後備層守門"
+  rec "guard:year" skip 0 0 "找不到 $YEARGUARD"
 fi
 
 # ── 非書籍守門:最近 26 小時新增的上架書,書名命中非書籍關鍵字就處理 ──
@@ -232,13 +257,14 @@ fi
 NBGUARD="$ROOT/tools/guard_nonbook.php"
 if [ -f "$NBGUARD" ]; then
   log "--- 非書籍守門 ---"
-  if php "$NBGUARD" --apply >>"$LOG" 2>&1; then
+  if step "guard:nonbook" "$NBGUARD" --apply; then
     log "非書籍守門完成(A 級已下架、B 級已標記,清單見上方)"
   else
     log "[錯誤] 非書籍守門失敗 —— **新的非書籍可能已上架**,請確認 nonbook_guard_log 存在後手動重跑 php tools/guard_nonbook.php --apply"
   fi
 else
   log "[警告] 找不到 $NBGUARD,略過非書籍守門"
+  rec "guard:nonbook" skip 0 0 "找不到 $NBGUARD"
 fi
 
 # ── sitemap：上架書有增減就重產（tools/build_sitemap.php；Asana 1219388780554980）──
@@ -246,14 +272,20 @@ fi
 SITEMAP="$ROOT/tools/build_sitemap.php"
 if [ -f "$SITEMAP" ]; then
   log "--- sitemap ---"
-  if php "$SITEMAP" >>"$LOG" 2>&1; then
+  if step "sitemap" "$SITEMAP"; then
     log "sitemap 更新完成"
   else
     log "[錯誤] sitemap 更新失敗(搜尋引擎會讀到舊的 sitemap,可手動重跑 php tools/build_sitemap.php)"
   fi
 else
   log "[警告] 找不到 $SITEMAP,略過 sitemap"
+  rec "sitemap" skip 0 0 "找不到 $SITEMAP"
 fi
 
+FAILS="$(awk -F'\t' 'NR>1 && $3=="fail"' "$SUMMARY" | wc -l | tr -d ' ')"
+NEWBOOKS="$(awk -F'\t' 'NR>1 && $2 ~ /^crawl:/ && $3=="ok" {n+=$4} END {print n+0}' "$SUMMARY")"
+printf '{"finished_at":"%s","summary":"%s","fail_steps":%s,"new_books":%s}\n' \
+  "$(date -Iseconds)" "$SUMMARY" "$FAILS" "$NEWBOOKS" > "$LOG_DIR/last_run.json"
+log "摘要:新書 $NEWBOOKS 本、失敗步驟 $FAILS 個($SUMMARY)"
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。
