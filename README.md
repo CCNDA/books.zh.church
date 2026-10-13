@@ -13,7 +13,8 @@ database/migrations/  SQL migration,依編號順序執行
 
 ## 部署(正式站 https://books.zh.church)
 
-- 更新方式:**手動 FTP** 上傳異動檔案(不使用 CI/CD)
+- 更新方式:主機上 `./deploy/deploy.sh`(從 GitHub 拉 main 並自我檢查;已取代手動 FTP)
+- 維運總覽(東西在哪、排程、發布流程、出事先看哪裡):[deploy/operations.md](deploy/operations.md)
 - 首次部署:先在主機建立 MariaDB 資料庫(utf8mb4),依序執行 `database/migrations/` 的 SQL,再上傳程式與建立 `config/app.local.php`
 - `config/app.local.php` 只存在主機上,絕不進版控
 
