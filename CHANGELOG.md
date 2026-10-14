@@ -15,7 +15,7 @@
 
 ### 排程
 
-- **每日新品排程留下結構化摘要**：daily_new.sh 每一步（各站抓取、分類對映、分類回填、搜尋欄補值、兩個守門、sitemap）寫一行到 crawler/logs/summary-YYYYMMDD.tsv（狀態 ok／none／fail／skip、件數、秒數），跑完寫 crawler/logs/last_run.json（上次跑完：時間、log 檔名、偵測件數、失敗步驟數），全部步驟都沒失敗才另寫 last_ok.json（「超過 26 小時沒有成功」看這個），log 結尾多一行摘要。件數是各站偵測到的新品數，匯入後新增／合併、封面轉存數還沒分開記；寄信本身等 SES 設定（Asana 1217767344711740）
+- **每日新品排程留下結構化摘要**：daily_new.sh 每一步（各站抓取、分類對映、分類回填、搜尋欄補值、兩個守門、sitemap）寫一行到 crawler/logs/summary-YYYYMMDD.tsv（狀態 ok／none／fail／skip、件數、秒數），跑完寫 crawler/logs/last_run.json（上次跑完：時間、log 檔名、偵測件數、失敗步驟數），全部步驟都沒失敗才另寫 last_ok.json（「超過 26 小時沒有成功」看這個；摘要讀不到記 -1、分類回填／搜尋欄補值／兩個守門被略過也算失敗，都不會更新它），log 結尾多一行摘要。件數是各站偵測到的新品數，匯入後新增／合併、封面轉存數還沒分開記；寄信本身等 SES 設定（Asana 1217767344711740）
 
 ### 工具
 

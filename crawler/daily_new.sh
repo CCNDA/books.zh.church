@@ -175,7 +175,7 @@ if [ "$(date +%u)" = "1" ] && [ -f "$CRAWLER_DIR/rockhouse_crawler.py" ]; then
   if (cd "$CRAWLER_DIR" && "$VENV/bin/python" -u rockhouse_crawler.py --refresh-list) >>"$LOG" 2>&1 \
      && php "$IMPORT" --file="$CRAWLER_DIR/data/rockhouse_books.jsonl" --source=rockhouse >>"$LOG" 2>&1; then
     log "海天書樓重抓＋匯入完成"
-    rec "crawl:rockhouse" ok 0 0 "每週一全量"
+    rec "crawl:rockhouse" ok 0 0 "每週一全量,件數未計入偵測數"
     apply_map "海天書樓" "$ROOT/tools/apply_rockhouse_categories.php"
     # 海天書樓只有 http（https 憑證不符），https 頁面上的 http 圖片會被瀏覽器擋 → 封面一定要轉存 R2 才看得到
     if step "covers:rockhouse" "$ROOT/tools/covers_to_r2.php" --source=rockhouse; then
@@ -282,13 +282,22 @@ else
   rec "sitemap" skip 0 0 "找不到 $SITEMAP"
 fi
 
-FAILS="$(awk -F'\t' 'NR>1 && $3=="fail"' "$SUMMARY" | wc -l | tr -d ' ')"
-DETECTED="$(awk -F'\t' 'NR>1 && $2 ~ /^crawl:/ && $3=="ok" {n+=$4} END {print n+0}' "$SUMMARY")"
-FAILS="${FAILS:-0}"; DETECTED="${DETECTED:-0}"   # summary 讀不到時也要寫出合法 JSON
+# 關鍵步驟(分類回填、搜尋欄補值、兩個守門)被略過也算失敗:工具被刪掉時只記 skip 的話,
+# last_ok.json 會天天更新,「超過 26 小時沒有成功」的警報永遠不會響
+CRITICAL_RE='^(classify|search_text|guard:year|guard:nonbook)$'
+if [ -f "$SUMMARY" ] && [ -r "$SUMMARY" ] && [ -s "$SUMMARY" ]; then
+  FAILS="$(awk -F'\t' -v re="$CRITICAL_RE" 'NR>1 && ($3=="fail" || ($3=="skip" && $2 ~ re)) {n++} END {print n+0}' "$SUMMARY")"
+  SKIPS="$(awk -F'\t' 'NR>1 && $3=="skip" {n++} END {print n+0}' "$SUMMARY")"
+  DETECTED="$(awk -F'\t' 'NR>1 && $2 ~ /^crawl:/ && $3=="ok" {n+=$4} END {print n+0}' "$SUMMARY")"
+else
+  # 摘要寫不進或讀不到:不能當成全部成功(否則 last_ok.json 假綠),記 -1
+  FAILS=-1; SKIPS=0; DETECTED=0
+fi
+FAILS="${FAILS:--1}"; SKIPS="${SKIPS:-0}"; DETECTED="${DETECTED:-0}"
 # last_run.json＝上次「跑完」(不論成敗);last_ok.json＝上次「全部步驟沒有失敗」——
 # 「超過 26 小時沒有成功紀錄」要看 last_ok.json,否則每天都失敗也不會警報
-printf '{"finished_at":"%s","summary":"%s","log":"%s","fail_steps":%s,"detected":%s}\n' \
-  "$(date -Iseconds)" "$SUMMARY" "$LOG" "$FAILS" "$DETECTED" > "$LOG_DIR/last_run.json"
+printf '{"finished_at":"%s","summary":"%s","log":"%s","fail_steps":%s,"skip_steps":%s,"detected":%s}\n' \
+  "$(date -Iseconds)" "$SUMMARY" "$LOG" "$FAILS" "$SKIPS" "$DETECTED" > "$LOG_DIR/last_run.json"
 if [ "$FAILS" = "0" ]; then cp "$LOG_DIR/last_run.json" "$LOG_DIR/last_ok.json"; fi
 log "摘要:各站偵測到 $DETECTED 本(匯入時會與既有書合併)、失敗步驟 $FAILS 個($SUMMARY)"
 log "=== 每日新品檢查結束 ==="
