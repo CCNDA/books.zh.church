@@ -23,7 +23,7 @@
   - commit 前先 `git status` 確認 staged 清單符合意圖
   - commit 訊息描述變更本身(what + why),不轉述對話、不提需求者
 - **對外動作先給草稿**:任何別人會看到的內容(PR、對外留言、公告)先給熊哥看,不直接送出。
-- **本專案特有**:沙箱無 PHP、連不到主機——程式寫完靠自我審查 + 線上驗證(熊哥貼結果);SQL 交 Navicat 執行;部署走手動 FTP。每次工作結束必記錄 Asana 與 history.md。
+- **本專案特有**:沙箱無 PHP、連不到主機——程式寫完靠自我審查 + 線上驗證(熊哥貼結果);SQL 交 Navicat 執行;部署由熊哥在主機跑 deploy/deploy.sh(已取代手動 FTP)。每次工作結束必記錄 Asana 與 history.md。
 
 ## 除錯流程
 

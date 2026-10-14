@@ -1,7 +1,7 @@
 # 維運總覽（books.zh.church）
 
 給接手維運的人一頁看完：東西在哪裡、每天會自己跑什麼、出事先看哪裡。
-**本文件不放任何密碼、權杖或金鑰，只寫它們放在哪裡。** 細節以各 runbook 為準。
+**本文件不放任何密碼、權杖或金鑰，只寫它們放在哪裡；本 repo 是公開的，內網位址與帳號名稱也不寫在這裡。** 細節以各 runbook 為準。
 （Asana【M3-B】公開上線與維運交接 1216467419399059 第 3 項）
 
 ## 一、東西在哪裡
@@ -15,9 +15,9 @@
 | 封面圖 | Cloudflare R2（`app.local.php` 的 `r2.public_url`） | `tools/covers_to_r2.php` 轉存 |
 | 爬蟲資料 | 主機 `crawler/data/`（各站 master jsonl、`new/` 每日 delta、對照檔） | 不進 git；**重建時一定要先在** |
 | 排程 log | 主機 `crawler/logs/new-arrivals-YYYYMMDD.log`、`summary-YYYYMMDD.tsv`、`last_run.json` | summary／last_run 自 feature/daily-summary 起 |
-| 測試站 | https://books.ps194.net（cora-lab `/srv/dev/books.zh.church`，Cloudflare Access 保護） | 先在這裡驗證再上正式站 |
-| 程式備份＋每日修改紀錄 | NAS `\\192.168.193.230\files\DD-code\books.zh.church`（`history/YYYY-MM-DD.md`） | 修改紀錄只放 NAS、不進 git |
-| 唯讀查詢 | 資料庫帳號 `cora_ro`（只有 SELECT），經 SSH 轉接 | 小芯查正式資料用，不能寫 |
+| 測試站 | https://books.ps194.net（協會測試機，Cloudflare Access 保護） | 先在這裡驗證再上正式站 |
+| 程式備份＋每日修改紀錄 | 協會 NAS（位置見內部文件） | 修改紀錄只放 NAS、不進 git |
+| 唯讀查詢 | 只有 SELECT 權限的資料庫帳號，經 SSH 轉接 | 數位同工查正式資料用，不能寫 |
 
 ## 二、每天自己跑的排程（主機 crontab，時間是 UTC）
 
