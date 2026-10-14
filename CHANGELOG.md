@@ -13,6 +13,10 @@
 
 ## [Unreleased]
 
+### 排程
+
+- **每日新品排程留下結構化摘要**：daily_new.sh 每一步（各站抓取、分類對映、分類回填、搜尋欄補值、兩個守門、sitemap）寫一行到 crawler/logs/summary-YYYYMMDD.tsv（狀態 ok／none／fail／skip、件數、秒數），跑完寫 crawler/logs/last_run.json（結束時間、新書數、失敗步驟數），log 結尾多一行摘要。這是每日摘要信與警報信的資料來源，寄信本身等 SES 設定（Asana 1217767344711740）
+
 ### 工具
 
 - **apply_logos_categories.php 的「未對照」拆成兩個數字**：「未收錄商品碼」（資料庫完全沒有）與「已收錄但下架」（有收、只是下架，不套分類）。原本下架書也算成未對照，跟 reconcile_logos_codes.php 的數字對不起來（458 vs 79）。只改印出的統計，套分類的邏輯不變（Asana 1218194268650259）
