@@ -36,44 +36,10 @@ if (PHP_SAPI !== 'cli') {
     exit("CLI only\n");
 }
 require dirname(__DIR__) . '/app/lib/db.php';
+require_once __DIR__ . '/lib_dupmatch.php';   // 判斷規則與 import.php 共用
 
 $opt = getopt('', ['out::']);
 $out = (string) ($opt['out'] ?? (dirname(__DIR__) . '/crawler/data/title_publisher_dup_review.tsv'));
-
-function norm(?string $s): string
-{
-    return mb_strtolower(preg_replace('/[\s\p{P}\p{S}]+/u', '', (string) $s), 'UTF-8');
-}
-
-/** 與 merge_duplicate_books.php first_author() 相同的分隔規則 */
-function first_author(?string $raw): string
-{
-    $p = preg_split('/[;' . "\u{FF1B}\u{3001}" . '\/]/u', (string) $raw);
-    return norm(preg_replace('/\s*等$/u', '', trim($p[0] ?? '')));
-}
-
-/** 第一作者去掉括號內容(多半是英文原名:「賴特（N. T. Wright）」→「賴特」)再正規化 */
-function author_core(?string $raw): string
-{
-    $p = preg_split('/[;' . "\u{FF1B}\u{3001}" . '\/]/u', (string) $raw);
-    return norm(preg_replace(['/[（(][^（）()]*[）)]/u', '/\s*等$/u'], '', trim($p[0] ?? '')));
-}
-
-/** 作者相容:一邊空白,或一邊包含另一邊(較短的至少 2 字,避免單字誤中) */
-function authors_compatible(string $a, string $b): bool
-{
-    if ($a === '' || $b === '') return true;
-    if ($a === $b) return true;
-    [$s, $l] = mb_strlen($a) <= mb_strlen($b) ? [$a, $b] : [$b, $a];
-    return mb_strlen($s) >= 2 && str_contains($l, $s);
-}
-
-/** 原寫法或去掉括號後,任一種相容就算相容 */
-function authors_match(?string $rawA, ?string $rawB): bool
-{
-    return authors_compatible(first_author($rawA), first_author($rawB))
-        || authors_compatible(author_core($rawA), author_core($rawB));
-}
 
 $pdo = db();
 $pdo->exec('SET NAMES utf8mb4');
@@ -94,10 +60,10 @@ $sql = "SELECT b.book_id, b.title, b.author, b.publisher, b.isbn13,
 $books = [];
 $byKey = [];
 foreach ($pdo->query($sql) as $r) {
-    $t = norm($r['title']);
+    $t = dm_norm($r['title']);
     if ($t === '') continue;
     $keys = array_map(fn($id) => "$t|p$id", array_filter(explode(',', (string) $r['pubs'])));
-    if (!$keys && norm($r['publisher']) !== '') $keys = ["$t|s" . norm($r['publisher'])];
+    if (!$keys && dm_norm($r['publisher']) !== '') $keys = ["$t|s" . dm_norm($r['publisher'])];
     if (!$keys) continue;
     $books[$r['book_id']] = $r;
     foreach ($keys as $k) $byKey[$k][] = (int) $r['book_id'];
@@ -126,21 +92,9 @@ foreach ($groups as $g) {
                         <=> [(int) empty($y['isbn13']), -(int) $y['ed_cnt'], (int) $y['book_id']]);
     $keep = array_shift($g);
     $stat['groups']++;
-    $ka = first_author($keep['author']);
     $ks = explode(',', (string) $keep['srcs']);
     foreach ($g as $d) {
-        $da = first_author($d['author']);
-        $ds = explode(',', (string) $d['srcs']);
-        $sameSource = (bool) array_intersect($ks, $ds);
-        if ($ka === '' && $da === '') {
-            [$level, $why] = ['待判', '兩邊都沒有作者'];
-        } elseif (!authors_match($keep['author'], $d['author'])) {
-            [$level, $why] = ['不併', '作者不同'];
-        } elseif ($sameSource) {
-            [$level, $why] = ['待判', '同一家書房上了兩筆(可能是不同版本或商品)'];
-        } else {
-            [$level, $why] = ['高', $ka === $da ? '作者相同' : ($ka === '' || $da === '' ? '一邊沒有作者' : '作者寫法不同但互相包含')];
-        }
+        [$level, $why] = dm_judge($keep['author'], $d['author'], $ks, explode(',', (string) $d['srcs']));
         $stat[$level]++;
         $rows[] = [$level === '高' ? '併入' : ($level === '不併' ? '不併' : ''), $level, $why,
                    $d['book_id'], $d['title'], $keep['book_id'], $keep['title'], (string) $keep['publisher'],
