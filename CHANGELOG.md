@@ -13,6 +13,10 @@
 
 ## [Unreleased]
 
+### 資安
+
+- **補三個安全標頭**（deploy/nginx-books.conf）：Content-Security-Policy（GA、Google Fonts 白名單，含 frame-ancestors none）、X-Frame-Options DENY、Referrer-Policy strict-origin-when-cross-origin。用本機代理加上這組標頭、無頭 Chrome 開五個頁面驗證 0 違規；nginx -t 語法通過。檔頭拿掉主機 IP（repo 公開）（Asana 1216467657098295）
+
 
 ## [1.19.1] - 2026-10-13 —— 關鍵字搜尋再加速
 
