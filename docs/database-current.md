@@ -415,6 +415,46 @@ SELECT VIEW_DEFINITION FROM information_schema.VIEWS
 
 ---
 
+## 十、之一　2026-10-07 之後的變更（2026-10-14 正式庫唯讀實查）
+
+正式庫現況：**38 張表**、`schema_migrations` **57 筆**（最新 `2026-10-12_rockhouse_category_map.sql`，10-13 00:56 UTC 套用）。
+
+| migration | 套用時間（UTC） | 內容 |
+| --- | --- | --- |
+| `2026-10-11_delist_nonbook_items.sql` | 10-11 08:09 | 非書籍周邊商品 146 筆下架（`is_published = 0`） |
+| `2026-10-11_nonbook_guard_log.sql` | 10-11 11:49 | 新表 `nonbook_guard_log`（見下） |
+| `2026-10-12_schema_migrations_backfill.sql` | 10-12 12:07 | 回溯補登 10 筆漏記的 migration |
+| `2026-10-12_idx_id_pub_created.sql` | 10-12 12:07 | `books (book_id, is_published, created_at)` 窄索引：關鍵字搜尋 2–3 秒 → 約 0.3 秒 |
+| `2026-10-12_idx_category_pub.sql` | 10-12 12:32 | `books (category_id, is_published)`：`/api/categories` 8 秒 → 0.04 秒 |
+| `2026-10-12_rockhouse_category_map.sql` | 10-13 00:56 | 新表 `rockhouse_category_map`（海天書樓分類對映，第 16 張對映表） |
+
+### `nonbook_guard_log`（10 欄，104 列）
+
+非書籍守門（`tools/guard_nonbook.php`，每日排程）與後台 `/admin/` 審核的紀錄。
+
+| 欄 | 型別 | 說明 |
+| --- | --- | --- |
+| `log_id` | int unsigned PK | |
+| `book_id` | int unsigned | 索引 |
+| `tier` | char(1) | A＝先下架、B＝只標記 |
+| `word` | varchar(20) | 命中的關鍵字 |
+| `action` | enum(hidden, flagged, restored, confirmed) | 守門寫 hidden／flagged，後台審核寫 restored／confirmed |
+| `title_snapshot` | varchar(500) | 當時的書名 |
+| `source` | varchar(30) | |
+| `created_at` | timestamp | 索引 `idx_created` |
+| `reviewed_at`／`reviewed_by` | datetime／varchar(190) | 後台審核，索引 `idx_review` |
+
+唯一鍵 `uq_book_action`：同一本書同一種動作只記一次。⚠️ 只記命中，沒命中的日子沒有紀錄——不能用它證明守門有跑（看當天 log 或 `crawler/logs/summary-*.tsv` 的 `guard:nonbook`）。
+
+### `rockhouse_category_map`（6 欄，28 列）
+
+`rh_code`（PK）、`rh_path`、`internal_name`（對到站內分類名稱，NULL＝不歸類）、`unpublish`（1＝這個站內分類的商品下架）、`sort_order`、`note`。形狀跟其他來源對映表一樣，由 `tools/apply_rockhouse_categories.php` 使用。
+
+### `books` 索引（現況 10 個）
+
+`PRIMARY(book_id)`、`idx_author`、`idx_category`、`idx_category_pub(category_id, is_published)`、`idx_id_pub_created(book_id, is_published, created_at)`、`idx_isbn13`、`idx_publisher`、`idx_publish_date`、`idx_pub_created(is_published, created_at, book_id)`、`idx_title`。
+`idx_category` 現在被 `idx_category_pub` 的最左欄涵蓋，可列入冗餘索引候選（與第九節「兩個冗餘索引」一起評估，刪除要熊哥決定）。
+
 ## 十一、維護規則
 
 1. **改 schema = 同時更新本檔 + 在 migration 結尾 INSERT 一列 `schema_migrations`。**
