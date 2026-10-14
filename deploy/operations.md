@@ -14,7 +14,7 @@
 | 設定（含所有憑證） | 主機 `config/app.local.php`（不進 git） | 資料庫、R2、Discord webhook；範本 `config/app.example.php` |
 | 封面圖 | Cloudflare R2（`app.local.php` 的 `r2.public_url`） | `tools/covers_to_r2.php` 轉存 |
 | 爬蟲資料 | 主機 `crawler/data/`（各站 master jsonl、`new/` 每日 delta、對照檔） | 不進 git；**重建時一定要先在** |
-| 排程 log | 主機 `crawler/logs/new-arrivals-YYYYMMDD.log`、`summary-YYYYMMDD.tsv`、`last_run.json` | summary／last_run 自 feature/daily-summary 起 |
+| 排程 log | 主機 `crawler/logs/new-arrivals-YYYYMMDD.log`、`summary-YYYYMMDD.tsv`、`last_run.json`（上次跑完）、`last_ok.json`（上次全部成功） | summary／last_run 自 feature/daily-summary 起 |
 | 測試站 | https://books.ps194.net（協會測試機，Cloudflare Access 保護） | 先在這裡驗證再上正式站 |
 | 程式備份＋每日修改紀錄 | 協會 NAS（位置見內部文件） | 修改紀錄只放 NAS、不進 git |
 | 唯讀查詢 | 只有 SELECT 權限的資料庫帳號，經 SSH 轉接 | 數位同工查正式資料用，不能寫 |

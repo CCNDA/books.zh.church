@@ -109,7 +109,11 @@ while (($line = fgets($fh)) !== false) {
     $books = $findBooks->fetchAll();
     if (!$books) {
         $findUnpublished->execute([':code' => (string) $rec['code']]);
-        $findUnpublished->fetchColumn() !== false ? $unpublishedCodes++ : $unmatchedCodes++;
+        if ($findUnpublished->fetchColumn() !== false) {
+            $unpublishedCodes++;
+        } else {
+            $unmatchedCodes++;
+        }
         continue;
     }
 
@@ -186,7 +190,9 @@ if (!$dry && $pdo->inTransaction()) $pdo->commit();
 arsort($stats); arsort($topStats);
 $books = count($byBook);
 echo "\n== 對照檔處理 ==\n";
-echo "讀取商品碼列:{$rowsSeen}" . ($limit ? "(--limit={$limit})" : '') . ";未收錄商品碼:{$unmatchedCodes};已收錄但下架:{$unpublishedCodes}(不套分類)\n";
+echo "讀取商品碼列:{$rowsSeen}" . ($limit ? "(--limit={$limit})" : '') . "\n"
+   . "未收錄商品碼:{$unmatchedCodes}\n"
+   . "已收錄但下架:{$unpublishedCodes}(不套分類)\n";
 echo "對照到書:共 {$books} 本(logos-only {$logosBooks}、跨站合併 {$mergedBooks});多分類(>=2 站內類):{$multi}\n";
 
 echo "\n== logos 主分類命中(書數,含跨類重複)==\n";

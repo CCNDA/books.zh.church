@@ -283,9 +283,13 @@ else
 fi
 
 FAILS="$(awk -F'\t' 'NR>1 && $3=="fail"' "$SUMMARY" | wc -l | tr -d ' ')"
-NEWBOOKS="$(awk -F'\t' 'NR>1 && $2 ~ /^crawl:/ && $3=="ok" {n+=$4} END {print n+0}' "$SUMMARY")"
-printf '{"finished_at":"%s","summary":"%s","fail_steps":%s,"new_books":%s}\n' \
-  "$(date -Iseconds)" "$SUMMARY" "$FAILS" "$NEWBOOKS" > "$LOG_DIR/last_run.json"
-log "摘要:新書 $NEWBOOKS 本、失敗步驟 $FAILS 個($SUMMARY)"
+DETECTED="$(awk -F'\t' 'NR>1 && $2 ~ /^crawl:/ && $3=="ok" {n+=$4} END {print n+0}' "$SUMMARY")"
+FAILS="${FAILS:-0}"; DETECTED="${DETECTED:-0}"   # summary 讀不到時也要寫出合法 JSON
+# last_run.json＝上次「跑完」(不論成敗);last_ok.json＝上次「全部步驟沒有失敗」——
+# 「超過 26 小時沒有成功紀錄」要看 last_ok.json,否則每天都失敗也不會警報
+printf '{"finished_at":"%s","summary":"%s","log":"%s","fail_steps":%s,"detected":%s}\n' \
+  "$(date -Iseconds)" "$SUMMARY" "$LOG" "$FAILS" "$DETECTED" > "$LOG_DIR/last_run.json"
+if [ "$FAILS" = "0" ]; then cp "$LOG_DIR/last_run.json" "$LOG_DIR/last_ok.json"; fi
+log "摘要:各站偵測到 $DETECTED 本(匯入時會與既有書合併)、失敗步驟 $FAILS 個($SUMMARY)"
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。
