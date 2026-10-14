@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<!-- Google Analytics（GA4 G-58CPNJ5D6F，熊哥 2026-10-11；Asana 1219388348551239）。只裝前台，後台 /admin/ 不裝。 -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-58CPNJ5D6F"></script>
+<script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','G-58CPNJ5D6F');</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>開放 API|屬靈共同書目</title>
+<meta name="description" content="屬靈共同書目開放 API 說明:免申請、免金鑰的 JSON 介面,可依關鍵字、分類、作者、出版社、出版年、來源書房查詢華文屬靈書目。">
+<link rel="canonical" href="https://books.zh.church/api.html">
+<link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+<link rel="shortcut icon" href="/assets/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="theme-color" content="#177da8">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="屬靈共同書目">
+<meta property="og:title" content="開放 API|屬靈共同書目">
+<meta property="og:description" content="免申請、免金鑰的華文屬靈書目 JSON API。">
+<meta property="og:url" content="https://books.zh.church/api.html">
+<meta property="og:image" content="https://books.zh.church/assets/og-image.png">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[{"@type":"Organization","@id":"https://books.zh.church/#org","name":"中華基督教網路發展協會 CCNDA","url":"https://www.ccnda.org","logo":"https://books.zh.church/assets/android-chrome-512x512.png"},{"@type":"WebSite","@id":"https://books.zh.church/#website","name":"屬靈共同書目","alternateName":"基督徒圖書分享服務","url":"https://books.zh.church/","inLanguage":"zh-Hant","publisher":{"@id":"https://books.zh.church/#org"}}]}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --paper:#f2f6f9; --card:#ffffff; --ink:#14303c; --ink-soft:#5c7482;
+  --gold:#0e6d94; --gold-soft:#f0c04a; --line:#e2e8ee; --accent:#177da8;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif;line-height:1.9}
+a{color:var(--gold);text-decoration:none}
+.serif{font-family:"Noto Serif TC","PMingLiU",serif}
+header{border-bottom:3px double var(--gold-soft);background:var(--card)}
+.hd-inner{max-width:860px;margin:0 auto;padding:20px 20px 14px;
+  display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.hd-title{margin:0;font-size:1.35rem;letter-spacing:.12em;font-weight:700;line-height:normal}
+.hd-title a{color:var(--ink);display:inline-flex;align-items:center;gap:.4em}
+.brand-logo{height:34px;width:34px;flex:0 0 auto}
+.ft-logo{width:26px;height:26px;border-radius:4px;flex:0 0 auto}
+.hd-nav{font-size:.88rem}
+main{max-width:860px;margin:36px auto 0;padding:0 20px}
+h1{font-size:1.6rem;letter-spacing:.1em;margin:0 0 24px}
+h2{font-size:1.12rem;letter-spacing:.08em;margin:34px 0 10px;
+  border-left:4px solid var(--gold);padding-left:10px}
+p{margin:0 0 14px}
+.quote{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold-soft);
+  border-radius:8px;padding:16px 22px;color:var(--ink-soft);font-size:.95rem;margin:20px 0}
+.sources{margin:14px 0 6px}
+.src-row{display:flex;align-items:baseline;gap:12px;margin:0 0 12px;flex-wrap:wrap}
+.src-region{flex:0 0 auto;font-size:.85rem;letter-spacing:.1em;color:var(--ink-soft);
+  border-right:3px solid var(--gold-soft);padding-right:12px;min-width:4.2em}
+.src-links{display:flex;flex-wrap:wrap;gap:10px}
+.src-links a{display:inline-block;background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:5px 16px;font-size:.92rem;color:var(--gold)}
+.src-n{color:var(--ink-soft);font-size:.8rem;margin-left:4px;font-variant-numeric:tabular-nums}
+.src-nolink{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:5px 16px;font-size:.92rem}
+.src-total{color:var(--ink-soft);font-size:.92rem;margin:6px 0 0}
+.src-links a:hover{border-color:var(--gold);background:#eaf4f9}
+footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
+.ft{max-width:860px;margin:0 auto;padding:22px 20px;font-size:.82rem;color:var(--ink-soft);
+  display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+/* 無障礙：連結不能只靠顏色區分（WCAG 1.4.1） */
+.hd-nav a,.ft a,main p a,main li a{text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px;text-decoration-color:rgba(14,109,148,.4)}
+/* 無障礙：跳到主要內容（WCAG 2.4.1）、鍵盤焦點看得見（2.4.7） */
+.skip{position:absolute;left:-9999px;top:8px;z-index:100;background:#14303c;color:#fff;padding:8px 14px;border-radius:6px;text-decoration:none}
+.skip:focus{left:12px}
+:focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
+
+/* API 說明頁 */
+code,pre{font-family:Consolas,"Courier New",monospace;font-size:.88rem}
+code{background:#eaf1f6;border-radius:4px;padding:1px 6px}
+pre{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 16px;overflow-x:auto;line-height:1.6;margin:8px 0 16px}
+pre code{background:none;padding:0}
+.tbl-wrap{overflow-x:auto;margin:8px 0 18px}
+table{border-collapse:collapse;width:100%;background:var(--card);font-size:.92rem}
+caption{text-align:left;color:var(--ink-soft);font-size:.85rem;padding:0 0 6px}
+th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
+th{background:#eef4f8;font-weight:600}
+.ep{font-family:Consolas,"Courier New",monospace;font-weight:700;color:var(--ink)}
+.note{color:var(--ink-soft);font-size:.9rem}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到主要內容</a>
+<header>
+  <div class="hd-inner">
+    <div class="hd-title serif"><a href="/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目</a></div>
+    <nav class="hd-nav"><a href="/">書目瀏覽</a> ・ <a href="/about.html">關於本站</a> ・ <span style="color:var(--ink-soft)" aria-current="page">開放 API</span> ・ <a href="#" id="langToggle" aria-label="簡繁體切換"></a></nav>
+  </div>
+</header>
+<main id="main">
+  <h1 class="serif">開放 API</h1>
+
+  <p>屬靈共同書目的書目資料以 JSON 開放取用,<strong>不用申請、不用金鑰</strong>,教會、機構與開發者都可以直接使用。只提供讀取(GET);回應都包在 <code>data</code> 裡,錯誤時是 <code>{"error": "說明"}</code> 與對應的 HTTP 狀態碼(例如找不到書是 404)。</p>
+  <p class="note">請合理使用:需要大量資料時,請放慢速度、把結果暫存起來,不要短時間內反覆抓取。引用書目時請註明出處「屬靈共同書目(books.zh.church)」,並以各出版社公布的資訊為準。</p>
+
+  <h2 class="serif">搜尋與瀏覽書目</h2>
+  <p><span class="ep">GET /api/books</span>:所有條件都可以一起用;沒有任何條件時依上架時間由新到舊列出。</p>
+  <div class="tbl-wrap"><table>
+    <caption>/api/books 的查詢參數</caption>
+    <thead><tr><th scope="col">參數</th><th scope="col">說明</th><th scope="col">例子</th></tr></thead>
+    <tbody>
+      <tr><td><code>q</code></td><td>關鍵字:書名、作者、出版社、ISBN</td><td><code>q=羅馬書</code></td></tr>
+      <tr><td><code>deep</code></td><td><code>1</code>＝關鍵字也搜內容簡介(比較慢)</td><td><code>deep=1</code></td></tr>
+      <tr><td><code>category</code></td><td>分類編號(見 <code>/api/categories</code>)</td><td><code>category=9</code></td></tr>
+      <tr><td><code>person</code></td><td>作者/譯者等貢獻者編號(見 <code>/api/persons</code>)</td><td><code>person=18991</code></td></tr>
+      <tr><td><code>publisher</code></td><td>出版社編號(見 <code>/api/publishers</code>);同一家出版社的不同寫法會一起算</td><td><code>publisher=2748</code></td></tr>
+      <tr><td><code>year_from</code>、<code>year_to</code></td><td>出版年範圍(西元四位數)</td><td><code>year_from=2020&amp;year_to=2025</code></td></tr>
+      <tr><td><code>source</code></td><td>來源書房代碼(見 <code>/api/sources</code> 的 <code>code</code>)</td><td><code>source=logos</code></td></tr>
+      <tr><td><code>page</code>、<code>per_page</code></td><td>第幾頁、每頁幾本(1–50,預設 20)</td><td><code>page=2&amp;per_page=50</code></td></tr>
+    </tbody>
+  </table></div>
+  <p>回應的 <code>data</code> 有 <code>items</code>(書目清單)、<code>total</code>(符合的總數)、<code>page</code>、<code>per_page</code>、<code>pages</code>。每本書有 <code>book_id</code>、<code>title</code>、<code>author</code>、<code>publisher</code>、<code>publish_date</code>、<code>isbn13</code>、<code>cover_url</code>、<code>summary_short</code>、<code>category_name</code> 等欄位。</p>
+  <pre><code>curl "https://books.zh.church/api/books?q=羅馬書&amp;per_page=5"</code></pre>
+
+  <h2 class="serif">單本書目</h2>
+  <p><span class="ep">GET /api/books/{book_id}</span>:一本書的完整資料,包含內容簡介、作者與譯者(<code>contributors</code>)、各書房的版本與購書連結(<code>editions</code>、<code>buy_links</code>)、叢書與主題。網頁版是 <code>https://books.zh.church/book/{book_id}</code>。</p>
+  <pre><code>curl "https://books.zh.church/api/books/38080"</code></pre>
+
+  <h2 class="serif">最新上架、熱門書目</h2>
+  <p><span class="ep">GET /api/books/latest</span>、<span class="ep">GET /api/books/popular</span>:<code>limit</code> 1–20,預設 6。</p>
+
+  <h2 class="serif">分類、作者、出版社、來源書房</h2>
+  <div class="tbl-wrap"><table>
+    <caption>查編號用的端點</caption>
+    <thead><tr><th scope="col">端點</th><th scope="col">說明</th></tr></thead>
+    <tbody>
+      <tr><td><span class="ep">GET /api/categories</span></td><td>全部分類:<code>category_id</code>、<code>name</code>、<code>book_count</code></td></tr>
+      <tr><td><span class="ep">GET /api/persons?q=</span></td><td>找作者/貢獻者:<code>person_id</code>、<code>name</code>、<code>book_count</code>;不帶 <code>q</code> 時依著作數列出。<code>limit</code> 1–50,預設 15</td></tr>
+      <tr><td><span class="ep">GET /api/publishers?q=</span></td><td>找出版社:<code>publisher_id</code>、<code>name_zh</code>、<code>book_count</code>;用法同上</td></tr>
+      <tr><td><span class="ep">GET /api/sources</span></td><td>收錄的網路書房與出版社:<code>code</code>、<code>name</code>、<code>region</code>、<code>url</code>、<code>book_count</code>,以及全站上架總數 <code>total</code></td></tr>
+      <tr><td><span class="ep">GET /api/version</span></td><td>目前網站版本</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2 class="serif">例子:找某位作者的書</h2>
+  <pre><code>curl "https://books.zh.church/api/persons?q=賴特"          # 先查作者編號
+curl "https://books.zh.church/api/books?person=編號"         # 再用編號查他的書</code></pre>
+
+  <h2 class="serif">其他</h2>
+  <p>給 AI 與搜尋引擎的網站說明在 <a href="/llms.txt">llms.txt</a>,所有書目頁的清單在 <a href="/sitemap.xml">sitemap.xml</a>。發現資料有誤或有使用上的問題,歡迎與<a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a>聯繫。</p>
+</main>
+<footer><div class="ft">
+  <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
+  <span><span style="color:var(--ink-soft)">開放 API</span> ・ <a href="/changelog.php" id="ftVer" title="版本更新紀錄">版本資訊</a></span>
+</div></footer>
+<script>fetch("/api/version").then(r=>r.ok?r.json():null).then(j=>{const v=j&&j.data&&j.data.version;if(v)document.getElementById("ftVer").textContent="v"+v;}).catch(()=>{});</script>
+<script src="/assets/lang.js"></script>
+</body>
+</html>

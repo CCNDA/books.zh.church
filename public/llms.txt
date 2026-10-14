@@ -14,7 +14,11 @@
 
 ## 開放 API（JSON）
 
-- `GET https://books.zh.church/api/books?q={關鍵字}`：搜尋書目
+完整說明（參數、回應欄位、例子）：https://books.zh.church/api.html 。免申請、免金鑰，只提供讀取。
+
+- `GET https://books.zh.church/api/books?q={關鍵字}`：搜尋書目；可再加 `category`、`person`、`publisher`、`year_from`、`year_to`、`source`、`deep=1`（也搜內容簡介）、`page`、`per_page`（1–50）
+- `GET https://books.zh.church/api/books/latest`、`/api/books/popular`：最新上架、熱門書目
+- `GET https://books.zh.church/api/persons?q={姓名}`、`/api/publishers?q={名稱}`：查作者、出版社編號
 - `GET https://books.zh.church/api/books/{id}`：單本書目完整資料
 - `GET https://books.zh.church/api/categories`：分類清單
 - `GET https://books.zh.church/api/sources`：收錄的出版社／書房與各自的書目數量

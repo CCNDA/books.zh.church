@@ -33,7 +33,7 @@ if (!$ids) {
     fwrite(STDERR, "查到 0 本上架書（資料庫異常？）—— 中止，不動既有的 sitemap\n");
     exit(1);
 }
-$static = ['/', '/about.html', '/changelog.php'];
+$static = ['/', '/about.html', '/api.html', '/changelog.php'];
 $chunks = array_chunk($ids, SITEMAP_MAX);
 
 printf("上架書 %d 本 → %d 個 books 檔（每檔最多 %d）＋ 固定頁 %d 個\n", count($ids), count($chunks), SITEMAP_MAX, count($static));

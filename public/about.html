@@ -92,7 +92,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
   好書是燈旁的燈,幫助我們更明白那真光。</div>
 
   <h2 class="serif">我們提供</h2>
-  <p>書目瀏覽與主題分類、關鍵字搜尋(書名/作者/出版社/ISBN)、每本書的獨立網址方便分享、購書與延伸連結,以及<a href="/api/books">開放 API</a> 供教會、機構與開發者自由取用書目資料。</p>
+  <p>書目瀏覽與主題分類、關鍵字搜尋(書名/作者/出版社/ISBN)、每本書的獨立網址方便分享、購書與延伸連結,以及<a href="/api.html">開放 API</a> 供教會、機構與開發者自由取用書目資料。</p>
 
   <h2 class="serif">資料來源</h2>
   <p>書目資料彙整自各基督教出版社與網路書房的公開資訊,並由同工與網友持續補充校對。若您發現資料有誤、或希望收錄某本書,歡迎與我們聯繫。</p>
@@ -136,7 +136,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 </main>
 <footer><div class="ft">
   <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
-  <span><a href="/api/books">開放 API</a> ・ <a href="/changelog.php" id="ftVer" title="版本更新紀錄">版本資訊</a></span>
+  <span><a href="/api.html">開放 API</a> ・ <a href="/changelog.php" id="ftVer" title="版本更新紀錄">版本資訊</a></span>
 </div></footer>
 <script>fetch("/api/version").then(r=>r.ok?r.json():null).then(j=>{const v=j&&j.data&&j.data.version;if(v)document.getElementById("ftVer").textContent="v"+v;}).catch(()=>{});</script>
 <script>

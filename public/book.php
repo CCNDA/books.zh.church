@@ -354,7 +354,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
 
 <footer><div class="ft">
   <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
-  <span><a href="/about.html">關於本站</a> ・ <a href="/api/books">開放 API</a> ・ <a href="/changelog.php" title="版本更新紀錄"><?php require_once dirname(__DIR__) . '/app/lib/release.php'; $ver = app_version(); echo $ver !== '' ? 'v' . htmlspecialchars($ver, ENT_QUOTES, 'UTF-8') : '版本資訊'; ?></a></span>
+  <span><a href="/about.html">關於本站</a> ・ <a href="/api.html">開放 API</a> ・ <a href="/changelog.php" title="版本更新紀錄"><?php require_once dirname(__DIR__) . '/app/lib/release.php'; $ver = app_version(); echo $ver !== '' ? 'v' . htmlspecialchars($ver, ENT_QUOTES, 'UTF-8') : '版本資訊'; ?></a></span>
 </div></footer>
 
 <script src="/assets/lang.js"></script>
