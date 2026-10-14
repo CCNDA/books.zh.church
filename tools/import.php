@@ -200,6 +200,19 @@ function parse_date(?string $s): array
 }
 
 /** 舊 bug 殘值(「出版社：」等純標籤)視為空 */
+/**
+ * 封面網址要指到檔案:以琳、衛理沒有封面時 og:image 會給站台根網址或目錄
+ * (https://www.elimbookstore.com.tw/、…/image/methodistbookroom/image/),收進來只會讓
+ * covers_to_r2 每天下載失敗。路徑空的或以 / 結尾就當作沒有封面(Asana 1217982001242514)。
+ */
+function cover_url_or_null(?string $u): ?string
+{
+    $u = tidy($u);
+    if ($u === null || !preg_match('#^https?://#i', $u)) return null;
+    $path = (string) parse_url($u, PHP_URL_PATH);
+    return ($path === '' || str_ends_with($path, '/')) ? null : $u;
+}
+
 function tidy(?string $s): ?string
 {
     $s = trim((string) $s);
@@ -404,7 +417,7 @@ function map_record(string $source, array $r): array
         'price'          => isset($r['price_list']) && $r['price_list'] !== '' ? $r['price_list']
                             : ($r['price_sale'] ?? null),
         'currency'       => tidy($r['currency'] ?? null) ?: (SOURCE_CURRENCY[$source] ?? DEFAULT_CURRENCY), // 爬蟲值優先,對映表當 fallback(決議 A)
-        'cover_url'      => tidy($r['cover_url'] ?? null),
+        'cover_url'      => cover_url_or_null($r['cover_url'] ?? null),
         'source_url'     => $r['source_url'] ?? null,
         'subject_code'   => cap(tidy($r['category_source'] ?? null), 40), // 2026-08-25 20→40:subjects.code 已加寬(福音書房 24 碼 ID handle)
         'subject_label'  => cap(tidy($r['category_text'] ?? null), 150),
