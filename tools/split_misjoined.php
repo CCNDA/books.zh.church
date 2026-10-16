@@ -18,6 +18,8 @@ declare(strict_types=1);
  *      (api 的購書彙整是 links + buy_links 聯集,只刪 links 會留下假按鈕)
  *   4. books.extra.campus 若存的是混入那筆,改成 --campus-json 給的本書商品資料;
  *      沒給就只報告、不動(寧可留舊資料,也不要清成空的)
+ *   5. books.original_title 若等於混入商品的 title_en／authors_raw,改成本書商品的 title_en(沒有就 NULL)
+ *      (10/17 逐欄比對 6 本拆分前快照,只有 45744 這一欄被混入資料寫到)
  * 拆完之後,用已修好的 import.php 重新匯入那 6 個混入商品:
  *   正確 ISBN 有既有書的會自動併過去(95009、57889、86339),沒有的會新建。
  *   source_url 在第 1 步已刪,import 的 doneUrls 不會擋。
@@ -143,6 +145,14 @@ foreach (PAIRS as $bookId => [$edId, $intruderPid, $ownPid]) {
         }
     }
 
+    // 5. 原文書名:校園 meta 的英文段常是「作者英文名」(45744 被寫成「余惠娥(Hui Er Yu)」)。
+    //    等於混入商品的 title_en 或 authors_raw 才改;改成本書商品的 title_en,沒有就清空
+    $origTitle = $pdo->query("SELECT original_title FROM books WHERE book_id = $bookId")->fetchColumn();
+    $fixOrig = $exIsIntruder && $origTitle !== null && $origTitle !== ''
+        && in_array($origTitle, [$exCampus['title_en'] ?? null, $exCampus['authors_raw'] ?? null], true);
+    $newOrig = $fixOrig ? ($campus[$ownPid]['title_en'] ?? null) : null;
+    if ($fixOrig) $plan[] = ["UPDATE books.original_title「{$origTitle}」→ " . ($newOrig === null ? 'NULL' : "「{$newOrig}」"), 1];
+
     foreach ($plan as [$sql, $n]) echo "   $sql   ($n 列)\n";
     $sum['rows'] += array_sum(array_column($plan, 1));
     if (!$apply) { $sum['done']++; continue; }
@@ -155,6 +165,9 @@ foreach (PAIRS as $bookId => [$edId, $intruderPid, $ownPid]) {
         if ($blChanged) {
             $pdo->prepare('UPDATE books SET buy_links = ? WHERE book_id = ?')
                 ->execute([json_encode($bl2, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $bookId]);
+        }
+        if ($fixOrig) {
+            $pdo->prepare('UPDATE books SET original_title = ? WHERE book_id = ?')->execute([$newOrig, $bookId]);
         }
         if ($newCampus !== null) {
             $extra['campus'] = $newCampus;
