@@ -363,12 +363,31 @@ function weight_g(?string $s): ?int
     return $s && preg_match('/(\d+)/', $s, $m) ? (int) $m[1] : null;
 }
 
+/**
+ * 一筆紀錄同時有 isbn（詳細資料區）與 isbn_meta（商品頁 meta）時選哪個。
+ * 校園的 isbn 是在整頁文字找第一個「ISBN：」，會抓到頁面上相關商品的號；
+ * isbn_meta 是商品自己的 meta keywords。兩者換成 13 碼仍不同時以 isbn_meta 為準並印警告。
+ * 舊寫法 isbn 優先，讓不同的書以錯號跨站合併（book 45997 等 6 本，2026-10-16 實查；Asana 1216590012421010）。
+ * 只有其中一個、或兩個相同（含 10／13 碼互換）時行為不變。
+ */
+function pick_isbn(array $r): array
+{
+    $a = isbn_pair($r['isbn'] ?? null);
+    $m = isbn_pair($r['isbn_meta'] ?? null);
+    if ($a[0] && $m[0] && $a[0] !== $m[0]) {
+        fwrite(STDERR, '  [ISBN 不一致] ' . ($r['product_id'] ?? $r['source_url'] ?? '?')
+            . " isbn={$a[0]} isbn_meta={$m[0]} → 用 isbn_meta\n");
+        return $m;
+    }
+    return $a[0] ? $a : $m;
+}
+
 // ── 來源映射(→ 統一中介格式) ───────────────────────────
 
 function map_record(string $source, array $r): array
 {
     $isJunkTitle = !tidy($r['title'] ?? null);
-    [$isbn13, $isbn10] = isbn_pair($r['isbn'] ?? ($r['isbn_meta'] ?? null));
+    [$isbn13, $isbn10] = pick_isbn($r);
     [$bDate, $eDate]   = parse_date($r['publish_date'] ?? null);
     // 以琳多人名以「/」分隔(如「薛玉光/古維華」)→ 先換成頓號再拆;
     // 僅 elim 適用,避免影響其他來源既有行為。原始字串仍完整保留於 *_raw 與 extra。
