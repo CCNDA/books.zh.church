@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
-# 流程:new_arrivals.py 抓十七站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓/突破機構/麥種傳道會)→ 產生當日 delta jsonl
+# 流程:new_arrivals.py 抓十六站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓/突破機構/麥種傳道會)→ 產生當日 delta jsonl
 #      → tools/import.php 匯入(以 source_url 去重)→ 十五站套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
