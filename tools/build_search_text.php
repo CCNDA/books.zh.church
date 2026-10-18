@@ -105,6 +105,12 @@ if ($bookId > 0) {
     }
     $st = $pdo->prepare("UPDATE books b SET {$setBoth} WHERE b.book_id = :id1");
     $st->execute([':id1' => $bookId]);
+    // ★ 2026-10-17:單書也要同步 book_search(API 查的是它)。原本只改 books,
+    //   單書重建後瘦表仍是舊關鍵字;新書先跑 --book 再跑 --missing 時更會整本漏掉(待處理 0 筆就不同步)
+    $pdo->prepare("INSERT INTO book_search (book_id, search_key)
+                   SELECT book_id, search_key FROM books WHERE book_id = :id3 AND search_key IS NOT NULL
+                   ON DUPLICATE KEY UPDATE search_key = VALUES(search_key)")
+        ->execute([':id3' => $bookId]);
     // ★ 不信 rowCount(值相同時回 0),回查實際狀態
     $chk = $pdo->prepare('SELECT CHAR_LENGTH(search_key) AS k, CHAR_LENGTH(search_text) AS t
                             FROM books WHERE book_id = :id2');
