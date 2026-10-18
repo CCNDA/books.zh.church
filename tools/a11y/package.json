@@ -1,0 +1,7 @@
+{
+  "name": "books-a11y-check",
+  "private": true,
+  "description": "書目網無障礙自動檢查（axe-core）。只在開發者電腦跑，不部署到主機。",
+  "scripts": { "check": "node check_axe.js" },
+  "dependencies": { "axe-core": "4.10.2", "puppeteer-core": "23.11.1" }
+}
