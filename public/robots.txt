@@ -1,9 +1,9 @@
 # 屬靈共同書目 books.zh.church
-# 熊哥 2026-10-11：搜尋、AI 引用回答、AI 訓練都開放（Content-Signal 見 https://contentsignals.org/）
+# 熊哥 2026-10-11：搜尋、AI 引用回答、AI 訓練都開放。
+# 2026-10-15 拿掉 Content-Signal 指令：Lighthouse 判為 Unknown directive（robots.txt is not valid），SEO 被扣到 92。
 # /admin/ 是內部後台。/api/ 是開放 API（llms.txt 有介紹），不擋。
 
 User-agent: *
-Content-Signal: search=yes, ai-input=yes, ai-train=yes
 Allow: /
 Disallow: /admin/
 
