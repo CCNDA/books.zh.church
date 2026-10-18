@@ -13,9 +13,28 @@
 
 ## [Unreleased]
 
+
+## [1.19.3] - 2026-10-18 —— 修正校園書併錯書、Search Console 404、搜尋同步
+
+### 資料修正
+
+- **校園書房匯入改用商品自己的 ISBN**：import.php 新增 pick_isbn()——isbn（整頁第一個「ISBN：」，會抓到相關商品的號）與 isbn_meta（商品自己的 meta）換成 13 碼仍不同時，以 isbn_meta 為準並印「[ISBN 不一致]」；其他情況不變（Asana 1216590012421010）
+- **新增 tools/split_misjoined.php**：拆開已被錯號併進別本書的 6 筆校園 edition（刪混入 edition 與其 identifiers／links／media、移除只屬於混入商品的作者、清 buy_links 平面欄位、換回 extra.campus 與 original_title）。預設 dry-run，--apply 才寫；每本一個交易、先核對才動，重跑不會多刪。books_dev 以正式庫複本完整彩排通過（6/6）
+- **build_search_text.php --book 也同步 book_search**：原本單書模式只改 books，API 實際查的 book_search 不更新；新書若先跑 --book 再跑 --missing 會整本搜不到
+
 ### SEO
 
+- **JS 裡不再出現像網址的書目路徑字串**：Google 把首頁卡片樣板的 href 與書頁「複製本頁連結」的前綴當連結去爬，Search Console 出現 /book/ 404。首頁卡片改由 fillBookLinks() 補連結、書頁複製連結改讀 canonical（Asana 1219536208818620）
 - **robots.txt 拿掉 Content-Signal 指令**：Lighthouse 不認得這個指令，判 robots.txt 無效，正式站 4 頁 SEO 都被扣到 92（結票要 95）。熊哥 2026-10-15 選拿掉；開放搜尋與 AI 的政策改寫在註解。其餘規則不變（Asana 1219388780554980）
+
+### 工具
+
+- **新增 tools/a11y/check_axe.js**：發版前跑的無障礙自動檢查（axe-core 4.10.2，WCAG 2.0／2.1 A＋AA，前台 4 頁 × 桌機／手機），有違規 exit 1；只在開發者電腦跑，不部署（Asana 1219388780461074）
+
+### 排程
+
+- crawler/daily_new.sh 註解「十七站」改「十六站」（括號裡本來就只列 16 家）
+
 
 
 ## [1.19.2] - 2026-10-14 —— 排程摘要、對帳數字、維運總覽
