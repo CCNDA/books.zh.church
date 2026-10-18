@@ -582,6 +582,40 @@ foreach (['某某 文' => '某某', '王小明 圖' => '王小明', '飯嶌玲�
        normalize_person_name($in)['clean']);
 }
 
+echo "\n== 26. 書目尾巴：作者欄夾 ISBN／書號／出版（2026-10-19，正式庫 21 個 person）==\n";
+
+// 整段只有 ISBN → filler（不是人）
+foreach (['9789864001682', 'ISBN 9789626735206', 'ISBN：9789888642106', '書號：9789811438141', '978-986-400-168-2'] as $in) {
+    $r = normalize_person_name($in);
+    ok($r['kind'] === 'filler' && $r['clean'] === '', "「{$in}」整段是 ISBN → filler", $r['kind'] . '/' . $r['clean']);
+}
+// 人名＋書目尾巴 → 切掉尾巴、記成 tail_note
+foreach (['唐澄暐 ISBN ： 9789865524272'           => '唐澄暐',
+          '陳恩明 ISBN ： 9789888562442 出版：突破' => '陳恩明',
+          '辛西亞·湯白斯 ISBN ： 9787510857294'     => '辛西亞·湯白斯',
+          '王小明 出版：校園'                        => '王小明'] as $in => $want) {
+    $r = normalize_person_name($in);
+    ok($r['clean'] === $want && $r['kind'] === 'tail_note', "「{$in}」→「{$want}」（tail_note）", $r['kind'] . '/' . $r['clean']);
+}
+// 「梁家麟著 ISBN：978…」：原本的規則在「著」後面切成兩段 → needs_resplit（走重切、不改名）；
+//   重切後「梁家麟著」照舊剝成「梁家麟」，「ISBN：978…」那段是 filler 被丟掉
+$r = normalize_person_name('梁家麟著 ISBN：9789622083837');
+ok($r['kind'] === 'needs_resplit', '「梁家麟著 ISBN：978…」走重切（不在這裡改名）', $r['kind'] . '/' . $r['clean']);
+$parts = array_column(pn_split_names('梁家麟著 ISBN：9789622083837'), 'name');
+ok($parts === ['梁家麟'], '「梁家麟著 ISBN：978…」重切後只剩梁家麟', implode('｜', $parts));
+// 多人擠一列：仍然走重切，不在這裡改名
+$r = normalize_person_name('李志秋，張心瑋合著 書號：9789811438141');
+ok($r['kind'] === 'needs_resplit', '「李志秋，張心瑋合著 書號：978…」仍判 needs_resplit（走重切、不可改名）', $r['kind']);
+$parts = array_column(pn_split_names('李志秋，張心瑋合著 書號：9789811438141'), 'name');
+ok(!preg_grep('/97[89]\d{10}|書號/u', $parts), '重切後不會再出現含 ISBN／書號的人名', implode('｜', $parts));
+$parts = array_column(pn_split_names('9789864001682、文亮'), 'name');
+ok($parts === ['文亮'], '「9789864001682、文亮」切完只剩文亮', implode('｜', $parts));
+// ★ 防誤傷：不是書目尾巴的照舊
+foreach (['台灣教會公報社出版', '王出版', '978', '張978', '李小華 9789'] as $in) {
+    $r = normalize_person_name($in);
+    ok(pn_cut_biblio_tail($in) === null && !pn_is_isbn_only($in), "「{$in}」不是書目尾巴，不切", $r['kind'] . '/' . $r['clean']);
+}
+
 echo "\n────────────────────────────\n";
 echo ($fail === 0 ? "全綠:{$pass} 項通過\n" : "**{$fail} 項失敗**(通過 {$pass})\n");
 exit($fail === 0 ? 0 : 1);
