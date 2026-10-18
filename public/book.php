@@ -452,7 +452,7 @@ function render(b){
   btns.push(`<button class="btn" id="copyBtn">🔗 複製本頁連結</button>`);
   $("bBtns").innerHTML = btns.join("");
   $("copyBtn").addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText("https://books.zh.church/book/" + b.book_id);
+    try { await navigator.clipboard.writeText(document.querySelector('link[rel="canonical"]').href);
           $("copyBtn").textContent = "✓ 已複製"; } catch(_){}
   });
   show("wrap", true);

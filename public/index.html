@@ -146,7 +146,7 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 :focus-visible{outline:3px solid #f0c04a;outline-offset:2px}
 </style>
 </head>
-<body>
+<body data-book-path="/book/">
 <a class="skip" href="#q">跳到搜尋</a>
 <header>
   <div class="hd-inner">
@@ -311,9 +311,9 @@ async function loadHome(){
     fetchJson(API + "/books/latest?limit=6").catch(() => []),
   ]);
   $("hotSec").hidden = !hot.length;
-  $("hotGrid").innerHTML = hot.map(b => card(b, "home_hot")).join("");
+  $("hotGrid").innerHTML = hot.map(b => card(b, "home_hot")).join(""); fillBookLinks($("hotGrid"));
   $("newSec").hidden = !latest.length;
-  $("newGrid").innerHTML = latest.map(b => card(b, "home_new")).join("");
+  $("newGrid").innerHTML = latest.map(b => card(b, "home_new")).join(""); fillBookLinks($("newGrid"));
   $("allSec").hidden = !(hot.length || latest.length);
 }
 
@@ -364,9 +364,17 @@ async function load(){
     + (state.q ? `・關鍵字「${esc(state.q)}」` : "")
     + (filter ? ` <a href="/" style="color:var(--gold)">✕ 清除篩選</a>` : "");
   $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
-  $("grid").innerHTML = items.map(card).join("");
+  $("grid").innerHTML = items.map(card).join(""); fillBookLinks($("grid"));
   renderPager(page, pages);
 }
+/* 書目連結：樣板字串裡不寫 href（含變數的書目路徑）——Google 會把 JS 裡像網址的字串當連結去爬，
+   爬到「書目路徑＋未代換的變數名」而回 404（Search Console 2026-10-16 實查，Asana 1219536208818620）。
+   卡片畫進頁面後再用 DOM 補 href，路徑前綴放在 <body data-book-path>。 */
+function fillBookLinks(root){
+  const base = document.body.dataset.bookPath;
+  root.querySelectorAll("a[data-book-link]").forEach(a => { a.href = base + a.closest(".book").dataset.id; });
+}
+
 function card(b, src){
   const meta = [b.author, b.translator ? b.translator + " 譯" : "", b.publisher,
                 b.publish_date ? String(b.publish_date).slice(0,4) : ""]
@@ -376,9 +384,9 @@ function card(b, src){
          onerror="this.parentNode.innerHTML='<div class=ph>${esc((b.title||'書').charAt(0))}</div>'">`
     : `<div class="ph">${esc((b.title || "書").charAt(0))}</div>`;
   return `<article class="book" data-id="${b.book_id}" data-src="${src || ""}">
-    <a class="cover" href="/book/${b.book_id}" aria-hidden="true" tabindex="-1">${cover}</a>
+    <a class="cover" data-book-link aria-hidden="true" tabindex="-1">${cover}</a>
     <div class="bi">
-      <h2 class="bt serif"><a href="/book/${b.book_id}">${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
+      <h2 class="bt serif"><a data-book-link>${esc(b.title)}${b.subtitle ? "<small>:" + esc(b.subtitle) + "</small>" : ""}</a></h2>
       <div class="bmeta">${meta}</div>
       <p class="bsum">${esc(b.summary_short || "")}</p>
       <div class="btag">${b.category_name ? "<span>" + esc(b.category_name) + "</span>" : ""}</div>
