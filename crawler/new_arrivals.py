@@ -229,7 +229,7 @@ def collect_logos(writer, year: int, max_pages: int, dry_run: bool,
                  else f"扣掉漏頁仍有 {gap - by_pages} 筆不明,懷疑排序鍵 {sort} 有並列 → 跑 logos_coverage.py 對帳")
         print(f"  [警告] 涵蓋率 {pct:.1f}%,{gap} 筆未收:{cause}", flush=True)
 
-    return _parse_new(new_codes, logos.parse_product, writer, dry_run)
+    return _parse_new(new_codes, ParseSkip(DATA / "logos_parse_skip.tsv", logos.parse_product, dry_run), writer, dry_run)
 
 
 # ── 以琳分類增量(各分類列表最新在前,無新品即停)──────────────
@@ -681,6 +681,61 @@ def collect_btproduct(writer, max_pages: int, dry_run: bool,
     fresh = _parse_new(new_keys, parse, writer, dry_run)
     btproduct._flush_reports()
     return fresh
+
+
+class ParseSkip:
+    """包住 parse_fn：解析不到（回 None）的商品碼記進 TSV，RECHECK_DAYS 天內不再重抓。
+
+    起因（Asana 1216651317073747 追加 C）：基道 CCLC2221 商品頁 force 重抓仍解析不到書名，
+    parse_product 只印「[略過] … 無書名」就丟掉；沒寫進 master，每天排程都重抓一次、再丟一次。
+    - 記錄：碼、第一次失敗、最後一次失敗、失敗次數（之後可以人工查，不再是無聲丟棄）
+    - 超過 RECHECK_DAYS 天會再試一次（站方可能修好頁面）；試成功就從清單移除
+    - 抓取錯誤（RuntimeError，網路問題）不算解析失敗、不記，照原本「下次重跑補抓」
+    - dry-run 只讀清單、不寫
+    """
+    RECHECK_DAYS = 7
+
+    def __init__(self, path: Path, parse_fn, dry_run: bool = False):
+        self.path, self.parse_fn, self.dry_run = path, parse_fn, dry_run
+        self.rows: dict[str, list[str]] = {}
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines()[1:]:
+                c = line.split("\t")
+                if len(c) >= 4 and c[0]:
+                    self.rows[c[0]] = c[:4]
+        self.today = datetime.now().strftime("%Y-%m-%d")
+        self.skipped = 0
+
+    def _fresh(self, key: str) -> bool:
+        last = self.rows[key][2]
+        try:
+            return (datetime.now() - datetime.strptime(last, "%Y-%m-%d")).days < self.RECHECK_DAYS
+        except ValueError:
+            return False
+
+    def __call__(self, key: str):
+        if key in self.rows and self._fresh(key):
+            self.skipped += 1
+            print(f"  [已知解析失敗，{self.RECHECK_DAYS} 天內不重抓] {key}（最後 {self.rows[key][2]}、共 {self.rows[key][3]} 次）", flush=True)
+            return None
+        rec = self.parse_fn(key)          # RuntimeError 照樣往外丟，給 _parse_new 當「下次補抓」
+        if rec is None:
+            first, n = (self.rows[key][1], int(self.rows[key][3] or 0)) if key in self.rows else (self.today, 0)
+            self.rows[key] = [key, first, self.today, str(n + 1)]
+        elif key in self.rows:
+            del self.rows[key]            # 這次解析成功了 → 移出清單
+        self._save()
+        return rec
+
+    def _save(self) -> None:
+        if self.dry_run:
+            return
+        if not self.rows:
+            if self.path.exists():
+                self.path.unlink()
+            return
+        lines = ["code\tfirst_failed\tlast_failed\tcount"] + ["\t".join(r) for r in sorted(self.rows.values())]
+        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _parse_new(new_keys: list[str], parse_fn, writer, dry_run: bool) -> list[dict]:
