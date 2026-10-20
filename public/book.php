@@ -19,6 +19,21 @@ if ($id > 0) {
         $dbError = true;
     }
 }
+if (!$book && !$dbError && $id > 0) {
+    // 2026-10-20 被合併掉的書號 301 到保留的那本（Asana 1219483419251976）。
+    // 表不存在或查詢失敗時當作沒有轉址，照原本回 404。
+    try {
+        $st = db()->prepare('SELECT new_book_id FROM book_redirects WHERE old_book_id = :id');
+        $st->execute([':id' => $id]);
+        $to = (int) $st->fetchColumn();
+    } catch (Throwable $ex) {
+        $to = 0;
+    }
+    if ($to > 0 && $to !== $id) {
+        header('Location: /book/' . $to, true, 301);
+        exit;
+    }
+}
 if (!$book) {
     // DB 異常回 503（暫時無法服務），不要回 404：404 會讓搜尋引擎把書目頁移出索引
     http_response_code($dbError ? 503 : 404);

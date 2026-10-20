@@ -22,6 +22,10 @@
 - **新增審核清單 docs/review/2026-10-19_person_biblio_tail.tsv**：正式庫 107 個 person（114 本書）的處理方式；熊哥 2026-10-20 裁示：8 列只有 ISBN 的刪、書目尾巴整類放行（67 併入／12 改名）、「哥本哈根出版社」從作者刪、8 列重切只補不刪、16 列留人工
 - **新增複核清單 database/merge_lists/2026-10-14_title_publisher.tsv**：書名＋出版社相同的重複書，熊哥 10/14 複核 1,856 列、判定「併入」1,841 組，給 merge_duplicate_books.php --pairs 用（Asana 1219483419251976）
 
+### SEO
+
+- **被合併掉的書號 301 轉到保留的那本**：新增 book_redirects 表（database/migrations/2026-10-20_book_redirects.sql）。merge_duplicate_books.php 合併時把「舊書號 → 保留書號」寫進去，之前指向舊書號的轉址一併改指新目標（不留轉址鏈）；表不在就拒絕合併（exit 1）。book.php 找不到書時先查這張表，有就 301 到 /book/{保留書號}，沒有照舊 404。起因：測試庫彩排 1,841 組合併後，被併掉的書頁直接 404，正式站上線會讓 Google 已收錄的網址大量 404（Asana 1219483419251976）
+
 ### 工具
 
 - **新增 tools/find_title_publisher_duplicates.php（唯讀）**：找出書名＋出版社相同（出版社用正規群組，校園／校園書房／校園書房出版社算同一家）、沒被合併的重複書，產出與 merge_duplicate_books.php --pairs 相容的複核清單。作者寫法不同但互相包含（含去掉括號英文名後）預填「併入」；兩邊都沒作者、同一家書房上兩筆留給人判斷；作者不同預填「不併」。起因：搜「張悅慈」出現三筆《邪惡與上帝新世界》（Asana 1219483419251976）

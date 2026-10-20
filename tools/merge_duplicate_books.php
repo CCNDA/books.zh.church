@@ -187,6 +187,16 @@ $stMoveSub   = $pdo->prepare('UPDATE IGNORE book_subjects SET book_id = :p WHERE
 $stMoveSer   = $pdo->prepare('UPDATE IGNORE book_series   SET book_id = :p WHERE book_id = :d');
 $stGetBook   = $pdo->prepare('SELECT * FROM books WHERE book_id = :id');
 $stDelBook   = $pdo->prepare('DELETE FROM books WHERE book_id = :id');
+// 轉址表不在就不合併:併了卻沒記轉址,舊網址會變 404(先跑 database/migrations/2026-10-20_book_redirects.sql)
+if (!$pdo->query("SHOW TABLES LIKE 'book_redirects'")->fetchColumn()) {
+    fwrite(STDERR, "找不到 book_redirects 表,先跑 database/migrations/2026-10-20_book_redirects.sql 再合併\n"); exit(1);
+}
+
+// 2026-10-20 合併後舊書號 301 轉址(Asana 1219483419251976):被併的書號記進 book_redirects;
+// 之前指向它的轉址一併改指新目標,不留轉址鏈
+$stRedir     = $pdo->prepare('INSERT INTO book_redirects (old_book_id, new_book_id, reason) VALUES (:d, :p, \'merge\')
+                              ON DUPLICATE KEY UPDATE new_book_id = VALUES(new_book_id)');
+$stRedirFlat = $pdo->prepare('UPDATE book_redirects SET new_book_id = :p WHERE new_book_id = :d');
 $stFill      = $pdo->prepare(
     'UPDATE books SET
        original_title = COALESCE(original_title, :ot), author = COALESCE(author, :au),
@@ -232,6 +242,8 @@ foreach ($plans as [$p, $dups]) {
             else $ex[$srcKey . '_dup' . $d] = $recRaw;   // 不丟資料
         }
         $stDelBook->execute([':id' => $d]);   // 殘餘撞鍵列由 FK CASCADE 清掉
+        $stRedirFlat->execute([':p' => (int) $p['book_id'], ':d' => $d]);
+        $stRedir->execute([':d' => $d, ':p' => (int) $p['book_id']]);
     }
 
     // buy_links URL 去重(保序)
