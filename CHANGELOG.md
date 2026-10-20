@@ -19,7 +19,8 @@
 ### 資料修正
 
 - **作者欄不再夾 ISBN／書號／出版字樣**：衛理書房商品頁「作者」欄後面接著「ISBN」「書號」「出版」等欄位，爬蟲把整段當作者（例「唐澄暐 ISBN ： 9789865524272」）。crawler/methodist_crawler.py 詳細資料欄位切開時加上這幾個標籤；tools/lib_person.php 新增書目尾巴判斷——整段只有 ISBN 的當 filler（不是人），「人名＋ISBN／書號＋13 碼」或「人名＋出版：…」切掉尾巴（tail_note）；多人擠一列仍走重切（Asana 1219613623198535）
-- **新增審核清單 docs/review/2026-10-19_person_biblio_tail.tsv**：正式庫 107 個 person（114 本書）的處理方式；熊哥 2026-10-20 裁示：8 列只有 ISBN 的刪、書目尾巴整類放行（67 併入／12 改名）、「哥本哈根出版社」從作者刪、8 列重切後刪掉多餘的髒名字（database/migrations/2026-10-20_person_biblio_tail.sql → fix_person_names --book 15 本 → 2026-10-20_person_biblio_tail_step2.sql）、16 列留人工
+- **新增 tools/clean_credit_biblio_tail.php**：book_persons.credit_text（書頁人名後面括號裡的原始署名）也去掉書目尾巴，規則同 pn_cut_biblio_tail()；人工清單上的 person 與整段只有 ISBN 的不動；預設 dry-run。起因：人名清乾淨後書頁仍顯示「唐澄暐(唐澄暐 ISBN ： 9789865524272)」
+- **新增審核清單 docs/review/2026-10-19_person_biblio_tail.tsv**：正式庫 107 個 person（114 本書）的處理方式；熊哥 2026-10-20 裁示：8 列只有 ISBN 的刪、書目尾巴整類放行（67 併入／12 改名）、「哥本哈根出版社」從作者刪、8 列重切後刪掉多餘的髒名字（database/migrations/2026-10-20_person_biblio_tail.sql → fix_person_names --book 15 本 → 2026-10-20_person_biblio_tail_step2.sql → tools/clean_credit_biblio_tail.php 清關聯的 credit_text → build_search_text 影響的書）、16 列留人工
 - **新增複核清單 database/merge_lists/2026-10-14_title_publisher.tsv**：書名＋出版社相同的重複書，熊哥 10/14 複核 1,856 列、判定「併入」1,841 組，給 merge_duplicate_books.php --pairs 用（Asana 1219483419251976）
 
 ### SEO
