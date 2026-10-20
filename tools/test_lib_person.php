@@ -159,7 +159,7 @@ ok($bad === [], 'preg 樣式一律用 \\x{} escape,不得寫字面全形字元',
 
 // 同時驗分隔符常數的實際位元組(退化成兩個半形分號就是靠這條抓出來的)
 $hex = strtoupper(bin2hex(implode('', PN_DELIMS)));
-ok($hex === '3BEFBC9BE38081', 'PN_DELIMS 位元組應為 3B EFBC9B E38081(; ; 、)', $hex);
+ok($hex === '3BEFBC9BE38081EFBC8C', 'PN_DELIMS 位元組應為 3B EFBC9B E38081 EFBC8C(; ; 、 ,)', $hex);
 
 echo "\n== 12. pn_split_names 端到端(實際出貨的那條路) ==\n";
 $e2e = [
@@ -614,6 +614,26 @@ ok($parts === ['文亮'], '「9789864001682、文亮」切完只剩文亮', impl
 foreach (['台灣教會公報社出版', '王出版', '978', '張978', '李小華 9789'] as $in) {
     $r = normalize_person_name($in);
     ok(pn_cut_biblio_tail($in) === null && !pn_is_isbn_only($in), "「{$in}」不是書目尾巴，不切", $r['kind'] . '/' . $r['clean']);
+}
+
+echo "\n== 27. 全形逗號是分隔符（2026-10-21，票 1219676923286530；85920「李志秋，張心瑋」）==\n";
+$cases = [
+    "李志秋\u{FF0C}張心瑋"                            => ['李志秋', '張心瑋'],
+    "吉姆．懷爾德\u{FF0C}米榭爾．亨德力克"             => ['吉姆．懷爾德', '米榭爾．亨德力克'],
+    "宮本顯二\u{FF0C} 宮本禮子"                        => ['宮本顯二', '宮本禮子'],          // 逗號後多一個空白
+    "C.S. 路易斯 著\u{FF0C}鄧軍海 譯"                  => ['C.S. 路易斯', '鄧軍海'],
+    "孔毅（Roger I. Kung）\u{FF0C}"                    => ['孔毅（Roger I. Kung）'],        // 結尾多一個逗號
+    // ★ 括號裡的逗號不切（英文名「姓，名」）
+    "吳國傑 \u{FF08}Ng\u{FF0C} Nathan K. K.\u{FF09}"   => ["吳國傑 \u{FF08}Ng\u{FF0C} Nathan K. K.\u{FF09}"],
+    // ★ 學位／會銜不是另一個人
+    "ROBERT J.FUREY\u{FF0C}PH.D."                      => ["ROBERT J.FUREY\u{FF0C}PH.D."],
+    "Michael Kennedy\u{FF0C} S.J."                     => ["Michael Kennedy\u{FF0C} S.J."],
+    // ★ 半形逗號仍不切
+    'Smith, John'                                      => ['Smith, John'],
+];
+foreach ($cases as $in => $want) {
+    $got = array_column(pn_split_names($in), 'name');
+    ok($got === $want, "切「{$in}」應得 [" . implode('｜', $want) . ']', '[' . implode('｜', $got) . ']');
 }
 
 echo "\n────────────────────────────\n";
