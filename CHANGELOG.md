@@ -13,11 +13,24 @@
 
 ## [Unreleased]
 
+
+## [1.19.4] - 2026-10-20 —— 重複書工具、作者欄書目尾巴、基道解析失敗不重抓
+
+### 資料修正
+
+- **作者欄不再夾 ISBN／書號／出版字樣**：衛理書房商品頁「作者」欄後面接著「ISBN」「書號」「出版」等欄位，爬蟲把整段當作者（例「唐澄暐 ISBN ： 9789865524272」）。crawler/methodist_crawler.py 詳細資料欄位切開時加上這幾個標籤；tools/lib_person.php 新增書目尾巴判斷——整段只有 ISBN 的當 filler（不是人），「人名＋ISBN／書號＋13 碼」或「人名＋出版：…」切掉尾巴（tail_note）；多人擠一列仍走重切（Asana 1219613623198535）
+- **新增審核清單 docs/review/2026-10-19_person_biblio_tail.tsv**：正式庫 107 個 person（114 本書）的處理方式；熊哥 2026-10-20 裁示：8 列只有 ISBN 的刪、書目尾巴整類放行（67 併入／12 改名）、「哥本哈根出版社」從作者刪、8 列重切只補不刪、16 列留人工
+- **新增複核清單 database/merge_lists/2026-10-14_title_publisher.tsv**：書名＋出版社相同的重複書，熊哥 10/14 複核 1,856 列、判定「併入」1,841 組，給 merge_duplicate_books.php --pairs 用（Asana 1219483419251976）
+
 ### 工具
 
 - **新增 tools/find_title_publisher_duplicates.php（唯讀）**：找出書名＋出版社相同（出版社用正規群組，校園／校園書房／校園書房出版社算同一家）、沒被合併的重複書，產出與 merge_duplicate_books.php --pairs 相容的複核清單。作者寫法不同但互相包含（含去掉括號英文名後）預填「併入」；兩邊都沒作者、同一家書房上兩筆留給人判斷；作者不同預填「不併」。起因：搜「張悅慈」出現三筆《邪惡與上帝新世界》（Asana 1219483419251976）
 - **import.php 第三層比對「書名＋出版社」**：ISBN 與「書名＋第一作者」都沒對到時，找同書名、同一家出版社（正規群組）、作者相容、不同書房的上架書；剛好一本才合併，兩本以上不猜。判斷規則放 tools/lib_dupmatch.php，與上面的找重複工具共用。dry-run 合併明細多一欄「書名＋出版社」
+- **基道（logos）解析失敗的商品碼 7 天內不重抓**：crawler/new_arrivals.py 新增 ParseSkip，解析不到書名的碼記進 data/logos_parse_skip.tsv（第一次／最後一次失敗日、次數），7 天內跳過、之後再試一次，成功就移出；網路錯誤不算解析失敗。原本每天重抓同一批、再無聲丟掉（Asana 1216651317073747）
 
+### 文件
+
+- **docs/database-current.md 補 10/07 之後的 6 個 migration、nonbook_guard_log 與 rockhouse_category_map 兩張表、books 索引現況**（Asana 1217927332453913）
 
 ## [1.19.3] - 2026-10-18 —— 修正校園書併錯書、Search Console 404、搜尋同步
 
