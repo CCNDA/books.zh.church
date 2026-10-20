@@ -183,6 +183,39 @@ const PN_TAIL_GLUE = '[\s\x{3000}\x{00B7}\x{2022}\x{FF65}\x{30FB}\/\x{FF0F}\\\\]
 /** 剝完字尾註記後,至少要剩幾個字才敢採用(見檔頭第 4 點) */
 const PN_MIN_LEN = 2;
 
+/**
+ * 書目尾巴（2026-10-19，Asana 1219613623198535）：有些書房的作者欄後面直接接
+ * 「ISBN ： 978…」「書號：978…」「出版：突破」，或整欄就是 ISBN（正式庫 21 個 person）。
+ * ★ ISBN 一定要 13 碼（97[89] 開頭、中間可夾空白或連字號）才算；「出版」一定要接冒號——
+ *   「台灣教會公報社出版」沒有冒號，那是出版社名，不能剝。
+ */
+const PN_BIBLIO_LABEL = '(?:ISBN|書號|书号)';
+const PN_ISBN13       = '97[89](?:[\s\x{3000}\-]?\d){10}';
+
+/** 整段只有 ISBN（可帶「ISBN／書號：」標籤）→ 不是人 */
+function pn_is_isbn_only(string $s): bool
+{
+    return (bool) preg_match('/^(?:' . PN_BIBLIO_LABEL . '[\s\x{3000}]*[:\x{FF1A}]?[\s\x{3000}]*)?'
+        . PN_ISBN13 . '$/u', trim($s));
+}
+
+/**
+ * 切掉書目尾巴。回傳 [前面的人名, 切掉的尾巴]；沒有書目尾巴回 null。
+ * 只在前面還有字時才切（整段都是書目資料的交給 pn_is_isbn_only）。
+ */
+function pn_cut_biblio_tail(string $s): ?array
+{
+    $s = trim($s);
+    $res = [
+        '/^(.+?)[\s\x{3000}]*(' . PN_BIBLIO_LABEL . '[\s\x{3000}]*[:\x{FF1A}]?[\s\x{3000}]*' . PN_ISBN13 . '.*)$/u',
+        '/^(.+?)[\s\x{3000}]+(出版[\s\x{3000}]*[:\x{FF1A}].*)$/u',
+    ];
+    foreach ($res as $re) {
+        if (preg_match($re, $s, $m) && trim($m[1]) !== '') return [trim($m[1]), trim($m[2])];
+    }
+    return null;
+}
+
 /** persons.name 超過這個字數就當「疑似整段文字」,一律人工看 */
 const PN_LONG_LEN = 25;
 
@@ -640,6 +673,25 @@ function normalize_person_name(?string $raw): array
         $out['kind']   = 'entity';
         $out['hold'][] = 'HTML entity 殘骸「' . $e . '」→ 走 fix_person_names.php 重新 decode 再切';
         return $out;
+    }
+    // (b-2) 2026-10-19 書目尾巴（Asana 1219613623198535）
+    //   排在「一列多人要重切」之後：「李志秋，張心瑋合著 書號：978…」會先走重切，
+    //   切出來的「書號：978…」那一段再進這裡，被判成 filler。
+    //   整段只有 ISBN → filler（不是人，check_person_names 會列進刪除清單）；
+    //   人名後面黏書目尾巴 → 切掉後**剩下的人名照原本的規則再跑一次**，種類記成 tail_note
+    //   （check_person_names 會找同名的既有列併過去，找不到才改名）。
+    if (pn_is_isbn_only($orig)) {
+        $out['kind']     = 'filler';
+        $out['clean']    = '';
+        $out['stripped'] = [$orig];
+        return $out;
+    }
+    if (($cut = pn_cut_biblio_tail($orig)) !== null) {
+        [$prefix, $tail] = $cut;
+        $inner = normalize_person_name($prefix);
+        $inner['stripped'] = array_merge($inner['stripped'], [$tail]);
+        if ($inner['kind'] === 'clean' && !$inner['hold']) $inner['kind'] = 'tail_note';
+        return $inner;
     }
     // (c-0) 整列是填充詞(「等」「其他」…)→ 不是人
     if (in_array(preg_replace('/[\s\x{3000}]+/u', '', $orig), PN_FILLER_WORDS, true)) {
