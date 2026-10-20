@@ -82,6 +82,7 @@ require dirname(__DIR__) . '/app/lib/db.php';
 // 書名促銷詞剝除規則。與 tools/check_title_promo.php **共用同一份** ——
 // 那支是這條規則的驗證者(產 dry-run 對照表給人勾),兩邊各寫一份會悄悄分家。
 require_once __DIR__ . '/lib_title.php';
+require_once __DIR__ . '/lib_dupmatch.php';   // 書名＋出版社比對規則(與 find_title_publisher_duplicates.php 共用)
 // 人名正規化規則(entity 解碼、角色詞、字尾註記、分隔符與括號定義)。
 // 與 tools/check_person_names.php、tools/fix_person_names.php **共用同一份**。
 require_once __DIR__ . '/lib_person.php';
@@ -480,6 +481,48 @@ $pubMap = [];
 foreach ($pdo->query("SELECT publisher_id, name_zh FROM publishers") as $r) {
     $pubMap[$r['name_zh']] = (int) $r['publisher_id'];
 }
+// 書名＋出版社比對(第三層,2026-10-14;Asana 1219483419251976):
+// ISBN 沒命中、書名＋第一作者也沒命中時,找「同書名、同一家出版社(正規群組)、作者相容」的上架書。
+// 起因:真哪噠／微讀的書沒有 ISBN、作者寫法跟他站不同,同一本《邪惡與上帝新世界》長成三筆。
+$pubGroup = [];   // 出版社名稱 → COALESCE(canonical_id, publisher_id),「校園」「校園書房出版社」同一群
+foreach ($pdo->query("SELECT name_zh, COALESCE(canonical_id, publisher_id) AS g FROM publishers") as $r) {
+    $pubGroup[$r['name_zh']] = (int) $r['g'];
+}
+$tpMap = [];      // dm_norm(書名)|出版社群組 → [[book_id, 作者原文, isbn13, 來源[]], ...]
+foreach ($pdo->query(
+    "SELECT b.book_id, b.title, b.author, b.isbn13,
+            GROUP_CONCAT(DISTINCT e.source) AS srcs,
+            GROUP_CONCAT(DISTINCT COALESCE(p.canonical_id, p.publisher_id)) AS pubs
+       FROM books b JOIN editions e ON e.book_id = b.book_id
+       LEFT JOIN publishers p ON p.publisher_id = e.publisher_id
+      WHERE b.is_published = 1
+      GROUP BY b.book_id") as $r) {
+    $t = dm_norm($r['title']);
+    if ($t === '') continue;
+    foreach (array_filter(explode(',', (string) $r['pubs'])) as $g) {
+        $tpMap["$t|$g"][] = [(int) $r['book_id'], $r['author'], $r['isbn13'] ?: null, explode(',', (string) $r['srcs'])];
+    }
+}
+
+/**
+ * 第三層比對:只在剛好一本候選「高」等級(dm_judge:作者相容、至少一邊有作者、不同書房)時合併;
+ * 兩本以上符合就不猜(交 find_title_publisher_duplicates.php 給人看)。ISBN 條件與模糊比對相同。
+ */
+function title_publisher_match(array $tpMap, array $pubGroup, array $m, string $source, bool $isEbook): ?int
+{
+    $t = dm_norm($m['title'] ?? '');
+    $g = $pubGroup[$m['publisher'] ?? ''] ?? null;
+    if ($t === '' || $g === null) return null;
+    $hits = [];
+    foreach ($tpMap["$t|$g"] ?? [] as [$bid, $author, $isbn, $srcs]) {
+        [$level] = dm_judge($m['authors_raw'] ?? null, $author, [$source], $srcs);
+        if ($level !== '高') continue;
+        if ($m['isbn13'] && $isbn !== null && $isbn !== $m['isbn13'] && !$isEbook) continue;
+        $hits[] = $bid;
+    }
+    return count($hits) === 1 ? $hits[0] : null;
+}
+
 $subjMap = [];
 foreach ($pdo->query("SELECT subject_id, scheme, code, label FROM subjects") as $r) {
     $subjMap[$r['scheme'] . '|' . $r['code'] . '|' . $r['label']] = (int) $r['subject_id'];
@@ -492,7 +535,7 @@ echo "預載:editions " . count($doneUrls) . "、isbn " . count($isbnMap)
 $stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merged' => 0, 'edition' => 0,
           // dry-run 合併明細(8/21 起):合併率異常高時要能當場分辨
           // 「ISBN 命中」與「書名+第一作者模糊比對」,後者才是誤併風險所在。
-          'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0,
+          'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0, 'merge_titlepub' => 0,
           // 站方 ISBN 不唯一而擋下的合併(akow)——正常應該只有個位數,
           // 若某次突然變多,代表站方又批次抄錯,要回頭看來源不是看程式
           'isbn_conflict' => 0];
@@ -619,6 +662,14 @@ while (($line = fgets($fh)) !== false) {
                 $mergeVia = 'fuzzy';
             }
         }
+        if ($bookId === null) {
+            $cand = title_publisher_match($tpMap, $pubGroup, $m, $source, $isEbook);
+            if ($cand !== null) {
+                $bookId = $cand;
+                $isMerge = true;
+                $mergeVia = 'titlepub';
+            }
+        }
     }
 
     // 記住本次匯入已出現過的 ISBN(同檔內撞號時要拿來比對是不是同一作品)
@@ -639,7 +690,7 @@ while (($line = fgets($fh)) !== false) {
         } else {
             $stats['merged']++;
             $stats['merge_' . $mergeVia]++;
-            if ($mergeVia === 'fuzzy' && count($fuzzySamples) < $fuzzyCap) {
+            if (($mergeVia === 'fuzzy' || $mergeVia === 'titlepub') && count($fuzzySamples) < $fuzzyCap) {
                 $fuzzySamples[] = [$m['title'], $m['authors'][0]['name'] ?? '', (int) $bookId];
             }
         }
@@ -676,6 +727,10 @@ while (($line = fgets($fh)) !== false) {
         if ($m['isbn13']) $isbnMap[$m['isbn13']] = $bookId;
         $fk = fuzzy_key($m['title'], $m['authors'][0]['name'] ?? null);
         if ($fk) $fuzzyMap[$fk] = $bookId;
+        $tpg = $pubGroup[$m['publisher'] ?? ''] ?? null;
+        if ($tpg !== null && dm_norm($m['title']) !== '') {
+            $tpMap[dm_norm($m['title']) . "|$tpg"][] = [$bookId, $m['authors_raw'], $m['isbn13'] ?: null, [$source]];
+        }
     } else {
         // 合併:只補空欄,不覆蓋;extra 增鍵;buy_links 追加
         $cur = $pdo->prepare("SELECT summary, extra, buy_links FROM books WHERE book_id = :id");
@@ -854,7 +909,7 @@ echo ($dry ? "[dry-run 模擬] " : "") . "完成:讀 {$stats['read']}、新書 {
 // 沿 8/19 橄欖華宣慣例——合併率偏高時,先確認高的是 ISBN 那一段再正式匯入。
 if ($dry) {
     echo "  合併明細:ISBN 命中 {$stats['merge_isbn']}、模糊比對 {$stats['merge_fuzzy']}、"
-       . "同檔內重複 {$stats['merge_infile']}\n";
+       . "書名＋出版社 {$stats['merge_titlepub']}、同檔內重複 {$stats['merge_infile']}\n";
     if ($fuzzySamples) {
         $exist = [];
         $uniq = array_values(array_unique(array_filter(
