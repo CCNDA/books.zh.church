@@ -190,7 +190,7 @@ SELECT (SELECT COUNT(*) FROM persons) AS persons_total, (SELECT COUNT(*) FROM bo
 
 -- 紀錄
 INSERT INTO schema_migrations (version, applied_at, note) VALUES
-  (2026-10-20_person_biblio_tail.sql, NOW(), 作者欄書目尾巴清理：刪 9、併 66、改名 12（107 person／114 本）)
+  ('2026-10-20_person_biblio_tail.sql', NOW(), '作者欄書目尾巴清理：刪 9、併 66、改名 12（107 person／114 本）')
 ON DUPLICATE KEY UPDATE note = VALUES(note);
 
 -- 以上全部 0 列：COMMIT;   有任何一句回了列：ROLLBACK;
