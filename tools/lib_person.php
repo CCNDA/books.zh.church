@@ -802,10 +802,11 @@ function pn_split_delims(string $s, ?callable $warn = null): array
     $depth = 0;
     $buf   = '';
     $out   = [];
+    $seps  = [];   // $seps[$i] = 切開第 $i 段與第 $i+1 段的那個分隔符
     foreach (preg_split('//u', $s, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $ch) {
         if (isset($open[$ch]))  { $depth++;                    $buf .= $ch; continue; }
         if (isset($close[$ch])) { $depth = max(0, $depth - 1); $buf .= $ch; continue; }
-        if ($depth === 0 && in_array($ch, $delims, true)) { $out[] = $buf; $buf = ''; continue; }
+        if ($depth === 0 && in_array($ch, $delims, true)) { $out[] = $buf; $seps[] = $ch; $buf = ''; continue; }
         $buf .= $ch;
     }
     // 括號不成對(來源資料本來就殘缺)→ 大聲失敗並退回直接切割,
@@ -815,10 +816,11 @@ function pn_split_delims(string $s, ?callable $warn = null): array
         return explode(';', str_replace($delims, ';', $s));
     }
     $out[] = $buf;
-    // 學位／會銜字尾黏回前一段（全形逗號是 2026-10-21 才加進分隔符的，它會把這種字尾切出來）
+    // 學位／會銜字尾黏回前一段 —— **只限全形逗號切出來的**（2026-10-21 才加進分隔符的就是它）；
+    // 「李四；Jr.」「A、Inc」照舊切，不改寫原本的分隔符
     $merged = [];
-    foreach ($out as $seg) {
-        if ($merged !== [] && preg_match(PN_COMMA_SUFFIX, $seg)) {
+    foreach ($out as $i => $seg) {
+        if ($merged !== [] && ($seps[$i - 1] ?? '') === "\u{FF0C}" && preg_match(PN_COMMA_SUFFIX, $seg)) {
             $merged[count($merged) - 1] .= "\u{FF0C}" . $seg;
             continue;
         }
