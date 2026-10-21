@@ -59,7 +59,8 @@ fclose($fh);
 $pdo = db();
 $has = $pdo->prepare('SELECT 1 FROM dup_review WHERE list_name = :l AND source = :s AND source_key = :k AND candidate_book_id = :b');
 $book = $pdo->prepare('SELECT 1 FROM books WHERE book_id = :b');
-$ins = $pdo->prepare('INSERT IGNORE INTO dup_review
+// dry-run 不準備 INSERT：唯讀帳號連 prepare INSERT 都會被拒（10/22 正式庫 dry-run 實測）
+$ins = !$apply ? null : $pdo->prepare('INSERT IGNORE INTO dup_review
     (list_name, source, source_key, src_title, src_author, src_publisher, src_isbn, src_url, src_cover, candidate_book_id, match_how)
     VALUES (:l, :s, :k, :t, :a, :p, :i, :u, :v, :b, :h)');
 
