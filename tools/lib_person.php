@@ -62,7 +62,7 @@ declare(strict_types=1);
 const PN_DELIMS = [';', "\u{FF1B}", "\u{3001}", "\u{FF0C}"];                            // ; ； 、 ，
 // 全形逗號切開後，整段只是學位／會銜／公司字尾 → 不是另一個人，黏回前一段
 //（「ROBERT J.FUREY，PH.D.」「Michael Kennedy，S.J.」）
-const PN_COMMA_SUFFIX = '/^[\s\x{3000}]*(?:Ph\.?\s?D\.?|S\.?J\.?|O\.?S\.?B\.?|Jr\.?|Sr\.?|M\.?D\.?|Ltd\.?|Inc\.?)[\s\x{3000}]*$/iu';
+const PN_COMMA_SUFFIX = '/^[\s\x{3000}]*(?:Ph\.?\s?D\.?|Th\.?\s?D\.?|D\.?\s?Min\.?|Ed\.?\s?D\.?|D\.?D\.?|S\.?J\.?|O\.?S\.?B\.?|Jr\.?|Sr\.?|M\.?D\.?|Ltd\.?|Inc\.?)[\s\x{3000}]*$/iu';
 const PN_OPEN   = ['(' => 1, "\u{FF08}" => 1, '[' => 1, "\u{FF3B}" => 1, "\u{3010}" => 1]; // ( （ [ ［ 【
 const PN_CLOSE  = [')' => 1, "\u{FF09}" => 1, ']' => 1, "\u{FF3D}" => 1, "\u{3011}" => 1]; // ) ） ] ］ 】
 

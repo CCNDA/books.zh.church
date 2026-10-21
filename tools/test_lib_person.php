@@ -636,6 +636,9 @@ $cases = [
     "Jr.\u{FF0C}李四"                                   => ['Jr.', '李四'],
     "王大明\u{FF0C}Smith\u{FF0C}Jr."                    => ['王大明', "Smith\u{FF0C}Jr."],
     "Smith\u{FF0C}PhD"                                  => ["Smith\u{FF0C}PhD"],
+    // ★ 審查 10/21 補：神學／教牧學位也是字尾
+    "Jane Doe\u{FF0C}Th.D."                             => ["Jane Doe\u{FF0C}Th.D."],
+    "王大明\u{FF0C}D.Min."                               => ["王大明\u{FF0C}D.Min."],
 ];
 foreach ($cases as $in => $want) {
     $got = array_column(pn_split_names($in), 'name');

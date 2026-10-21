@@ -24,6 +24,10 @@ require __DIR__ . '/lib_person.php';
 
 $opt   = getopt('', ['apply', 'books']);
 $apply = isset($opt['apply']);
+if ($apply && isset($opt['books'])) {
+    fwrite(STDERR, "--books 只印書號、不寫入，不要和 --apply 一起用\n");
+    exit(1);
+}
 
 $pdo     = db();
 $persons = $pdo->prepare('SELECT person_id, name FROM persons WHERE INSTR(name, :c) > 0 ORDER BY person_id');
@@ -31,9 +35,10 @@ $persons->execute([':c' => "\u{FF0C}"]);
 $persons = $persons->fetchAll(PDO::FETCH_ASSOC);
 
 $links = $pdo->prepare('SELECT book_person_id, book_id, role FROM book_persons WHERE person_id = :p ORDER BY book_id');
+// ★ 要同一本書、**同一個角色**：只比名字的話，新切出來的人若掛成別的角色，會誤判成已有、把舊關聯的角色資訊刪掉
 $has   = $pdo->prepare(
     'SELECT 1 FROM book_persons bp JOIN persons p ON p.person_id = bp.person_id
-      WHERE bp.book_id = :b AND p.name = :n AND bp.person_id <> :self LIMIT 1');
+      WHERE bp.book_id = :b AND bp.role = :r AND p.name = :n AND bp.person_id <> :self LIMIT 1');
 
 $plan = []; $wait = []; $skip = []; $allBooks = [];
 foreach ($persons as $p) {
@@ -49,7 +54,7 @@ foreach ($persons as $p) {
     foreach ($rows as $r) {
         $missing = [];
         foreach ($names as $n) {
-            $has->execute([':b' => (int) $r['book_id'], ':n' => $n, ':self' => $pid]);
+            $has->execute([':b' => (int) $r['book_id'], ':r' => $r['role'], ':n' => $n, ':self' => $pid]);
             if (!$has->fetchColumn()) $missing[] = $n;
         }
         if ($missing) $wait[] = [$p, $r, $missing];
@@ -79,21 +84,27 @@ $delPerson = $pdo->prepare('DELETE FROM persons WHERE person_id = :p');
 $doneLinks = 0; $donePersons = 0; $books = [];
 if ($apply) {
     $pdo->beginTransaction();
-    $touched = [];
-    foreach ($plan as [$p, $r]) {
-        $delLink->execute([':id' => (int) $r['book_person_id'], ':p' => (int) $p['person_id']]);
-        $doneLinks += $delLink->rowCount();
-        $books[(int) $r['book_id']] = true;
-        $touched[(int) $p['person_id']] = true;
-    }
-    foreach (array_keys($touched) as $pid) {
-        $orphan->execute([':p' => $pid]);
-        if ((int) $orphan->fetchColumn() === 0) {
-            $delPerson->execute([':p' => $pid]);
-            $donePersons += $delPerson->rowCount();
+    try {
+        $touched = [];
+        foreach ($plan as [$p, $r]) {
+            $delLink->execute([':id' => (int) $r['book_person_id'], ':p' => (int) $p['person_id']]);
+            $doneLinks += $delLink->rowCount();
+            $books[(int) $r['book_id']] = true;
+            $touched[(int) $p['person_id']] = true;
         }
+        foreach (array_keys($touched) as $pid) {
+            $orphan->execute([':p' => $pid]);
+            if ((int) $orphan->fetchColumn() === 0) {
+                $delPerson->execute([':p' => $pid]);
+                $donePersons += $delPerson->rowCount();
+            }
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        fwrite(STDERR, '寫入失敗，已全部退回：' . $e->getMessage() . "\n");
+        exit(1);
     }
-    $pdo->commit();
 } else {
     foreach ($plan as [$p, $r]) $books[(int) $r['book_id']] = true;
 }
