@@ -13,6 +13,36 @@
 
 ## [Unreleased]
 
+## [1.20.0] - 2026-10-22 —— 後台「重複書複核」頁
+
+### 新功能（後台）
+
+- **重複書複核頁 /admin/dup.php**：書房新商品裡、書名跟站上某本書很像的，在後台一筆一筆判「同一本（不匯入）／不同書（之後補匯入）／看不出來」。左邊書房商品（封面、作者、出版、ISBN、貨號、商品頁），右邊站上候選（編號、比對方式、作者、出版、書目頁）；三個分頁（待判／看不出來／已判）、每頁 20 組、已判可改判。按下去**只記錄**，不匯入、不合併（熊哥 2026-10-21 裁示 dup-import-A）。先只開給熊哥（沿用 /admin/ 的 Cloudflare Access，dup-who-A），先放 bappress 173 本（dup-scope-A）；表設計成可再加別的清單。後台頁首加「重複書複核」入口
+- **database/migrations/2026-10-21_dup_review.sql**：dup_review 表（可重跑）
+- **tools/load_dup_review.php**：把 check_new_books.php 的對照表匯進 dup_review（預設 dry-run、可重跑、不蓋已判；站上那本已不在就不列）
+
+### 測試站用
+
+- **後台登入可認指定的 Cloudflare 服務權杖**（app/lib/cf_access.php）：簽章、iss、aud、到期都驗過後，沒有 email、common_name 在 config `admin.service_tokens` 裡才放行，身分記成 service:名稱。**只有設定這一項才生效，正式站設定沒有，行為不變**。讓小布能在測試站複測後台頁
+- tools/dev/mkjwt.php：開發站後台自動測試用的測試登入憑證
+
+### 正式機執行順序（熊哥）
+
+1. Navicat 跑 database/migrations/2026-10-21_dup_review.sql（最後一行 16）
+2. `./deploy/deploy.sh`（1.20.0）
+3. `php tools/load_dup_review.php --tsv=crawler/data/bappress_dup.tsv --jsonl=crawler/data/bappress_books.jsonl --source=bappress`（dry-run，先看「新增 N」筆數）→ 熊哥點頭後加 `--apply`
+4. 開 /admin/dup.php 看到「待判（N）」
+5. `php tools/notify_discord.php --dry-run` 看內容 → 去掉 --dry-run 送出
+
+### 驗收
+
+- 開發庫：188 列匯入（173 本）、重跑 0 新增；判定／改判、壞 CSRF／別站 Origin／壞參數 400、不存在 404、非協會信箱 403；Lighthouse 無障礙 100
+- 小布真瀏覽器 12／12（10/22 01:3x，經 Cloudflare、service token）
+
+### 合併風險
+
+- 爆炸半徑：新增一張表、一個後台頁、一支匯入工具；cf_access 多一條只在有設定時才走的分支。前台、搜尋、既有後台審核沒改
+- 能不能退回：程式回 v1.19.5 tag；dup_review 表留著不影響任何頁面
 
 ## [1.19.5] - 2026-10-21 —— 作者欄全形逗號切開、人工清單收尾
 
