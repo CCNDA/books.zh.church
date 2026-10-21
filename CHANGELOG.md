@@ -28,7 +28,7 @@
 1. Navicat 備份
 2. database/migrations/2026-10-21_person_manual_tail.sql（核對 A0／A1／E1～E3 後 COMMIT）
 3. `php tools/clean_fullwidth_comma_persons.php`（dry-run，看「要換的關聯」約 181 筆、「不碰」47 個）→ `--apply`
-4. 對印出的書號跑 `php tools/build_search_text.php --book=N`
+4. 對第 3 步印出的書號，**加上 migration 動到的 6 本（43525 45119 46464 57500 86026 90117）**，跑 `php tools/build_search_text.php --book=N`（小布複測發現 86026 搜尋欄還是舊人名串）
 
 ### 合併風險
 
