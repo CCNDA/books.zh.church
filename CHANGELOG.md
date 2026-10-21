@@ -14,6 +14,29 @@
 ## [Unreleased]
 
 
+## [1.19.5] - 2026-10-2X —— 作者欄全形逗號切開、人工清單收尾
+
+### 資料修正
+
+- **作者欄的全形逗號「，」當成人名分隔**：tools/lib_person.php 的 PN_DELIMS 加入全形逗號。起因：85920「李志秋，張心瑋」被當成一個人。半形逗號照舊不切（「Smith, John」是同一人）、括號內不切（「吳國傑 （Ng， Nathan K. K.）」）；全形逗號切出來只剩 Ph.D.／S.J.／O.S.B.／Jr. 等學位會銜時黏回前一人。測試 tools/test_lib_person.php 第 27 節（Asana 1219676923286530，熊哥 2026-10-21 裁示 fwc-merge-A）
+- **新增 tools/clean_fullwidth_comma_persons.php**：重切後刪掉舊的全形逗號黏名——切開的每個名字都已掛在同一本書才刪那筆關聯，person 沒關聯了才刪；hold／切不開的不碰；預設 dry-run，--books 印出要先跑 fix_person_names --book 的書號。只做全形逗號這批，全庫其他未重切的另案（熊哥 2026-10-21 裁示 fwc-resplit-A）
+- **人工清單收尾 database/migrations/2026-10-21_person_manual_tail.sql**：v1.19.4 留給人工的 6 本書——刪 9 個重複髒名字；57500 譯者改掛既有「朱怡康」、90117 譯者併入「美國見證出版社 編輯委員會 (Testimony Publications)」、46464 繪者「派屈克柯里根」改名「派屈克．柯里根（Patrick Corrigan）」並由作者改為繪者（熊哥 2026-10-21 裁示 pc-merge-A、tp-merge-A）
+- **新增試切清單 docs/review/2026-10-21_fullwidth_comma.tsv**：開發庫 202 個含全形逗號的 person 試切結果（173 切開、29 不變、40 需人工）
+
+### 正式機執行順序（熊哥）
+
+1. Navicat 備份
+2. database/migrations/2026-10-21_person_manual_tail.sql（核對 A0／A1／E1～E3 後 COMMIT）
+3. `php tools/clean_fullwidth_comma_persons.php --books > /tmp/fw_books.txt`
+4. `for b in $(cat /tmp/fw_books.txt); do php tools/fix_person_names.php --book=$b --apply; done`
+5. `php tools/clean_fullwidth_comma_persons.php`（dry-run，確認「先不刪 0」）→ `--apply`
+6. 對印出的書號跑 `php tools/build_search_text.php --book=N`
+
+### 合併風險
+
+- 爆炸半徑：只動作者／譯者／繪者資料（persons、book_persons）與之後的匯入切法；書頁、搜尋、首頁程式沒改。第一作者原本是「甲，乙」的書，之後重匯時「書名＋第一作者」比對鍵會變。開發庫演練：216 本、刪關聯 181、person 155、沒有書變成沒作者
+- 能不能退回：程式回 v1.19.4 tag 即可；資料改了不會自己回來 → 靠第 1 步的備份還原
+
 ## [1.19.4] - 2026-10-20 —— 重複書工具、作者欄書目尾巴、基道解析失敗不重抓
 
 ### 資料修正
