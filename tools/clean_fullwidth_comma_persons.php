@@ -35,16 +35,19 @@ $persons->execute([':c' => "\u{FF0C}"]);
 $persons = $persons->fetchAll(PDO::FETCH_ASSOC);
 
 $links = $pdo->prepare('SELECT book_person_id, book_id, role FROM book_persons WHERE person_id = :p ORDER BY book_id');
-// ★ 要同一本書、**同一個角色**：只比名字的話，新切出來的人若掛成別的角色，會誤判成已有、把舊關聯的角色資訊刪掉
+// ★ 要同一本書、而且角色對得上：舊那筆的角色，或規則從署名讀出來的角色（「鄧軍海 譯」→ translator）。
+//   只比名字的話，新切出來的人若剛好以別的身分掛在這本書，會誤判成已有、把舊關聯的角色資訊刪掉
 $has   = $pdo->prepare(
     'SELECT 1 FROM book_persons bp JOIN persons p ON p.person_id = bp.person_id
-      WHERE bp.book_id = :b AND bp.role = :r AND p.name = :n AND bp.person_id <> :self LIMIT 1');
+      WHERE bp.book_id = :b AND bp.role IN (:r1, :r2) AND p.name = :n AND bp.person_id <> :self LIMIT 1');
 
 $plan = []; $wait = []; $skip = []; $allBooks = [];
 foreach ($persons as $p) {
     $pid   = (int) $p['person_id'];
     $parts = pn_split_names($p['name']);
     $names = array_values(array_unique(array_column($parts, 'name')));
+    $hint  = [];                                        // 名字 → 規則從署名讀出來的角色（沒有就 null）
+    foreach ($parts as $x) $hint[$x['name']] ??= $x['role'];
     $held  = array_filter(array_column($parts, 'hold'));
     $links->execute([':p' => $pid]);
     $rows = $links->fetchAll(PDO::FETCH_ASSOC);
@@ -54,7 +57,8 @@ foreach ($persons as $p) {
     foreach ($rows as $r) {
         $missing = [];
         foreach ($names as $n) {
-            $has->execute([':b' => (int) $r['book_id'], ':r' => $r['role'], ':n' => $n, ':self' => $pid]);
+            $has->execute([':b' => (int) $r['book_id'], ':r1' => $r['role'], ':r2' => $hint[$n] ?? $r['role'],
+                           ':n' => $n, ':self' => $pid]);
             if (!$has->fetchColumn()) $missing[] = $n;
         }
         if ($missing) $wait[] = [$p, $r, $missing];
