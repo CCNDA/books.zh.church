@@ -422,7 +422,7 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <header>
   <div class="hd-inner">
     <h1 class="hd-title serif"><a href="/admin/"><img class="brand-logo" src="/assets/logo-books.svg" alt="" aria-hidden="true">屬靈共同書目 <small>後台</small></a></h1>
-    <nav class="hd-nav"><a href="/" target="_blank" rel="noopener">回前台 ↗</a> ・ <?= e($me) ?></nav>
+    <nav class="hd-nav" aria-label="後台頁面"><a href="/admin/dup.php">重複書複核</a> ・ <a href="/" target="_blank" rel="noopener">回前台 ↗</a> ・ <?= e($me) ?></nav>
   </div>
 </header>
 <main id="main">
