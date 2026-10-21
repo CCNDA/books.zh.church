@@ -1,0 +1,32 @@
+# 自動檢查（熊哥 2026-10-21 TG 按 gh-protect-A；Asana 1219409582519637）
+# 每次 push 與 PR 都跑；main 的保護規則會要求這個檢查通過才能合併。
+# 這裡只做「機器看得出來的錯」，發布照舊：小布複測 → 熊哥 TG 確認。
+name: 檢查
+on:
+  push:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'      # 正式站是 8.3，語法以它為準
+          extensions: mbstring, pdo_mysql
+          coverage: none
+      - name: PHP 語法（php -l）
+        run: git ls-files -z '*.php' | xargs -0 -r -n1 php -l > /dev/null
+      - name: Python 語法
+        run: git ls-files -z '*.py' | xargs -0 -r python3 -m py_compile
+      - name: JSON 能解析
+        run: |
+          git ls-files -z '*.json' | xargs -0 -r -n1 python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))'
+      - name: 人名規則測試
+        run: php tools/test_lib_person.php
+      - name: 掃金鑰（gitleaks）
+        # 不用 gitleaks-action：組織 repo 要授權碼；直接跑官方映像，掃目前的檔案。誤報寫在 .gitleaksignore
+        run: docker run --rm -v "$PWD:/repo:ro" zricethezav/gitleaks:v8.21.2 dir /repo --redact --no-banner
