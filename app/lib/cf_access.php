@@ -79,6 +79,16 @@ function cf_access_user(array $cfg, ?string &$why = null): ?array
         return null;
     }
 
+    // 測試站讓「指定的 Cloudflare 服務權杖」進後台（小布複測用；2026-10-22，Asana 1219668289655146）。
+    // ★ 只有 config admin.service_tokens（Client ID => 顯示名稱）有設才生效；正式站設定不要有這一項。
+    //   服務權杖的 JWT 沒有 email，身分在 common_name（＝權杖的 Client ID，不是密鑰）；
+    //   走到這裡時簽章、iss、aud、到期都已驗過，所以 common_name 是 Cloudflare 簽發的、不能偽造。
+    $svc = (array) ($cfg['service_tokens'] ?? []);
+    $cn = (string) ($claims['common_name'] ?? '');
+    if ($svc !== [] && $cn !== '' && trim((string) ($claims['email'] ?? '')) === '' && isset($svc[$cn])) {
+        return ['email' => 'service:' . $svc[$cn], 'claims' => $claims];
+    }
+
     $email = strtolower(trim((string) ($claims['email'] ?? '')));
     if (!str_ends_with($email, '@' . $domain)) {
         $why = '只有 @' . $domain . ' 的帳號可以使用後台';
