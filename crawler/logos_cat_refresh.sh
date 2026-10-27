@@ -37,15 +37,18 @@ if [ -f venv/bin/activate ]; then source venv/bin/activate; fi
 log "=== 基道分類對照重爬開始($MODE)==="
 
 # -u:不加會 block buffering(4-8KB),進度與重試訊息要等程式結束才吐,整場看起來像卡死。
-# timeout -s INT 21600:4 小時上限,且用 SIGINT 而非 SIGTERM —— logos_categories.py 攔
-#   KeyboardInterrupt,收到 INT 會保存進度並寫出對照檔;SIGTERM 會讓那一輪的進度白費。
-if timeout -s INT 14400 python3 -u logos_categories.py "$MODE" >>"$LOG" 2>&1; then
+# timeout -s INT:用 SIGINT 而非 SIGTERM —— logos_categories.py 攔 KeyboardInterrupt,
+#   收到 INT 會保存進度並寫出對照檔;SIGTERM 會讓那一輪的進度白費。
+# 2026-10-28:上限原本在註解寫 21600、實際是 14400、log 又寫「6 小時」三處不一致,
+#   改成只在 TIMEOUT_SEC 寫一次,log 的時數由它算出來(Asana 1216651317073747)。
+TIMEOUT_SEC=14400
+if timeout -s INT "$TIMEOUT_SEC" python3 -u logos_categories.py "$MODE" >>"$LOG" 2>&1; then
   log "重爬完成;對照檔 $(wc -c < data/logos_code_categories.jsonl) bytes、$(wc -l < data/logos_code_categories.jsonl) 個商品碼"
   log "提醒:接著跑 php $ROOT/tools/apply_logos_categories.php --dry-run 再正式套用"
 else
   rc=$?
   if [ "$rc" = "124" ] || [ "$rc" = "130" ]; then
-    log "[警告] 逾時 6 小時已中止(進度已保存)。補跑:$0 --resume"
+    log "[警告] 逾時 $((TIMEOUT_SEC / 3600)) 小時已中止(進度已保存)。補跑:$0 --resume"
   else
     log "[錯誤] 重爬失敗(rc=$rc);apply 將沿用舊對照檔,基道新書分類會落回關鍵字猜測"
   fi
