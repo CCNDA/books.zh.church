@@ -297,7 +297,8 @@ SPEC_LABELS: list[tuple[str, tuple[str, ...]]] = [
     ("page_count",      ("頁數",)),
     ("dimensions",      ("尺寸", "開本", "開數")),
     ("weight",          ("重量",)),
-    ("series_text",     ("系列別", "系列", "叢書系列")),
+    # 「系列名稱」要排在「系列」前面：只比對到「系列」的話，「名稱」會被當成值的開頭（Asana 1218961225060659）
+    ("series_text",     ("系列名稱", "系列別", "系列", "叢書系列")),
     ("language",        ("語文別", "語言", "語文")),
     ("binding",         ("裝訂", "裝訂方式")),
 ]
@@ -397,8 +398,13 @@ def pick_specs(text: str, specs: dict[str, str]) -> dict[str, str]:
         if key in out:
             continue
         for lab in labels:
+            # 同一組裡較長的標籤（「系列名稱」之於「系列」）：短標籤後面接著長標籤剩下的字就不算，
+            # 不然長標籤沒有值時，短標籤會把「名稱」當成值（Asana 1218961225060659）
+            longer = [l[len(lab):] for l in labels if l != lab and l.startswith(lab)]
+            not_longer = r"(?!" + "|".join(re.escape(t) for t in longer) + r")" if longer else ""
+            # 標籤到冒號之間只吃同一行的空白：用 \s* 會跨行，標籤沒有值時把下一行（例如「作者  陳達」）當成值
             pat = (r"(?m)^\s*" + r"\s*".join(re.escape(c) for c in lab)
-                   + _NOT_FIELD_TAIL + r"\s*[" + _COLONS + r"]?[ \t]*([^\n]{1,120})$")
+                   + _NOT_FIELD_TAIL + not_longer + r"[ \t]*[" + _COLONS + r"]?[ \t]*([^\n]{1,120})$")
             m = re.search(pat, text)
             if m:
                 v = m.group(1).strip(" " + _COLONS)
