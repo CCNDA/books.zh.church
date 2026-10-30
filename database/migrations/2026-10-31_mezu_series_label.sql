@@ -4,13 +4,15 @@
 -- 只剝標籤：「名稱 Meet 40」→「Meet 40」、「名稱：反思系列」→「反思系列」；冊次記號保留。整格只有「名稱」的 5 本改成 NULL。
 -- 改到的書把 search_key／search_text 清空，跑完請接著跑 php tools/build_search_text.php --missing（重建搜尋欄）。
 -- ★ 重跑：條件綁在「名稱」開頭與「別」，第二次 A0 會回 0、UPDATE 改 0 列，不會改到別的東西。
--- 2026-10-31 正式庫唯讀查：書系 90 本（全部有真哪噠版本）、語言「別」2 本（都有真哪噠版本）。
+-- 2026-10-31 正式庫唯讀查：書系 90 本、語言「別」2 本、裝訂「方式：」4 本（都有真哪噠版本）。
 
+SET NAMES utf8mb4;
 START TRANSACTION;
 
 -- A0. 要改的數量（10/31 查是 90 和 2）：差很多就 ROLLBACK，先回報
 SELECT COUNT(*) AS 書系帶標籤_約90 FROM books WHERE series REGEXP '^名稱([[:space:]:：／/]|$)';
 SELECT COUNT(*) AS 語言是別_約2 FROM books WHERE language = '別';
+SELECT COUNT(*) AS 裝訂帶方式_約4 FROM books WHERE binding REGEXP '^方式[[:space:]:：]';
 
 -- A1. 改完的樣子（不會寫入）：右欄應該都是乾淨的書系名，或 NULL
 SELECT book_id, series, NULLIF(TRIM(REGEXP_REPLACE(series, '^名稱[[:space:]:：／/]*', '')), '') AS 改成
@@ -25,12 +27,19 @@ UPDATE books
    SET language = NULL, search_key = NULL, search_text = NULL
  WHERE language = '別';
 
+-- 「裝訂方式：平裝」被「裝訂」吃掉，存成「方式：平裝」→ 剝掉「方式：」
+UPDATE books
+   SET binding = NULLIF(TRIM(REGEXP_REPLACE(binding, '^方式[[:space:]:：]*', '')), ''),
+       search_key = NULL, search_text = NULL
+ WHERE binding REGEXP '^方式[[:space:]:：]';
+
 -- E1. 改完應該都是 0
 SELECT COUNT(*) AS 還帶標籤_應為0 FROM books WHERE series REGEXP '^名稱([[:space:]:：／/]|$)';
 SELECT COUNT(*) AS 語言還是別_應為0 FROM books WHERE language = '別';
+SELECT COUNT(*) AS 裝訂還帶方式_應為0 FROM books WHERE binding REGEXP '^方式[[:space:]:：]';
 
 INSERT INTO schema_migrations (version, applied_at, note) VALUES
-  ('2026-10-31_mezu_series_label.sql', NOW(), '真哪噠書系剝「名稱」標籤、語言「別」改 NULL')
+  ('2026-10-31_mezu_series_label.sql', NOW(), '真哪噠書系剝「名稱」、裝訂剝「方式：」、語言「別」改 NULL')
 ON DUPLICATE KEY UPDATE note = VALUES(note);
 
 -- A0 數量對、E1 都 0：COMMIT;   不對：ROLLBACK;

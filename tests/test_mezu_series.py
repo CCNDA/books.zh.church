@@ -24,4 +24,14 @@ check("系列名稱沒有值 → 沒有書系", series("系列名稱\n作者  �
 check("舊寫法 系列別 不受影響", series("系列別：福音派神學叢書"), "福音派神學叢書")
 check("舊寫法 系列 不受影響", series("系列  Truth 24"), "Truth 24")
 check("冊次記號保留", series("系列名稱  Meet 40"), "Meet 40")
+check("標籤字間有空白（系 列 名 稱）", series("系 列 名 稱  Meet 41"), "Meet 41")
+
+def pick(text, key):
+    specs, _ = harvest_specs(text)
+    return pick_specs(text, specs).get(key)
+
+print("同一個原因的其他欄位")
+check("語文別沒有值 → 沒有語言（以前存成「別」）", pick("語文別\n頁數  528頁", "language"), None)
+check("語文別有值", pick("語文別  繁體中文", "language"), "繁體中文")
+check("裝訂方式：平裝（以前存成「方式：平裝」）", pick("裝訂方式：平裝", "binding"), "平裝")
 sys.exit(1 if fail else 0)

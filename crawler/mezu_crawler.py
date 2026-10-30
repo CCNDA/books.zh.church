@@ -401,7 +401,8 @@ def pick_specs(text: str, specs: dict[str, str]) -> dict[str, str]:
             # 同一組裡較長的標籤（「系列名稱」之於「系列」）：短標籤後面接著長標籤剩下的字就不算，
             # 不然長標籤沒有值時，短標籤會把「名稱」當成值（Asana 1218961225060659）
             longer = [l[len(lab):] for l in labels if l != lab and l.startswith(lab)]
-            not_longer = r"(?!" + "|".join(re.escape(t) for t in longer) + r")" if longer else ""
+            not_longer = (r"(?![ \t]*" + "|[ \t]*".join(r"[ \t]*".join(re.escape(c) for c in t) for t in longer)
+                          + r")") if longer else ""
             # 標籤到冒號之間只吃同一行的空白：用 \s* 會跨行，標籤沒有值時把下一行（例如「作者  陳達」）當成值
             pat = (r"(?m)^\s*" + r"\s*".join(re.escape(c) for c in lab)
                    + _NOT_FIELD_TAIL + not_longer + r"[ \t]*[" + _COLONS + r"]?[ \t]*([^\n]{1,120})$")
