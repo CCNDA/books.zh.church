@@ -13,6 +13,14 @@
 
 ## [Unreleased]
 
+### 新功能(排程)
+
+- **每日新品摘要信 tools/send_daily_report.php**(Asana 1217767336780488):讀 daily_new.sh 寫的 summary-YYYYMMDD.tsv、last_run.json、last_ok.json,加上全站累計(書目數、上架數、上架但沒有分類),寄一封 HTML＋純文字的摘要信。各來源一行(沒新書也列「無新書」)、其他步驟、耗時、log 檔名;失敗或略過的步驟、摘要檔不見、摘要只有表頭,都列在信最上面的「注意」
+- 經 SES SMTP 寄出(STARTTLS、AUTH LOGIN,不用套件);寄件人用 config aws.ses_from／ses_from_name(中文顯示名有 MIME 編碼),收件人讀新的 daily_report.to,沒設就不寄。寄不出去等 30 秒重試一次,結果寫 crawler/logs/mail-YYYYMMDD.log(只記伺服器回應,不記帳密)
+- `--dry-run` 只印內容、`--to=` 測試模式(只寄這個位址、主旨加〔測試〕)、`--date=` 指定哪一天
+- daily_new.sh 最後一步呼叫它;信寄不出去只記 log,不算排程失敗
+- 還沒做(下一張票):抓取失效偵測與【警報】信、相同錯誤節流、「超過 26 小時沒成功」的心跳警報
+
 ## [1.20.0] - 2026-10-22 —— 後台「重複書複核」頁
 
 ### 新功能（後台）
