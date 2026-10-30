@@ -17,6 +17,9 @@ declare(strict_types=1);
  *   php tools/send_daily_report.php --to=someone@ccnda.org     # 測試模式:只寄給這個位址,主旨加〔測試〕
  *   php tools/send_daily_report.php                            # 寄給 daily_report.to
  *   php tools/send_daily_report.php --date=20261030            # 指定哪一天的摘要(預設今天)
+ *   php tools/send_daily_report.php --log-dir=/path/to/logs    # 換讀摘要的資料夾(預設 crawler/logs,測試用)
+ *
+ * 注意:件數是「偵測」數(書房新品頁上看到的),還沒分新增／合併／封面轉存——summary TSV 目前只記這個。
  *
  * 寄信失敗:記到 crawler/logs/mail-YYYYMMDD.log,等 30 秒重試一次;兩次都失敗回傳 1。
  * log 與錯誤訊息只寫 SMTP 伺服器的回應碼與文字,不寫帳號密碼。
@@ -93,9 +96,25 @@ foreach ($rows as $r) {
         $warnings[] = $r['step'] . ' ' . ($r['status'] === 'fail' ? '失敗' : '略過') . ($r['note'] !== '' ? ':' . $r['note'] : '');
     }
 }
-// 摘要只有表頭(例如磁碟滿、步驟都沒寫進去):不能當成「今天沒新書」(小布 v1.19.2 複測記的邊角)
+// 摘要只有表頭(例如磁碟滿、步驟都沒寫進去):不能當成「今天沒新書」(v1.19.2 複測記的邊角)
+$incomplete = ! is_readable($summaryFile) || $rows === [];
 if (is_readable($summaryFile) && $rows === []) {
     $warnings[] = '摘要檔只有表頭,沒有任何步驟紀錄';
+}
+// 來源整行沒寫進去時信裡會少一行、看不出來:跟前一份摘要比,前一天有、今天沒有的來源列進注意
+$prevFiles = array_filter(glob("$logDir/summary-*.tsv") ?: [], static fn ($f) => basename($f) < "summary-$date.tsv");
+if ($prevFiles !== []) {
+    sort($prevFiles);
+    $prevSrc = [];
+    foreach (file(end($prevFiles), FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        $step = explode("\t", $line)[1] ?? '';
+        if (str_starts_with($step, 'crawl:')) {
+            $prevSrc[$step] = true;
+        }
+    }
+    foreach (array_keys(array_diff_key($prevSrc, array_flip(array_column($crawl, 'step')))) as $step) {
+        $warnings[] = $step . ' 今天沒有紀錄(' . basename(end($prevFiles)) . ' 有)';
+    }
 }
 
 $detected = array_sum(array_map(static fn ($r) => $r['status'] === 'ok' ? $r['count'] : 0, $crawl));
@@ -125,7 +144,15 @@ $statusLabel = ['ok' => '完成', 'none' => '無新書', 'fail' => '失敗', 'sk
 $label = static fn (string $src) => BUY_PLATFORM_LABELS[$src] ?? $src;
 $day = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
 
-$subject = "[書目網] 每日新品 $day:偵測 $detected 本" . ($fails > 0 ? ",失敗 $fails 步" : '');
+// last_run.json 只留最新一份;補寄別天(--date)時它的 log 是別天的,改用當天的檔名
+$logName = "new-arrivals-$date.log";
+if (isset($lastRun['log']) && str_ends_with((string) $lastRun['log'], "-$date.log")) {
+    $logName = (string) $lastRun['log'];
+}
+
+$subject = $incomplete
+    ? "[書目網] 每日新品 $day:摘要不完整,請查 log"
+    : "[書目網] 每日新品 $day:偵測 $detected 本" . ($fails > 0 ? ",失敗 $fails 步" : '');
 if ($testTo !== '') {
     $subject = '〔測試〕' . $subject;
 }
@@ -150,7 +177,7 @@ if ($stats) {
         $stats['total'], $stats['published'], $stats['no_category']);
 }
 $text .= "\n執行耗時:" . ($elapsed !== '' ? $elapsed : '不明') . "\n";
-$text .= 'log 檔:' . ($lastRun['log'] ?? "new-arrivals-$date.log") . "\n";
+$text .= "log 檔:$logName\n";
 $text .= '上次全部成功:' . ($lastOk['finished_at'] ?? '沒有紀錄') . "\n";
 if ($warnings !== []) {
     $text .= "\n注意\n";
@@ -180,6 +207,9 @@ foreach ($crawl as $r) {
            . $h($statusLabel[$r['status']] ?? $r['status']) . '</td><td ' . $td . ' align="right">' . $r['count']
            . '</td><td ' . $td . ' align="right">' . $r['sec'] . '</td><td ' . $td . '>' . $h($r['note']) . '</td></tr>';
 }
+if ($crawl === []) {
+    $html .= '<tr><td ' . $td . ' colspan="5">(沒有任何來源的紀錄)</td></tr>';
+}
 $html .= '</tbody></table>';
 if ($other !== []) {
     $html .= '<h2 style="font-size:16px">其他步驟</h2><ul>';
@@ -195,7 +225,7 @@ if ($stats) {
            . '<li>上架但沒有分類 ' . (int) $stats['no_category'] . ' 本</li>';
 }
 $html .= '<li>執行耗時:' . $h($elapsed !== '' ? $elapsed : '不明') . '</li>'
-       . '<li>log 檔:' . $h($lastRun['log'] ?? "new-arrivals-$date.log") . '</li>'
+       . '<li>log 檔:' . $h($logName) . '</li>'
        . '<li>上次全部成功:' . $h($lastOk['finished_at'] ?? '沒有紀錄') . '</li></ul></body></html>';
 
 if ($dry) {
@@ -208,6 +238,14 @@ $cfg  = app_config();
 $aws  = $cfg['aws'] ?? [];
 $smtp = $aws['smtp'] ?? [];
 $to   = $testTo !== '' ? [$testTo] : array_values(array_filter((array) ($cfg['daily_report']['to'] ?? [])));
+// 收件人會進 To: 與 RCPT TO:,不是有效 email(例如夾了換行)就不寄,免得插進 header 或 SMTP 指令
+foreach ($to as $addr) {
+    if (! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
+        fwrite(STDERR, "daily_report.to 裡有不是 email 的值,不寄\n");
+        mail_log('daily_report.to 裡有不是 email 的值,未寄');
+        exit(2);
+    }
+}
 if ($to === []) {
     fwrite(STDERR, "config 沒有 daily_report.to,不寄(要測試請用 --to=)\n");
     mail_log('沒有收件人(daily_report.to),未寄');
@@ -226,7 +264,9 @@ if (! filter_var($from, FILTER_VALIDATE_EMAIL)) {
     exit(2);
 }
 
-$enc  = static fn (string $s) => '=?UTF-8?B?' . base64_encode($s) . '?=';
+// RFC 2047:一個 encoded-word 最長 75 字元 → 每 12 個字一段(UTF-8 最多 48 bytes、base64 64 字元),段與段之間折行
+$enc  = static fn (string $s) => implode("\r\n ", array_map(
+    static fn ($c) => '=?UTF-8?B?' . base64_encode($c) . '?=', mb_str_split($s, 12, 'UTF-8')));
 $host = substr(strrchr($from, '@'), 1);
 $boundary = 'b' . bin2hex(random_bytes(12));
 $headers = [
@@ -266,7 +306,7 @@ exit(1);
  * 最小的 SMTP 用戶端(STARTTLS + AUTH LOGIN)。encryption=ssl 走 465 直接 TLS,其他走 STARTTLS。
  * 例外訊息只帶伺服器回應,不帶帳號密碼。
  */
-function smtp_send(array $smtp, string $from, array $to, string $message): void
+function smtp_send(#[\SensitiveParameter] array $smtp, string $from, array $to, string $message): void
 {
     $ssl = ($smtp['encryption'] ?? 'tls') === 'ssl';
     $fp = @stream_socket_client(($ssl ? 'tls://' : 'tcp://') . $smtp['host'] . ':' . (int) $smtp['port'],
