@@ -336,6 +336,7 @@ fi
 
 # 關鍵步驟(分類回填、搜尋欄補值、兩個守門)被略過也算失敗:工具被刪掉時只記 skip 的話,
 # last_ok.json 會天天更新,「超過 26 小時沒有成功」的警報永遠不會響
+# ⚠️ tools/send_alert.php 直接讀這一行(「關鍵步驟被略過」的警報),格式請維持 CRITICAL_RE='^(a|b|c)$'
 CRITICAL_RE='^(classify|search_text|guard:year|guard:nonbook)$'
 if [ -f "$SUMMARY" ] && [ -r "$SUMMARY" ] && [ -s "$SUMMARY" ]; then
   FAILS="$(awk -F'\t' -v re="$CRITICAL_RE" 'NR>1 && ($3=="fail" || ($3=="skip" && $2 ~ re)) {n++} END {print n+0}' "$SUMMARY")"
@@ -366,9 +367,9 @@ if [ -f "$REPORT" ]; then
   esac
 fi
 
-# ── 警報信(tools/send_alert.php;Asana 1217767377517110):有狀況才寄,標題帶【警報】,同一狀況 24 小時只寄一次 ──
+# ── 警報信(tools/send_alert.php;Asana 1217767377517110):有狀況才寄,標題帶【警報】,同一狀況 20 小時只寄一次 ──
 # 「超過 26 小時沒有全部成功」這一種要靠另外的排程才叫得出來(排程整個沒跑時,這裡也不會跑):
-#   主機 crontab 另加:30 */6 * * * cd $ROOT && php tools/send_alert.php --only=no-success
+#   主機 crontab 另加一行(見 deploy/cron-new-arrivals.md「警報」那段)
 ALERT="$ROOT/tools/send_alert.php"
 if [ -f "$ALERT" ]; then
   php "$ALERT" >>"$LOG" 2>&1
