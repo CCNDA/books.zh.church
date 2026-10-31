@@ -247,22 +247,6 @@ else
   rec "guard:year" skip 0 0 "找不到 $YEARGUARD"
 fi
 
-# ── 促銷詞守門:最近 26 小時新增的書,書名還留著促銷詞就列出來(Asana 1219012798642816)──
-# import.php 會剝掉 lib_title.php 規則吃得到的促銷尾註;剩下的(規則吃不到、站方換新寫法「下殺」「破盤」…)
-# 會靜默流入,這一行是唯一的徵兆。唯讀,不改書名;命中時 exit 1 → 這一步記 fail,清單在 log 裡。
-PROMOGUARD="$ROOT/tools/check_title_promo.php"
-if [ -f "$PROMOGUARD" ]; then
-  log "--- 促銷詞守門 ---"
-  if step "guard:promo" "$PROMOGUARD" --guard; then
-    log "促銷詞守門:通過(0 本)"
-  else
-    log "[錯誤] 促銷詞守門:**新書名還留著促銷詞**,清單見上方;要改書名請人工勾對照表再寫 migration"
-  fi
-else
-  log "[警告] 找不到 $PROMOGUARD,略過促銷詞守門"
-  rec "guard:promo" skip 0 0 "找不到 $PROMOGUARD"
-fi
-
 # ── 非書籍守門:最近 26 小時新增的上架書,書名命中非書籍關鍵字就處理 ──
 # ★★ 2026-10-11 補上(v1.16.1,Asana 1219384830498351)。
 #   import.php 新書一律 is_published=1、沒有關鍵字層,下架過的 146 筆非書籍(貼紙、項鍊、播放器…)
@@ -283,6 +267,23 @@ else
   rec "guard:nonbook" skip 0 0 "找不到 $NBGUARD"
 fi
 
+# ── 促銷詞守門:最近 26 小時新增的書,書名還留著促銷詞就列出來(Asana 1219012798642816)──
+# import.php 會剝掉 lib_title.php 規則吃得到的促銷尾註;剩下的(規則吃不到、站方換新寫法「下殺」「破盤」…)
+# 會靜默流入,這一行是唯一的徵兆。放在非書籍守門後面:被它下架的商品不再重複列。
+#唯讀,不改書名;命中時 exit 1 → 這一步記 fail,清單在 log 裡。
+PROMOGUARD="$ROOT/tools/check_title_promo.php"
+if [ -f "$PROMOGUARD" ]; then
+  log "--- 促銷詞守門 ---"
+  if step "guard:promo" "$PROMOGUARD" --guard; then
+    log "促銷詞守門:通過(0 本)"
+  else
+    log "[錯誤] 促銷詞守門沒有通過:新書名還留著促銷詞(清單見上方),或工具本身出錯(見上方訊息)"
+  fi
+else
+  log "[警告] 找不到 $PROMOGUARD,略過促銷詞守門"
+  rec "guard:promo" skip 0 0 "找不到 $PROMOGUARD"
+fi
+
 # ── sitemap：上架書有增減就重產（tools/build_sitemap.php；Asana 1219388780554980）──
 # 放在最後：前面的守門、後台保護都跑完，上架狀態才是今天的最終結果。產出檔不進版控。
 SITEMAP="$ROOT/tools/build_sitemap.php"
@@ -298,9 +299,9 @@ else
   rec "sitemap" skip 0 0 "找不到 $SITEMAP"
 fi
 
-# 關鍵步驟(分類回填、搜尋欄補值、兩個守門)被略過也算失敗:工具被刪掉時只記 skip 的話,
+# 關鍵步驟(分類回填、搜尋欄補值、三個守門)被略過也算失敗:工具被刪掉時只記 skip 的話,
 # last_ok.json 會天天更新,「超過 26 小時沒有成功」的警報永遠不會響
-CRITICAL_RE='^(classify|search_text|guard:year|guard:nonbook)$'
+CRITICAL_RE='^(classify|search_text|guard:year|guard:nonbook|guard:promo)$'
 if [ -f "$SUMMARY" ] && [ -r "$SUMMARY" ] && [ -s "$SUMMARY" ]; then
   FAILS="$(awk -F'\t' -v re="$CRITICAL_RE" 'NR>1 && ($3=="fail" || ($3=="skip" && $2 ~ re)) {n++} END {print n+0}' "$SUMMARY")"
   SKIPS="$(awk -F'\t' 'NR>1 && $3=="skip" {n++} END {print n+0}' "$SUMMARY")"

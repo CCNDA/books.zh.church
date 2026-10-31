@@ -51,7 +51,8 @@ declare(strict_types=1);
  *   php tools/check_title_promo.php --guard --since="2026-10-01"   # 守門,指定起點
  *
  * 結束碼:盤點模式一律 0。--guard 模式(Asana 1219012798642816):
- *   最近新增的書名還留著促銷詞就列出來並 exit 1,0 本 exit 0;--since 看不懂 exit 2。
+ *   最近新增、上架中的書名還留著促銷詞就列出來並 exit 1,0 本 exit 0;--since 看不懂 exit 2。
+ *   --since 要寫成 --since=日期(選填參數,寫成 --since 日期 會被當成沒給)。
  *   ★ 為什麼要守門:import.php 已經用 lib_title.php 剝掉規則吃得到的促銷尾註,
  *     剩下的是規則吃不到的(詞在句中、括號裡還有別的字),以及站方換了新寫法
  *     (「下殺」「破盤」「特惠」「促銷」不在白名單) —— 這兩種都會靜默流入。
@@ -88,7 +89,7 @@ if (isset($opt['guard'])) {
         "SELECT b.book_id, b.title, b.created_at,
                 (SELECT e.source FROM editions e WHERE e.book_id = b.book_id ORDER BY e.edition_id LIMIT 1) AS source
            FROM books b
-          WHERE b.created_at >= :since
+          WHERE b.created_at >= :since AND b.is_published = 1
           ORDER BY b.book_id"
     );
     $st->execute([':since' => $sinceAt]);
