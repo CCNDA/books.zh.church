@@ -32,6 +32,7 @@ if (PHP_SAPI !== 'cli') {
 
 $root = dirname(__DIR__);
 require $root . '/app/lib/book_detail.php';   // db()、app_config()、BUY_PLATFORM_LABELS
+require $root . '/tools/lib_mail.php';
 
 $opts   = getopt('', ['dry-run', 'to:', 'date:', 'log-dir:']);
 $dry    = isset($opts['dry-run']);
@@ -310,131 +311,17 @@ if ($dry) {
     exit(0);
 }
 
-// ── 寄出 ─────────────────────────────────────────────────
-$cfg  = app_config();
-$aws  = $cfg['aws'] ?? [];
-$smtp = $aws['smtp'] ?? [];
-$to   = $testTo !== '' ? [$testTo] : array_values(array_filter((array) ($cfg['daily_report']['to'] ?? [])));
-// 收件人會進 To: 與 RCPT TO:,不是有效 email(例如夾了換行)就不寄,免得插進 header 或 SMTP 指令
-foreach ($to as $addr) {
-    if (! filter_var($addr, FILTER_VALIDATE_EMAIL)) {
-        fwrite(STDERR, "daily_report.to 裡有不是 email 的值,不寄\n");
-        mail_log('daily_report.to 裡有不是 email 的值,未寄');
-        exit(2);
-    }
-}
-if ($to === []) {
-    fwrite(STDERR, "config 沒有 daily_report.to,不寄(要測試請用 --to=)\n");
-    mail_log('沒有收件人(daily_report.to),未寄');
+// ── 寄出(寄法在 tools/lib_mail.php,與警報信共用)───────────────
+$cfg = app_config();
+$aws = $cfg['aws'] ?? [];
+$to  = $testTo !== '' ? [$testTo] : array_values(array_filter((array) ($cfg['daily_report']['to'] ?? [])));
+if (($err = mail_check($aws, $to)) !== null) {
+    fwrite(STDERR, "$err,不寄(daily_report.to／aws;要測試請用 --to=)\n");
+    mail_log("$err,未寄");
     exit(2);
 }
-foreach (['host', 'port', 'username', 'password'] as $k) {
-    if (empty($smtp[$k])) {
-        fwrite(STDERR, "config aws.smtp.$k 沒有設定\n");
-        mail_log("aws.smtp.$k 沒有設定,未寄");
-        exit(2);
-    }
-}
-$from = (string) ($aws['ses_from'] ?? '');
-if (! filter_var($from, FILTER_VALIDATE_EMAIL)) {
-    fwrite(STDERR, "config aws.ses_from 不是有效的 email\n");
-    exit(2);
-}
-
-// RFC 2047:一個 encoded-word 最長 75 字元 → 每 12 個字一段(UTF-8 最多 48 bytes、base64 64 字元),段與段之間折行
-$enc  = static fn (string $s) => implode("\r\n ", array_map(
-    static fn ($c) => '=?UTF-8?B?' . base64_encode($c) . '?=', mb_str_split($s, 12, 'UTF-8')));
-$host = substr(strrchr($from, '@'), 1);
-$boundary = 'b' . bin2hex(random_bytes(12));
-$headers = [
-    'Date: ' . date('r'),
-    'From: ' . (($aws['ses_from_name'] ?? '') !== '' ? $enc($aws['ses_from_name']) . ' ' : '') . "<$from>",
-    'To: ' . implode(', ', $to),
-    'Subject: ' . $enc($subject),
-    'Message-ID: <' . date('YmdHis') . '.' . bin2hex(random_bytes(6)) . "@$host>",
-    'MIME-Version: 1.0',
-    "Content-Type: multipart/alternative; boundary=\"$boundary\"",
-];
-if (filter_var($aws['ses_reply_to'] ?? '', FILTER_VALIDATE_EMAIL)) {
-    $headers[] = 'Reply-To: ' . $aws['ses_reply_to'];
-}
-$part = static fn (string $type, string $body) => "--$boundary\r\nContent-Type: $type; charset=UTF-8\r\n"
-    . "Content-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode($body), 76, "\r\n");
-$message = implode("\r\n", $headers) . "\r\n\r\n"
-         . $part('text/plain', $text) . $part('text/html', $html) . "--$boundary--\r\n";
-
-for ($attempt = 1; $attempt <= 2; $attempt++) {
-    try {
-        smtp_send($smtp, $from, $to, $message);
-        mail_log("寄出 → " . implode(', ', $to) . " 主旨:$subject");
-        echo "寄出 → " . implode(', ', $to) . "\n";
-        exit(0);
-    } catch (Throwable $e) {
-        mail_log("第 $attempt 次寄信失敗:" . $e->getMessage());
-        fwrite(STDERR, "第 $attempt 次寄信失敗:" . $e->getMessage() . "\n");
-        if ($attempt === 1) {
-            sleep(30);
-        }
-    }
+if (mail_send($aws, $to, $subject, $text, $html, 'mail_log')) {
+    echo '寄出 → ' . implode(', ', $to) . "\n";
+    exit(0);
 }
 exit(1);
-
-/**
- * 最小的 SMTP 用戶端(STARTTLS + AUTH LOGIN)。encryption=ssl 走 465 直接 TLS,其他走 STARTTLS。
- * 例外訊息只帶伺服器回應,不帶帳號密碼。
- */
-function smtp_send(#[\SensitiveParameter] array $smtp, string $from, array $to, string $message): void
-{
-    $ssl = ($smtp['encryption'] ?? 'tls') === 'ssl';
-    $fp = @stream_socket_client(($ssl ? 'tls://' : 'tcp://') . $smtp['host'] . ':' . (int) $smtp['port'],
-        $errno, $errstr, 20);
-    if (! $fp) {
-        throw new RuntimeException("連不上 SMTP:$errstr");
-    }
-    stream_set_timeout($fp, 30);
-    $read = static function () use ($fp): string {
-        $out = '';
-        while (($line = fgets($fp, 1024)) !== false) {
-            $out .= $line;
-            if (strlen($line) < 4 || $line[3] === ' ') {
-                break;
-            }
-        }
-        return $out;
-    };
-    $expect = static function (string $what, int $code, ?string $cmd = null) use ($fp, $read): void {
-        if ($cmd !== null) {
-            fwrite($fp, $cmd . "\r\n");
-        }
-        $resp = $read();
-        if ((int) substr($resp, 0, 3) !== $code) {
-            throw new RuntimeException("$what 回應不對:" . trim($resp === '' ? '(沒有回應)' : $resp));
-        }
-    };
-    try {
-        $ehlo = 'EHLO ' . (gethostname() ?: 'localhost');
-        $expect('連線', 220);
-        $expect('EHLO', 250, $ehlo);
-        if (! $ssl) {
-            $expect('STARTTLS', 220, 'STARTTLS');
-            if (! stream_socket_enable_crypto($fp, true,
-                STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
-                throw new RuntimeException('TLS 交握失敗');
-            }
-            $expect('EHLO(TLS 後)', 250, $ehlo);
-        }
-        $expect('AUTH', 334, 'AUTH LOGIN');
-        $expect('帳號', 334, base64_encode((string) $smtp['username']));
-        $expect('密碼(認證)', 235, base64_encode((string) $smtp['password']));
-        $expect('MAIL FROM', 250, "MAIL FROM:<$from>");
-        foreach ($to as $rcpt) {
-            $expect("RCPT TO $rcpt", 250, "RCPT TO:<$rcpt>");
-        }
-        $expect('DATA', 354, 'DATA');
-        // 行首的「.」要多加一個(dot-stuffing)
-        $expect('送出內容', 250, preg_replace('/^\./m', '..', rtrim($message, "\r\n")) . "\r\n.");
-        fwrite($fp, "QUIT\r\n");
-    } finally {
-        fclose($fp);
-    }
-}
