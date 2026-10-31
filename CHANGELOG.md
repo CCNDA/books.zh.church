@@ -21,7 +21,7 @@
 - daily_new.sh 最後一步呼叫它;信寄不出去只記 log,不算排程失敗
 - 前一份摘要有、今天沒有的來源也列進「注意」;摘要檔不見或只有表頭時,主旨改成「摘要不完整,請查 log」,不會看起來像「今天沒新書」
 - 件數仍是「偵測」數,還沒分新增／合併／封面轉存(summary TSV 只記這個,v1.19.2 起同)
-- **【警報】信 tools/send_alert.php**(Asana 1217767377517110):有狀況才寄,標題帶【警報】。會叫的:某來源抓取或匯入失敗、其他步驟失敗、關鍵步驟被略過、摘要檔不見或只有表頭、某來源連續 14 天都是 0 本新書、超過 26 小時沒有全部成功。同一個狀況(指紋)24 小時內只寄一次,紀錄在 crawler/logs/alert_state.json;收件人讀 alert.to,沒設就用 daily_report.to。daily_new.sh 在摘要信後面呼叫;「超過 26 小時」要另外排一個 crontab(--only=no-success,每 6 小時)才叫得出來
+- **【警報】信 tools/send_alert.php**(Asana 1217767377517110):有狀況才寄,標題帶【警報】。會叫的:某來源抓取或匯入失敗、其他步驟失敗、關鍵步驟被略過、摘要檔不見或只有表頭、某來源連續 14 天都是 0 本新書、超過 26 小時沒有全部成功。同一個狀況(指紋,含錯誤種類)20 小時內只寄一次(每天跑完的時間會差幾分鐘,設 24 會變成兩天一封),紀錄在 crawler/logs/alert_state.json;收件人讀 alert.to,沒設就用 daily_report.to。daily_new.sh 在摘要信後面呼叫;「超過 26 小時」要另外排一個 crontab(--only=no-success,每 6 小時;寫在 deploy/cron-new-arrivals.md)才叫得出來;關鍵步驟名單直接讀 daily_new.sh 的 CRITICAL_RE
 - **tools/lib_mail.php**:SES SMTP 寄信從 send_daily_report.php 抽出來,摘要信和警報信共用
 - 還沒做:「商品節點 0 個」「關鍵欄位缺漏超過門檻」要各爬蟲自己回報(summary TSV 沒有這些資料);網站改版抓到 0 個商品時,會先由「連續 14 天 0 本」接住
 

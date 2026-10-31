@@ -72,6 +72,20 @@ crontab -l
 ```
 log 於 `crawler/logs/new-arrivals-YYYYMMDD.log`。
 
+### 警報：「超過 26 小時沒有全部成功」要另外排一行
+
+daily_new.sh 最後會跑 `tools/send_alert.php` 檢查當天的狀況；可是**排程整個沒跑的時候，它也不會跑**，
+所以「排程本身沒跑」要靠另一行每 6 小時的檢查才叫得出來（Asana 1217767377517110）：
+```cron
+15 */6 * * * cd /home/ubuntu/books && php tools/send_alert.php --only=no-success >/dev/null 2>&1
+```
+安裝：
+```bash
+( crontab -l 2>/dev/null; echo "15 */6 * * * cd /home/ubuntu/books && php tools/send_alert.php --only=no-success >/dev/null 2>&1" ) | crontab -
+crontab -l
+```
+收件人讀 config/app.local.php 的 `alert.to`，沒設就用 `daily_report.to`；同一個狀況 20 小時內只寄一次（紀錄在 crawler/logs/alert_state.json）。
+
 ## 查詢主機現有排程
 
 Ubuntu 排程分散在使用者 cron、系統 cron、systemd timer 三處:
