@@ -313,5 +313,18 @@ if [ -f "$REPORT" ]; then
     *) log "[警告] 摘要信沒有寄出(見 crawler/logs/mail-$(date +%Y%m%d).log)" ;;
   esac
 fi
+
+# ── 警報信(tools/send_alert.php;Asana 1217767377517110):有狀況才寄,標題帶【警報】,同一狀況 24 小時只寄一次 ──
+# 「超過 26 小時沒有全部成功」這一種要靠另外的排程才叫得出來(排程整個沒跑時,這裡也不會跑):
+#   主機 crontab 另加:30 */6 * * * cd $ROOT && php tools/send_alert.php --only=no-success
+ALERT="$ROOT/tools/send_alert.php"
+if [ -f "$ALERT" ]; then
+  php "$ALERT" >>"$LOG" 2>&1
+  case $? in
+    0) log "警報檢查完成(有狀況才寄)" ;;
+    2) log "警報信略過(設定不全,見上一行)" ;;
+    *) log "[警告] 警報信沒有寄出(見 crawler/logs/mail-$(date +%Y%m%d).log)" ;;
+  esac
+fi
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。
