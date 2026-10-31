@@ -47,16 +47,23 @@ declare(strict_types=1);
  *   php tools/check_title_promo.php                       # 摘要 + 對照表
  *   php tools/check_title_promo.php --out=/tmp/promo.tsv  # 另存 TSV 給熊哥逐列勾
  *   php tools/check_title_promo.php --show=hold           # 只看要人工判的
+ *   php tools/check_title_promo.php --guard               # 守門:最近 26 小時新增的書(daily_new.sh 用)
+ *   php tools/check_title_promo.php --guard --since="2026-10-01"   # 守門,指定起點
  *
- * 結束碼一律 0 —— 這支是盤點工具,不是守門員。
- * 守門(新書名命中就在每日排程叫出來)是另一次改動,要動 crawler/daily_new.sh。
+ * 結束碼:盤點模式一律 0。--guard 模式(Asana 1219012798642816):
+ *   最近新增的書名還留著促銷詞就列出來並 exit 1,0 本 exit 0;--since 看不懂 exit 2。
+ *   ★ 為什麼要守門:import.php 已經用 lib_title.php 剝掉規則吃得到的促銷尾註,
+ *     剩下的是規則吃不到的(詞在句中、括號裡還有別的字),以及站方換了新寫法
+ *     (「下殺」「破盤」「特惠」「促銷」不在白名單) —— 這兩種都會靜默流入。
+ *   ★ 「限量」「預購」不算(理由見下方「為什麼限量不在白名單」;預購是年曆／預購書的狀態)。
+ *   唯讀,不改書名;改書名照舊走人工勾對照表＋migration。
  *
  * 相關:Asana 1218961224853655、收錄判準彙整 1218562704413649
  */
 
 require __DIR__ . '/../app/lib/db.php';
 
-$opt   = getopt('', ['out::', 'show::', 'limit::']);
+$opt   = getopt('', ['out::', 'show::', 'limit::', 'guard', 'since::']);
 $out   = $opt['out']  ?? null;
 $show  = strtoupper((string) ($opt['show'] ?? 'all'));
 $limit = (int) ($opt['limit'] ?? 0);
@@ -64,6 +71,45 @@ $limit = (int) ($opt['limit'] ?? 0);
 // ★ 剝除規則**不在這支裡**,在 tools/lib_title.php —— import.php 用的是同一份。
 //   兩邊各寫一份的話,「驗過的規則」與「實際跑的規則」會悄悄分家。
 require_once __DIR__ . '/lib_title.php';
+
+// ── 守門模式(daily_new.sh):只看最近新增的書,不載入全站索引 ─────────────────
+if (isset($opt['guard'])) {
+    $since = $opt['since'] ?? null;
+    if ($since !== null && strtotime((string) $since) === false) {
+        fwrite(STDERR, "--since 看不懂:{$since}\n");
+        exit(2);
+    }
+    $sinceAt = $since !== null
+        ? date('Y-m-d H:i:s', (int) strtotime((string) $since))
+        : date('Y-m-d H:i:s', time() - 26 * 3600);   // 與非書籍守門同一個窗口
+    // 白名單詞(import 剝不掉才會留著)＋站方可能換的新寫法;不含「限量」「預購」
+    $guardRe = TP_PROMO . '|促銷|特惠|下殺|破盤';
+    $st = db()->prepare(
+        "SELECT b.book_id, b.title, b.created_at,
+                (SELECT e.source FROM editions e WHERE e.book_id = b.book_id ORDER BY e.edition_id LIMIT 1) AS source
+           FROM books b
+          WHERE b.created_at >= :since
+          ORDER BY b.book_id"
+    );
+    $st->execute([':since' => $sinceAt]);
+    $hits = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        if (preg_match('/' . $guardRe . '/u', (string) $r['title'], $m)) {
+            $hits[] = [$r['book_id'], $r['source'] ?? '', $m[0], $r['title']];
+        }
+    }
+    if ($hits === []) {
+        echo "促銷詞守門:{$sinceAt} 之後新增的書,書名沒有促銷詞(0 本)\n";
+        exit(0);
+    }
+    echo '促銷詞守門:' . count($hits) . " 本新書的書名還留著促銷詞(import 規則沒剝掉,或站方換了新寫法)\n";
+    echo "book_id\t來源\t命中\t書名\n";
+    foreach ($hits as $h) {
+        echo implode("\t", $h) . "\n";
+    }
+    echo "→ 跑 php tools/check_title_promo.php --show=hold 看判定;要改書名照舊人工勾對照表再寫 migration\n";
+    exit(1);
+}
 
 /** 疑似非書商品 —— 只標記,不處理。屬「收錄判準」1218562704413649。 */
 const NONBOOK = '(?:禮盒|明信片|木筷|木雕|香水|杯墊|書卡|小卡|透卡|骨盤枕|序號卡|點播機|聖經機|桌遊|牛奶棒|掛件|打氣筒|音樂專輯|SAMPLERS|USB|DVD|CD)';

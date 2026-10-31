@@ -247,6 +247,22 @@ else
   rec "guard:year" skip 0 0 "找不到 $YEARGUARD"
 fi
 
+# ── 促銷詞守門:最近 26 小時新增的書,書名還留著促銷詞就列出來(Asana 1219012798642816)──
+# import.php 會剝掉 lib_title.php 規則吃得到的促銷尾註;剩下的(規則吃不到、站方換新寫法「下殺」「破盤」…)
+# 會靜默流入,這一行是唯一的徵兆。唯讀,不改書名;命中時 exit 1 → 這一步記 fail,清單在 log 裡。
+PROMOGUARD="$ROOT/tools/check_title_promo.php"
+if [ -f "$PROMOGUARD" ]; then
+  log "--- 促銷詞守門 ---"
+  if step "guard:promo" "$PROMOGUARD" --guard; then
+    log "促銷詞守門:通過(0 本)"
+  else
+    log "[錯誤] 促銷詞守門:**新書名還留著促銷詞**,清單見上方;要改書名請人工勾對照表再寫 migration"
+  fi
+else
+  log "[警告] 找不到 $PROMOGUARD,略過促銷詞守門"
+  rec "guard:promo" skip 0 0 "找不到 $PROMOGUARD"
+fi
+
 # ── 非書籍守門:最近 26 小時新增的上架書,書名命中非書籍關鍵字就處理 ──
 # ★★ 2026-10-11 補上(v1.16.1,Asana 1219384830498351)。
 #   import.php 新書一律 is_published=1、沒有關鍵字層,下架過的 146 筆非書籍(貼紙、項鍊、播放器…)
