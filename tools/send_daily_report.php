@@ -141,7 +141,9 @@ try {
 
 // ── 組信 ─────────────────────────────────────────────────
 $statusLabel = ['ok' => '完成', 'none' => '無新書', 'fail' => '失敗', 'skip' => '略過'];
-$label = static fn (string $src) => BUY_PLATFORM_LABELS[$src] ?? $src;
+// btproduct（突破機構）不在 BUY_PLATFORM_LABELS（沒有購書連結），名稱同 public/api/index.php 的 SOURCE_NAME_OVERRIDES
+const REPORT_SOURCE_NAMES = ['btproduct' => '突破機構'];
+$label = static fn (string $src) => BUY_PLATFORM_LABELS[$src] ?? REPORT_SOURCE_NAMES[$src] ?? $src;
 $day = substr($date, 0, 4) . '-' . substr($date, 4, 2) . '-' . substr($date, 6, 2);
 
 // last_run.json 只留最新一份;補寄別天(--date)時它的 log 是別天的,改用當天的檔名
@@ -187,46 +189,118 @@ if ($warnings !== []) {
 }
 
 $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-$td = 'style="padding:4px 10px;border-bottom:1px solid #ddd"';
-$html = '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>' . $h($subject) . '</title></head>'
-      . '<body style="font-family:sans-serif;color:#222;line-height:1.5">'
-      . '<h1 style="font-size:18px">書目網每日新品摘要 ' . $h($day) . '</h1>';
-if ($warnings !== []) {
-    $html .= '<div style="border-left:4px solid #b00020;padding:6px 12px;background:#fdecee"><strong>注意</strong><ul>';
-    foreach ($warnings as $w) {
-        $html .= '<li>' . $h($w) . '</li>';
+// HTML 版面（熊哥 2026-11-01「可以美觀一點嗎」）：信件用 table＋inline style，Gmail／Outlook 都吃；不用 emoji
+$dur = static fn (int $s) => $s >= 60 ? sprintf('%d 分 %02d 秒', intdiv($s, 60), $s % 60) : "$s 秒";
+$tw  = static function (?string $iso): string {
+    if (! $iso || ($t = strtotime($iso)) === false) {
+        return '沒有紀錄';
     }
-    $html .= '</ul></div>';
+    return (new DateTime('@' . $t))->setTimezone(new DateTimeZone('Asia/Taipei'))->format('Y-m-d H:i');
+};
+$badge = static fn (string $text, string $fg, string $bg) =>
+    '<span style="display:inline-block;padding:2px 10px;border-radius:10px;font-size:12px;font-weight:bold;color:' . $fg . ';background:' . $bg . '">' . $text . '</span>';
+$font = "font-family:-apple-system,'Segoe UI','Noto Sans TC','Microsoft JhengHei',sans-serif";
+
+if ($incomplete) {
+    $state = $badge('摘要不完整', '#ffffff', '#b00020');
+} elseif ($fails > 0) {
+    $state = $badge("$fails 個步驟失敗", '#ffffff', '#b00020');
+} else {
+    $state = $badge('全部完成', '#1b5e20', '#c8e6c9');
 }
-$html .= '<h2 style="font-size:16px">各來源</h2>'
-       . '<table style="border-collapse:collapse"><caption style="text-align:left;color:#555">偵測件數是書房新品頁上看到的數量,匯入時會和站上既有的書合併</caption>'
-       . '<thead><tr><th scope="col" ' . $td . '>來源</th><th scope="col" ' . $td . '>狀態</th>'
-       . '<th scope="col" ' . $td . '>偵測</th><th scope="col" ' . $td . '>秒數</th><th scope="col" ' . $td . '>備註</th></tr></thead><tbody>';
-foreach ($crawl as $r) {
-    $html .= '<tr><td ' . $td . '>' . $h($label(substr($r['step'], 6))) . '</td><td ' . $td . '>'
-           . $h($statusLabel[$r['status']] ?? $r['status']) . '</td><td ' . $td . ' align="right">' . $r['count']
-           . '</td><td ' . $td . ' align="right">' . $r['sec'] . '</td><td ' . $td . '>' . $h($r['note']) . '</td></tr>';
+
+$html = '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+      . '<title>' . $h($subject) . '</title></head>'
+      . '<body style="margin:0;padding:0;background:#f2f4f7;' . $font . ';color:#1f2933">'
+      . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f4f7"><tr><td align="center" style="padding:24px 12px">'
+      . '<table role="presentation" width="640" cellpadding="0" cellspacing="0" style="max-width:640px;width:100%;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e3e7ec">'
+      // 標頭
+      . '<tr><td style="background:#1f4e5f;padding:20px 24px;color:#ffffff">'
+      . '<div style="font-size:13px;opacity:.85">書目網 books.zh.church</div>'
+      . '<div style="font-size:22px;font-weight:bold;margin:4px 0 8px">每日新品摘要 ' . $h($day) . '</div>'
+      . $state . '</td></tr>';
+
+// 注意
+if ($warnings !== []) {
+    $html .= '<tr><td style="padding:16px 24px 0"><div style="border-left:4px solid #b00020;background:#fdecee;padding:10px 14px;border-radius:4px">'
+           . '<div style="font-weight:bold;color:#b00020;margin-bottom:4px">注意</div>';
+    foreach ($warnings as $w) {
+        // 「crawl:logos 失敗…」在信裡改成來源中文名（純文字版維持原樣，方便對 log）
+        $w = preg_replace_callback('/^crawl:([a-z0-9_]+)/', static fn ($m) => $label($m[1]), $w);
+        $html .= '<div style="font-size:14px">・' . $h($w) . '</div>';
+    }
+    $html .= '</div></td></tr>';
+}
+
+// 數字卡
+$kpi = static function (string $title, string $value, string $color = '#1f2933', string $sub = '') use ($h): string {
+    return '<td width="25%" style="padding:6px"><div style="background:#f7f9fb;border:1px solid #e3e7ec;border-radius:8px;padding:12px 8px;text-align:center">'
+         . '<div style="font-size:12px;color:#5f6b7a">' . $h($title) . '</div>'
+         . '<div style="font-size:24px;font-weight:bold;color:' . $color . ';margin-top:2px">' . $h($value) . '</div>'
+         . ($sub !== '' ? '<div style="font-size:11px;color:#8a96a3">' . $h($sub) . '</div>' : '')
+         . '</div></td>';
+};
+$html .= '<tr><td style="padding:16px 18px 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
+       . $kpi('今日偵測新書', $incomplete ? '?' : (string) $detected, '#1f4e5f', '本')
+       . $kpi('書目總數', $stats ? number_format((int) $stats['total']) : '?', '#1f2933', '本')
+       . $kpi('線上上架', $stats ? number_format((int) $stats['published']) : '?', '#1f2933', '本')
+       . $kpi('上架但沒分類', $stats ? (string) (int) $stats['no_category'] : '?',
+              ($stats && (int) $stats['no_category'] > 0) ? '#c25e00' : '#1b5e20', '本')
+       . '</tr></table></td></tr>';
+
+// 各來源：有新書的在上面、失敗／略過其次、沒新書的灰色放最後（每個來源都列，不漏行）
+$rank = static fn ($r) => $r['status'] === 'ok' && $r['count'] > 0 ? 0 : (in_array($r['status'], ['fail', 'skip'], true) ? 1 : 2);
+$sorted = $crawl;
+usort($sorted, static fn ($a, $b) => $rank($a) <=> $rank($b) ?: $b['count'] <=> $a['count']);
+$cell = 'padding:9px 10px;border-bottom:1px solid #eef1f4;font-size:14px';
+$html .= '<tr><td style="padding:12px 24px 0"><div style="font-size:16px;font-weight:bold;margin-bottom:6px">各來源</div>'
+       . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">';
+foreach ($sorted as $r) {
+    $name = $h($label(substr($r['step'], 6)));
+    $muted = $rank($r) === 2;
+    if ($r['status'] === 'ok' && $r['count'] > 0) {
+        $st = $badge($r['count'] . ' 本', '#1b5e20', '#c8e6c9');
+    } elseif ($r['status'] === 'fail') {
+        $st = $badge('失敗', '#ffffff', '#b00020');
+    } elseif ($r['status'] === 'skip') {
+        $st = $badge('略過', '#7a4f01', '#ffe8b3');
+    } else {
+        $st = '<span style="font-size:13px;color:#9aa5b1">' . $h($statusLabel[$r['status']] ?? $r['status']) . '</span>';
+    }
+    $html .= '<tr><td style="' . $cell . ';color:' . ($muted ? '#9aa5b1' : '#1f2933') . ';' . ($muted ? '' : 'font-weight:bold') . '">' . $name
+           . ($r['note'] !== '' ? '<div style="font-size:12px;font-weight:normal;color:#b00020">' . $h($r['note']) . '</div>' : '') . '</td>'
+           . '<td style="' . $cell . '" align="right">' . $st . '</td>'
+           . '<td style="' . $cell . ';color:#9aa5b1;font-size:12px;white-space:nowrap" align="right" width="80">' . $h($dur((int) $r['sec'])) . '</td></tr>';
 }
 if ($crawl === []) {
-    $html .= '<tr><td ' . $td . ' colspan="5">(沒有任何來源的紀錄)</td></tr>';
+    $html .= '<tr><td style="' . $cell . ';color:#b00020">沒有任何來源的紀錄</td></tr>';
 }
-$html .= '</tbody></table>';
+$html .= '</table><div style="font-size:12px;color:#8a96a3;margin-top:6px">偵測件數是書房新品頁上看到的數量，匯入時會和站上既有的書合併。</div></td></tr>';
+
+// 其他步驟：全部完成就收成一行；有失敗／略過的逐條列出
 if ($other !== []) {
-    $html .= '<h2 style="font-size:16px">其他步驟</h2><ul>';
-    foreach ($other as $r) {
-        $html .= '<li>' . $h($r['step']) . ':' . $h($statusLabel[$r['status']] ?? $r['status'])
-               . '(' . $r['sec'] . ' 秒)' . $h($r['note'] !== '' ? ' ' . $r['note'] : '') . '</li>';
+    $bad = array_filter($other, static fn ($r) => in_array($r['status'], ['fail', 'skip'], true));
+    $html .= '<tr><td style="padding:16px 24px 0"><div style="font-size:16px;font-weight:bold;margin-bottom:6px">其他步驟</div>';
+    if ($bad === []) {
+        $html .= '<div style="font-size:14px">' . $badge('全部完成', '#1b5e20', '#c8e6c9') . ' 共 ' . count($other) . ' 個步驟</div>';
+    } else {
+        foreach ($bad as $r) {
+            $html .= '<div style="font-size:14px;margin:2px 0">' . ($r['status'] === 'fail' ? $badge('失敗', '#ffffff', '#b00020') : $badge('略過', '#7a4f01', '#ffe8b3'))
+                   . ' ' . $h($r['step']) . ($r['note'] !== '' ? '：' . $h($r['note']) : '') . '</div>';
+        }
+        $html .= '<div style="font-size:13px;color:#5f6b7a;margin-top:4px">其餘 ' . (count($other) - count($bad)) . ' 個步驟完成</div>';
     }
-    $html .= '</ul>';
+    $html .= '<div style="font-size:12px;color:#9aa5b1;margin-top:6px;line-height:1.6">'
+           . $h(implode('、', array_map(static fn ($r) => $r['step'], $other))) . '</div></td></tr>';
 }
-$html .= '<h2 style="font-size:16px">全站</h2><ul>';
-if ($stats) {
-    $html .= '<li>書目 ' . (int) $stats['total'] . ' 本、線上上架 ' . (int) $stats['published'] . ' 本</li>'
-           . '<li>上架但沒有分類 ' . (int) $stats['no_category'] . ' 本</li>';
-}
-$html .= '<li>執行耗時:' . $h($elapsed !== '' ? $elapsed : '不明') . '</li>'
-       . '<li>log 檔:' . $h($logName) . '</li>'
-       . '<li>上次全部成功:' . $h($lastOk['finished_at'] ?? '沒有紀錄') . '</li></ul></body></html>';
+
+// 頁尾
+$html .= '<tr><td style="padding:18px 24px 22px"><div style="border-top:1px solid #eef1f4;padding-top:12px;font-size:13px;color:#5f6b7a;line-height:1.8">'
+       . '執行耗時：' . $h($elapsed !== '' ? $elapsed : '不明') . '<br>'
+       . '上次全部成功：' . $h($tw($lastOk['finished_at'] ?? null)) . '（台北時間）<br>'
+       . 'log 檔：<span style="font-family:Consolas,Menlo,monospace;font-size:12px">' . $h($logName) . '</span>'
+       . '</div></td></tr>'
+       . '</table></td></tr></table></body></html>';
 
 if ($dry) {
     echo "Subject: $subject\n\n$text\n----- HTML -----\n$html\n";
