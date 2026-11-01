@@ -300,5 +300,18 @@ printf '{"finished_at":"%s","summary":"%s","log":"%s","fail_steps":%s,"skip_step
   "$(date -Iseconds)" "$SUMMARY" "$LOG" "$FAILS" "$SKIPS" "$DETECTED" > "$LOG_DIR/last_run.json"
 if [ "$FAILS" = "0" ]; then cp "$LOG_DIR/last_run.json" "$LOG_DIR/last_ok.json"; fi
 log "摘要:各站偵測到 $DETECTED 本(匯入時會與既有書合併)、失敗步驟 $FAILS 個($SUMMARY)"
+
+# ── 每日摘要信(tools/send_daily_report.php;Asana 1217767336780488)──
+# 放在 last_run.json 之後:摘要信要讀它。寄信成敗不改 FAILS(信寄不出去不代表排程失敗),只寫進 log。
+# 回傳 0＝寄出、2＝設定不全(例如沒設 daily_report.to)略過、其他＝重試後仍寄不出去
+REPORT="$ROOT/tools/send_daily_report.php"
+if [ -f "$REPORT" ]; then
+  php "$REPORT" >>"$LOG" 2>&1
+  case $? in
+    0) log "摘要信已寄出" ;;
+    2) log "摘要信略過(設定不全,見上一行)" ;;
+    *) log "[警告] 摘要信沒有寄出(見 crawler/logs/mail-$(date +%Y%m%d).log)" ;;
+  esac
+fi
 log "=== 每日新品檢查結束 ==="
 # 註:匯入的新書預設 is_published=1、封面仍指來源站;分類已於匯入後自動回填(見上)。非書籍由上方守門處理(A 級先下架、B 級只標記)。

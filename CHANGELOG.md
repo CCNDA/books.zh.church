@@ -13,6 +13,41 @@
 
 ## [Unreleased]
 
+## [1.21.0] - 2026-11-01 —— 真哪噠書系欄修正、每日新品摘要信
+
+### 修正（資料）
+
+- **真哪噠書系欄不再帶「名稱」標籤**（Asana 1218961225060659）：站方規格表的標籤是「系列名稱」，爬蟲只認得「系列」，把「名稱」當成書系開頭（「名稱 Meet 40」）。crawler/mezu_crawler.py 加「系列名稱」；退回比對時短標籤後面接著長標籤剩下的字就不算、標籤到冒號之間不再跨行（標籤沒有值時不會把下一行當成值）。同一個原因讓「語文別」沒有值時語言存成「別」、「裝訂方式：平裝」存成「方式：平裝」，一起修好
+- **database/migrations/2026-10-31_mezu_series_label.sql**：既有 90 本書系剝掉標籤（5 本整格只有「名稱」改 NULL）、2 本語言「別」改 NULL、4 本裝訂剝掉「方式：」；跑完接 build_search_text.php --missing
+- tests/test_mezu_series.py：書系、語言、裝訂共 11 個寫法的回歸測試（不連網）
+- 驗證：40 頁真商品頁新舊版解析對照，只有書系、語言兩種預期中的差別（樣本裡沒有「裝訂方式」）
+
+### 新功能(排程)
+
+- **每日新品摘要信 tools/send_daily_report.php**(Asana 1217767336780488):讀 daily_new.sh 寫的 summary-YYYYMMDD.tsv、last_run.json、last_ok.json,加上全站累計(書目數、上架數、上架但沒有分類),寄一封 HTML＋純文字的摘要信。各來源一行(沒新書也列「無新書」)、其他步驟、耗時、log 檔名;失敗或略過的步驟、摘要檔不見、摘要只有表頭,都列在信最上面的「注意」
+- 經 SES SMTP 寄出(STARTTLS、AUTH LOGIN,不用套件);寄件人用 config aws.ses_from／ses_from_name(中文顯示名有 MIME 編碼),收件人讀新的 daily_report.to,沒設就不寄。寄不出去等 30 秒重試一次,結果寫 crawler/logs/mail-YYYYMMDD.log(只記伺服器回應,不記帳密)
+- `--dry-run` 只印內容、`--to=` 測試模式(只寄這個位址、主旨加〔測試〕)、`--date=` 指定哪一天
+- daily_new.sh 最後一步呼叫它;信寄不出去只記 log,不算排程失敗
+- 前一份摘要有、今天沒有的來源也列進「注意」;摘要檔不見或只有表頭時,主旨改成「摘要不完整,請查 log」,不會看起來像「今天沒新書」
+- 件數仍是「偵測」數,還沒分新增／合併／封面轉存(summary TSV 只記這個,v1.19.2 起同)
+- 還沒做(下一張票):抓取失效偵測與【警報】信、相同錯誤節流、「超過 26 小時沒成功」的心跳警報
+- **摘要信版面（熊哥 2026-11-01 看預覽後改）**：信件用 table＋inline style；標頭顯示「全部完成／N 個步驟失敗／摘要不完整」；數字卡（今日偵測新書、書目總數、線上上架、上架但沒分類）；各來源有新書的在前、失敗／略過其次、沒新書的灰色在後（每個來源都列）；其他步驟全部完成收成一行；「注意」用來源中文名；上次全部成功改台北時間。純文字版不變
+- btproduct 不在 BUY_PLATFORM_LABELS，摘要信改顯示「突破機構」（同 /api/sources 的 SOURCE_NAME_OVERRIDES）
+
+### 正式機執行順序（熊哥）
+
+1. `./deploy/deploy.sh`（1.21.0）
+2. Navicat 跑 database/migrations/2026-10-31_mezu_series_label.sql：先看 A0 是 90／2／4 才 COMMIT，不對就 ROLLBACK
+3. `php tools/build_search_text.php --missing`（改到的書重建搜尋文字）
+4. config/app.local.php 加 `'daily_report' => ['to' => ['black@ccnda.net']]`（沒加就不寄）
+5. `php tools/notify_discord.php --dry-run` 看內容 → 去掉 --dry-run 送出
+
+### 驗收
+
+- mezu：開發庫整支跑過再 ROLLBACK，A0 90／2／4 → E1 0／0／0；40 頁真商品頁新舊版解析對照；tests/test_mezu_series.py 11 個寫法
+- 摘要信：cora-lab 假 SMTP（成功、535 重試、兩次失敗、伺服器關著）；正式站 10/31 摘要 --dry-run，正常與故意兩步失敗兩種版面截圖；熊哥 11/1 看預覽 OK
+- 小布測試站複測 11/1 通過（release/v1.21.0 85e2f01）：mezu 五項（含搜尋「清晨嗎哪」49 本逐本檢查）、摘要信讀程式（收件人驗證、摘要不完整、寄信失敗不算排程失敗、HTML 跳脫、log 不寫帳密）
+
 ## [1.20.0] - 2026-10-22 —— 後台「重複書複核」頁
 
 ### 新功能（後台）
