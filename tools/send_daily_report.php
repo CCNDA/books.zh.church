@@ -234,18 +234,20 @@ if ($warnings !== []) {
 
 // 數字卡
 $kpi = static function (string $title, string $value, string $color = '#1f2933', string $sub = '') use ($h): string {
-    return '<td width="25%" style="padding:6px"><div style="background:#f7f9fb;border:1px solid #e3e7ec;border-radius:8px;padding:12px 8px;text-align:center">'
+    return '<td width="50%" style="padding:6px"><div style="background:#f7f9fb;border:1px solid #e3e7ec;border-radius:8px;padding:12px 8px;text-align:center">'
          . '<div style="font-size:12px;color:#5f6b7a">' . $h($title) . '</div>'
          . '<div style="font-size:24px;font-weight:bold;color:' . $color . ';margin-top:2px">' . $h($value) . '</div>'
          . ($sub !== '' ? '<div style="font-size:11px;color:#8a96a3">' . $h($sub) . '</div>' : '')
          . '</div></td>';
 };
-$html .= '<tr><td style="padding:16px 18px 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>'
-       . $kpi('今日偵測新書', $incomplete ? '?' : (string) $detected, '#1f4e5f', '本')
+// 2×2 排：手機上一排四張會把標題擠成三行（熊哥 2026-11-01 手機截圖）
+$html .= '<tr><td style="padding:16px 18px 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="table-layout:fixed"><tr>'
+       . $kpi('今日新書', $incomplete ? '?' : (string) $detected, '#1f4e5f', '本')
+       . $kpi('上架未分類', $stats ? (string) (int) $stats['no_category'] : '?',
+              ($stats && (int) $stats['no_category'] > 0) ? '#c25e00' : '#1b5e20', '本')
+       . '</tr><tr>'
        . $kpi('書目總數', $stats ? number_format((int) $stats['total']) : '?', '#1f2933', '本')
        . $kpi('線上上架', $stats ? number_format((int) $stats['published']) : '?', '#1f2933', '本')
-       . $kpi('上架但沒分類', $stats ? (string) (int) $stats['no_category'] : '?',
-              ($stats && (int) $stats['no_category'] > 0) ? '#c25e00' : '#1b5e20', '本')
        . '</tr></table></td></tr>';
 
 // 各來源：有新書的在上面、失敗／略過其次、沒新書的灰色放最後（每個來源都列，不漏行）
@@ -298,7 +300,8 @@ if ($other !== []) {
 $html .= '<tr><td style="padding:18px 24px 22px"><div style="border-top:1px solid #eef1f4;padding-top:12px;font-size:13px;color:#5f6b7a;line-height:1.8">'
        . '執行耗時：' . $h($elapsed !== '' ? $elapsed : '不明') . '<br>'
        . '上次全部成功：' . $h($tw($lastOk['finished_at'] ?? null)) . '（台北時間）<br>'
-       . 'log 檔：<span style="font-family:Consolas,Menlo,monospace;font-size:12px">' . $h($logName) . '</span>'
+       // 只放檔名＋可斷行：整條路徑沒有斷點，手機上會把整封信撐寬（11/1 手機截圖）
+       . 'log 檔：<span style="font-family:Consolas,Menlo,monospace;font-size:12px;word-break:break-all">' . $h(basename($logName)) . '</span>'
        . '</div></td></tr>'
        . '</table></td></tr></table></body></html>';
 
