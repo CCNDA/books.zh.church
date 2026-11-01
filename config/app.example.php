@@ -54,4 +54,8 @@ return [
             'password'   => 'SES_SMTP_PASSWORD',
         ],
     ],
+    'daily_report' => [
+        // 每日新品摘要信(tools/send_daily_report.php)的收件人;空陣列＝不寄
+        'to' => [],
+    ],
 ];
