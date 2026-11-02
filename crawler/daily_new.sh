@@ -18,6 +18,19 @@ LOG="$LOG_DIR/new-arrivals-$(date +%Y%m%d).log"
 mkdir -p "$LOG_DIR" "$CRAWLER_DIR/data/new"
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
 
+# ── 同時只跑一輪(Asana 1217767336780488,11/2 cclm 卡 16 小時)──
+# 上一輪還沒結束就略過這輪:不然下面清空 summary 會蓋掉上一輪的紀錄,兩輪也會同時寫同一個 delta／log。
+# 要放在清空 summary 之前。鎖跟著行程走,行程結束(含被停掉)就自動釋放。
+exec 9>"$LOG_DIR/daily_new.lock"
+if ! flock -n 9; then
+  log "[警告] 上一輪還在跑,這輪略過(看 ps 有沒有卡住的 new_arrivals.py)"
+  exit 0
+fi
+
+# 每個來源最多跑多久(秒)。超過就停掉、記 fail、接著跑下一個來源,後面的步驟和摘要信照常。
+# 正常最久的是 logos 約 2,130 秒;站方一直回 503 時每頁重試要 15 分鐘,沒有上限會一直卡住。
+SOURCE_TIMEOUT="${SOURCE_TIMEOUT:-3600}"
+
 # ── 結構化摘要(Asana 1217767344711740):每一步一行 TSV,給每日摘要信／警報信讀 ──
 # 欄位:時間 步驟 狀態(ok/none/fail/skip) 件數 秒數 備註。同一天重跑會覆蓋(只留最後一輪)。
 # 跑完寫 last_run.json(結束時間、失敗步驟數)—— 「排程本身沒跑」靠它的時間判斷。
@@ -44,7 +57,14 @@ run_source() {
   local src="$1"; shift
   local out="data/new/${src}_${TS}.jsonl" t0=$SECONDS
   log "--- $src:抓取新品 ---"
-  if python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1; then
+  timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
+  local rc=$?
+  if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    log "$src:[錯誤] 超過 ${SOURCE_TIMEOUT} 秒還沒抓完,已停掉;已抓到的 delta 不匯入,保留於 $out"
+    rec "crawl:$src" fail 0 $((SECONDS - t0)) "逾時 ${SOURCE_TIMEOUT} 秒"
+    return
+  fi
+  if [ "$rc" -eq 0 ]; then
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
       log "$src:偵測到 $n 本新書,匯入中…"
