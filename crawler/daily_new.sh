@@ -36,6 +36,11 @@ fi
 # 正常最久的是 logos 約 2,130 秒;站方一直回 503 時每頁重試要 15 分鐘,沒有上限會一直卡住。
 SOURCE_TIMEOUT="${SOURCE_TIMEOUT:-3600}"
 
+# 暫停名單（熊叔叔 11/3：cclm 網站維修中，先暫停、恢復再開；Asana 1217767336780488）：
+# 一行一個「來源 原因」，# 開頭是註解。放在 crawler/data/（不進 git、部署不會動），
+# 暫停／恢復都只要在主機上改這個檔，不用重新部署。暫停的來源記 skip（不算失敗步驟，摘要信會列出「略過：暫停…」）。
+PAUSED_FILE="$CRAWLER_DIR/data/paused_sources.txt"
+
 # ── 結構化摘要(Asana 1217767344711740):每一步一行 TSV,給每日摘要信／警報信讀 ──
 # 欄位:時間 步驟 狀態(ok/none/fail/skip) 件數 秒數 備註。同一天重跑會覆蓋(只留最後一輪)。
 # 跑完寫 last_run.json(結束時間、失敗步驟數)—— 「排程本身沒跑」靠它的時間判斷。
@@ -61,6 +66,12 @@ log "=== 每日新品檢查開始 ==="
 run_source() {
   local src="$1"; shift
   local out="data/new/${src}_${TS}.jsonl" t0=$SECONDS
+  if [ -f "$PAUSED_FILE" ] && awk -v s="$src" '$1==s {f=1} END {exit !f}' "$PAUSED_FILE"; then
+    local why; why="$(awk -v s="$src" '$1==s {$1=""; sub(/^[ \t]+/, ""); print; exit}' "$PAUSED_FILE")"
+    log "--- $src:暫停中,這輪不抓(${why:-見 data/paused_sources.txt}) ---"
+    rec "crawl:$src" skip 0 0 "暫停:${why:-見 data/paused_sources.txt}"
+    return
+  fi
   log "--- $src:抓取新品 ---"
   rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
   timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1

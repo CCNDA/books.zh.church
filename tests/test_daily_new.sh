@@ -92,5 +92,19 @@ run env SOURCE_TIMEOUT=30
 check "下一輪沒被略過、有跑完" "$(grep -c '每日新品檢查結束' $L)" 2
 check "沒有出現「這輪略過」" "$(grep -c '這輪略過' $L)" 0
 
+echo "== 7. 暫停名單：cclm 暫停 → 不抓、記 skip、不算失敗步驟；註解那行不算數"
+reset
+printf '# 這行是註解\n# osb 註解掉的不算\ncclm 網站維修中（測試）\n' > $T/crawler/data/paused_sources.txt
+run env SOURCE_TIMEOUT=3 MODE_cclm=write2_hang
+check "cclm 記 skip、備註有暫停原因" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="skip" && $6 ~ /暫停:網站維修中/' $S | wc -l)" 1
+check "cclm 沒有被執行（master 沒有東西）" "$([ -s $T/crawler/data/cclm_books.jsonl ] && echo 有 || echo 沒有)" 沒有
+check "log 寫「暫停中,這輪不抓」" "$(grep -c 'cclm:暫停中,這輪不抓' $L)" 1
+check "註解掉的 osb 照常跑" "$(awk -F'\t' '$2=="crawl:osb" && $3!="skip"' $S | wc -l)" 1
+check "cclm 之後的 akow 有跑" "$(grep -c 'crawl:akow' $S)" 1
+want=$(awk -F'\t' 'NR>1 && ($3=="fail" || ($3=="skip" && ($2=="classify" || $2=="search_text" || $2=="guard:year" || $2=="guard:nonbook")))' $S | wc -l)
+check "暫停的 cclm 不算失敗步驟（fail_steps＝fail＋關鍵步驟 skip；假環境沒有 classify 等工具所以有 $want）" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fail_steps"])' $T/crawler/logs/last_run.json 2>/dev/null)" "$want"
+check "crawl:cclm 沒有記成 fail" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="fail"' $S | wc -l)" 0
+rm -f $T/crawler/data/paused_sources.txt
+
 pkill -f '^sleep 300$' 2>/dev/null; pkill -f "$T/crawler" 2>/dev/null; rm -rf $T
 echo; echo "OK $ok / FAIL $bad"; [ "$bad" -eq 0 ]
