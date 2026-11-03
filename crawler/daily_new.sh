@@ -20,11 +20,16 @@ log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOG"; }
 
 # ── 同時只跑一輪(Asana 1217767336780488,11/2 cclm 卡 16 小時)──
 # 上一輪還沒結束就略過這輪:不然下面清空 summary 會蓋掉上一輪的紀錄,兩輪也會同時寫同一個 delta／log。
-# 要放在清空 summary 之前。鎖跟著行程走,行程結束(含被停掉)就自動釋放。
-exec 9>"$LOG_DIR/daily_new.lock"
-if ! flock -n 9; then
-  log "[警告] 上一輪還在跑,這輪略過(看 ps 有沒有卡住的 new_arrivals.py)"
-  exit 0
+# 要放在清空 summary 之前。用 flock -o 重新執行自己:鎖只在外層 flock 行程手上,不會傳給 python／php
+# 子行程;就算子行程留下孤兒(例如瀏覽器),鎖也會在這支結束時放掉,不會之後每輪都被略過(小布 11/3)。
+if [ "${DAILY_NEW_LOCKED:-}" != 1 ]; then
+  DAILY_NEW_LOCKED=1 flock -n -o -E 75 "$LOG_DIR/daily_new.lock" bash "$0" "$@"
+  rc=$?
+  if [ "$rc" -eq 75 ]; then
+    log "[警告] 上一輪還在跑,這輪略過(看 ps 有沒有卡住的 new_arrivals.py)"
+    exit 0
+  fi
+  exit "$rc"
 fi
 
 # 每個來源最多跑多久(秒)。超過就停掉、記 fail、接著跑下一個來源,後面的步驟和摘要信照常。
@@ -57,11 +62,27 @@ run_source() {
   local src="$1"; shift
   local out="data/new/${src}_${TS}.jsonl" t0=$SECONDS
   log "--- $src:抓取新品 ---"
+  rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
   timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
   local rc=$?
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-    log "$src:[錯誤] 超過 ${SOURCE_TIMEOUT} 秒還沒抓完,已停掉;已抓到的 delta 不匯入,保留於 $out"
-    rec "crawl:$src" fail 0 $((SECONDS - t0)) "逾時 ${SOURCE_TIMEOUT} 秒"
+    # 137 也可能是記憶體不足被系統殺掉:用跑了多久分辨
+    local why="逾時 ${SOURCE_TIMEOUT} 秒" sec=$((SECONDS - t0))
+    if [ "$rc" -eq 137 ] && [ "$sec" -lt "$SOURCE_TIMEOUT" ]; then why="被強制停(跑 ${sec} 秒,可能記憶體不足)"; fi
+    log "$src:[錯誤] $why,已停掉"
+    # 停掉前已寫進 master 的新書都在 delta 裡(writer 邊寫邊出):照樣匯入,不然它們會永久漏掉
+    if [ -s "$out" ]; then
+      local n; n="$(wc -l < "$out" | tr -d ' ')"
+      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
+        log "$src:停掉前已找到 $n 本,已匯入"
+        rec "crawl:$src" fail "$n" "$sec" "$why,已匯入 $n 本"
+      else
+        log "$src:[錯誤] 停掉前找到的 $n 本匯入失敗,delta 保留於 $out"
+        rec "crawl:$src" fail "$n" "$sec" "$why,匯入失敗"
+      fi
+    else
+      rec "crawl:$src" fail 0 "$sec" "$why"
+    fi
     return
   fi
   if [ "$rc" -eq 0 ]; then

@@ -781,6 +781,12 @@ def main():
     ap.add_argument("--browser-ua", action="store_true", help="校園改用瀏覽器式 UA(遇 500/封鎖時用)")
     args = ap.parse_args()
 
+    # delta 由 writer 邊寫邊出(見 common.JsonlWriter 的 tee),中途被停掉也不會漏書;dry-run 不寫
+    global _DELTA_OUT
+    out = Path(args.out) if args.out else (
+        NEW_DIR / f"{args.source}_{datetime.now().strftime('%Y%m%d-%H%M')}.jsonl")
+    _DELTA_OUT = None if args.dry_run else out
+
     if args.source == "campus":
         if args.browser_ua:
             _apply_browser_ua()
@@ -881,18 +887,15 @@ def main():
         print(f"[{args.source}] dry-run:偵測到 {len(fresh)} 本新書(未寫檔)")
         return
 
-    out = Path(args.out) if args.out else (
-        NEW_DIR / f"{args.source}_{datetime.now().strftime('%Y%m%d-%H%M')}.jsonl")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", encoding="utf-8") as f:
-        for rec in fresh:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     print(f"[{args.source}] 新增 {len(fresh)} 本 → delta:{out}")
+
+
+_DELTA_OUT: Path | None = None
 
 
 def _writer(name: str, key: str):
     from common import JsonlWriter
-    return JsonlWriter(DATA / name, key)
+    return JsonlWriter(DATA / name, key, tee=_DELTA_OUT)
 
 
 if __name__ == "__main__":

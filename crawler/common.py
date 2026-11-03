@@ -88,11 +88,19 @@ def polite_fetch(
 
 
 class JsonlWriter:
-    """附加式 JSONL 輸出;啟動時載入既有 key 避免重複。"""
+    """附加式 JSONL 輸出;啟動時載入既有 key 避免重複。
 
-    def __init__(self, path: Path, key_field: str):
+    tee:另給一個路徑時,每筆「首次寫入 master」的紀錄也同時寫一行到 tee 並 flush(每日新品的 delta)。
+    為什麼要邊寫邊出:master 一寫入那本書就算「見過」;delta 若等整輪結束才寫,中途被停掉
+    (排程逾時、被 kill)那幾本就只在 master、不在 delta → 不會匯入、隔天也不會再當新書,永久漏掉
+    (小布 11/3 審查 a0c3751;Asana 1217767336780488)。tee 檔第一次有紀錄才建立,沒新書就不產生檔案。
+    """
+
+    def __init__(self, path: Path, key_field: str, tee: Path | None = None):
         self.path = path
         self.key_field = key_field
+        self.tee = tee
+        self._tee_fh = None
         self.seen: set[str] = set()
         if path.exists():
             with path.open("r", encoding="utf-8") as f:
@@ -114,13 +122,22 @@ class JsonlWriter:
         key = str(record[self.key_field])
         if key in self.seen:
             return False
-        self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        line = json.dumps(record, ensure_ascii=False) + "\n"
+        self._fh.write(line)
         self._fh.flush()
         self.seen.add(key)
+        if self.tee is not None:
+            if self._tee_fh is None:
+                self.tee.parent.mkdir(parents=True, exist_ok=True)
+                self._tee_fh = self.tee.open("w", encoding="utf-8")
+            self._tee_fh.write(line)
+            self._tee_fh.flush()
         return True
 
     def close(self):
         self._fh.close()
+        if self._tee_fh is not None:
+            self._tee_fh.close()
 
 
 class State:
