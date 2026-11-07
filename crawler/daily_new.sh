@@ -375,7 +375,7 @@ if [ -f "$ALERT" ]; then
   php "$ALERT" >>"$LOG" 2>&1
   case $? in
     0) log "警報檢查完成(有狀況才寄)" ;;
-    2) log "警報信略過(設定不全,見上一行)" ;;
+    2) log "[警告] 警報信沒有寄:收件人或寄信設定不全(alert.to、daily_report.to 都空?見上一行)" ;;
     *) log "[警告] 警報信沒有寄出(見 crawler/logs/mail-$(date +%Y%m%d).log)" ;;
   esac
 fi

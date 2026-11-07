@@ -209,7 +209,7 @@ foreach ($send as $fp => $msg) {
 if ($held !== []) {
     $text .= "\n另有 " . count($held) . " 項 " . ALERT_THROTTLE_HOURS . " 小時內已經寄過,這次不重複:" . implode('、', $held) . "\n";
 }
-$text .= "\nlog:crawler/logs/new-arrivals-$date.log(主機上)\n同一個狀況 " . ALERT_THROTTLE_HOURS . " 小時內只寄一次。\n";
+$text .= "\nlog:crawler/logs/new-arrivals-$date.log(主機上)\n同一個狀況 " . ALERT_THROTTLE_HOURS . " 小時內只寄一次；狀況解除前，大約每天會再寄一次（不是寄重複）。\n";
 $h = static fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
 $html = '<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>' . $h($subject) . '</title></head>'
       . '<body style="font-family:sans-serif;color:#222;line-height:1.5">'
@@ -221,7 +221,7 @@ $html .= '</ul>';
 if ($held !== []) {
     $html .= '<p style="color:#555">另有 ' . count($held) . ' 項 ' . ALERT_THROTTLE_HOURS . ' 小時內已經寄過,這次不重複:' . $h(implode('、', $held)) . '</p>';
 }
-$html .= '<p style="color:#555">log:crawler/logs/new-arrivals-' . $h($date) . '.log(主機上)。同一個狀況 ' . ALERT_THROTTLE_HOURS . ' 小時內只寄一次。</p></body></html>';
+$html .= '<p style="color:#555">log:crawler/logs/new-arrivals-' . $h($date) . '.log(主機上)。同一個狀況 ' . ALERT_THROTTLE_HOURS . ' 小時內只寄一次；狀況解除前，大約每天會再寄一次（不是寄重複）。</p></body></html>';
 
 if ($dry) {
     echo "Subject: $subject\n\n$text";
@@ -231,8 +231,10 @@ if ($dry) {
 // ── 寄出 ─────────────────────────────────────────────────
 $cfg = app_config();
 $aws = $cfg['aws'] ?? [];
+// alert.to 沒設或是空陣列，就用 daily_report.to（小布 11/7 審查：原本 ?? 遇到 [] 不會退回）
+$pick = static fn($v): array => array_values(array_filter((array) ($v ?? [])));
 $to  = $testTo !== '' ? [$testTo]
-     : array_values(array_filter((array) ($cfg['alert']['to'] ?? $cfg['daily_report']['to'] ?? [])));
+     : ($pick($cfg['alert']['to'] ?? null) ?: $pick($cfg['daily_report']['to'] ?? null));
 if (($err = mail_check($aws, $to)) !== null) {
     fwrite(STDERR, "$err,不寄(alert.to／daily_report.to／aws;要測試請用 --to=)\n");
     mail_log("$err,未寄");

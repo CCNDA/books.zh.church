@@ -84,7 +84,7 @@ daily_new.sh 最後會跑 `tools/send_alert.php` 檢查當天的狀況；可是*
 ( crontab -l 2>/dev/null; echo "15 */6 * * * cd /home/ubuntu/books && php tools/send_alert.php --only=no-success >/dev/null 2>&1" ) | crontab -
 crontab -l
 ```
-收件人讀 config/app.local.php 的 `alert.to`，沒設就用 `daily_report.to`；同一個狀況 20 小時內只寄一次（紀錄在 crawler/logs/alert_state.json）。
+收件人讀 config/app.local.php 的 `alert.to`，沒設或是空陣列就用 `daily_report.to`（兩個都空就不寄，daily_new.sh 記 [警告]）；同一個狀況 20 小時內只寄一次（紀錄在 crawler/logs/alert_state.json）——**狀況沒解除前，大約每天會再寄一次**，不是寄重複；沒有「已恢復」通知，隔天沒再收到就是好了。
 
 ## 查詢主機現有排程
 

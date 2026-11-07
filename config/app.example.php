@@ -58,4 +58,9 @@ return [
         // 每日新品摘要信(tools/send_daily_report.php)的收件人;空陣列＝不寄
         'to' => [],
     ],
+    'alert' => [
+        // 【警報】信(tools/send_alert.php)的收件人;空陣列或沒寫＝用 daily_report.to。
+        // 兩個都是空的就不寄警報(daily_new.sh 會記 [警告]);關掉摘要信又要收警報,這裡要填
+        'to' => [],
+    ],
 ];
