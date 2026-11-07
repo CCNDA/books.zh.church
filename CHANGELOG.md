@@ -13,6 +13,14 @@
 
 ## [Unreleased]
 
+### 新功能（排程）
+
+- **【警報】信 tools/send_alert.php**（Asana 1217767377517110）：有狀況才寄，主旨帶【警報】。會叫的：某來源抓取或匯入失敗、其他步驟失敗、關鍵步驟被略過、摘要檔不見或只有表頭、某來源連續 14 天都是 0 本新書、超過 26 小時沒有全部成功。同一個狀況（指紋＝種類＋來源＋錯誤種類）20 小時內只寄一次，紀錄在 crawler/logs/alert_state.json（上鎖、先寫暫存檔再改名；寄出成功才記）；收件人讀 alert.to，沒設就用 daily_report.to。daily_new.sh 在摘要信後面呼叫；「超過 26 小時」要另外排一個 crontab（--only=no-success，每 6 小時），寫在 deploy/cron-new-arrivals.md
+- **暫停名單（1.21.2）的來源不會叫**：暫停記的是 skip，不算失敗、也不算進「連續 0 本」（中間暫停一天，連續天數就斷掉）
+- **tools/lib_mail.php**：SES SMTP 寄信從 send_daily_report.php 抽出來，摘要信和警報信共用
+- 還沒做：「商品節點 0 個」「關鍵欄位缺漏超過門檻」要各爬蟲自己回報（summary TSV 沒有這些資料）；網站改版抓到 0 個商品時，先由「連續 14 天 0 本」接住；某來源只壞一部分頁面（例如微讀第 2 頁以後失敗）不會叫
+- 測試：cora-lab 假 SMTP＋自簽憑證 30 項全過（測試腳本會蓋 config/app.local.php，不放進 repo，存在 cora-lab ~/keep/books-alert/）；暫停 16 天不叫、對照組（同樣 16 天但抓了 0 本）會叫；tests/test_daily_new.sh 27 項全過
+
 ## [1.21.2] - 2026-11-03 —— 每日新品排程可以暫停單一來源
 
 ### 新功能（排程）
