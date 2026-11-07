@@ -13,6 +13,8 @@
 
 ## [Unreleased]
 
+## [1.21.3] - 2026-11-09 —— 抓取失效【警報】信
+
 ### 新功能（排程）
 
 - **【警報】信 tools/send_alert.php**（Asana 1217767377517110）：有狀況才寄，主旨帶【警報】。會叫的：某來源抓取或匯入失敗、其他步驟失敗、關鍵步驟被略過、摘要檔不見或只有表頭、某來源連續 14 天都是 0 本新書、超過 26 小時沒有全部成功。同一個狀況（指紋＝種類＋來源＋錯誤種類）20 小時內只寄一次，紀錄在 crawler/logs/alert_state.json（上鎖、先寫暫存檔再改名；寄出成功才記）；收件人讀 alert.to，沒設就用 daily_report.to。daily_new.sh 在摘要信後面呼叫；「超過 26 小時」要另外排一個 crontab（--only=no-success，每 6 小時），寫在 deploy/cron-new-arrivals.md
@@ -20,6 +22,19 @@
 - **tools/lib_mail.php**：SES SMTP 寄信從 send_daily_report.php 抽出來，摘要信和警報信共用
 - 還沒做：「商品節點 0 個」「關鍵欄位缺漏超過門檻」要各爬蟲自己回報（summary TSV 沒有這些資料）；網站改版抓到 0 個商品時，先由「連續 14 天 0 本」接住；某來源只壞一部分頁面（例如微讀第 2 頁以後失敗）不會叫
 - 測試：cora-lab 假 SMTP＋自簽憑證 30 項全過（測試腳本會蓋 config/app.local.php，不放進 repo，存在 cora-lab ~/keep/books-alert/）；暫停 16 天不叫、對照組（同樣 16 天但抓了 0 本）會叫；tests/test_daily_new.sh 27 項全過
+
+### 正式機執行順序（熊哥 11/7 TG 選甲：11/9 09:00 上、Discord 照草稿發）
+
+1. `cd /home/ubuntu/books && ./deploy/deploy.sh`（1.21.3）
+2. ubuntu crontab 加一行（小芯可以用 ubuntu 自己加）：`15 */6 * * * cd /home/ubuntu/books && php tools/send_alert.php --only=no-success >/dev/null 2>&1`
+3. 收件人不用改：alert.to 沒設，沿用 daily_report.to（black@ccnda.net，11/7 實查）
+4. 驗收：`php tools/send_alert.php --dry-run`（今天的摘要）、`--only=no-success --dry-run`；隔天 06:30 那輪跑完看 log 有「警報檢查完成」
+5. Discord：`php tools/notify_discord.php --dry-run` 看內容 → 去掉 --dry-run 送出
+
+### 驗收紀錄
+
+- 小布 11/7 審查：c85e0c2「通過，附註」→ 附註①②改 0ad6207 → 再審「通過」
+- 跟 1.21.1（每個來源逾時）、1.21.2（暫停名單）合在一起沒有衝突：暫停記 skip，不算失敗也不算連續 0 本
 
 ## [1.21.2] - 2026-11-03 —— 每日新品排程可以暫停單一來源
 
