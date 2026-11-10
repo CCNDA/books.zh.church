@@ -8,7 +8,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>屬靈共同書目|基督徒圖書分享服務</title>
 <meta name="description" content="CCNDA 屬靈共同書目——收錄華文屬靈好書,支援分類瀏覽與關鍵字搜尋,幫助你找到造就生命的下一本書。">
-<link rel="canonical" href="https://books.zh.church/">
+<script>
+/* canonical／robots 依網址參數算（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」：
+   原本列表、篩選、換頁的 canonical 都寫死成首頁，內容卻不同）。HTML 不寫死 canonical，免得跟這裡算的打架。
+   篩選（category／person／publisher）與第 2 頁以後 → 指向自己（參數固定順序）；其他不認得的參數不算。
+   搜尋結果（q）→ noindex,follow（站內搜尋結果頁不該被收錄，連結照樣讓 Google 跟）。 */
+function seoSync(){
+  var p = new URLSearchParams(location.search), c = new URLSearchParams();
+  ["category", "person", "publisher"].forEach(function (k) { var v = p.get(k); if (v) c.set(k, v); });
+  var q = p.get("q"); if (q) c.set("q", q);
+  var pg = parseInt(p.get("page") || "1", 10); if (pg > 1) c.set("page", String(pg));
+  var l = document.querySelector('link[rel="canonical"]');
+  if (!l) { l = document.createElement("link"); l.rel = "canonical"; document.head.appendChild(l); }
+  l.href = "https://books.zh.church/" + (c.toString() ? "?" + c.toString() : "");
+  var r = document.querySelector('meta[name="robots"]');
+  if (q) { if (!r) { r = document.createElement("meta"); r.name = "robots"; document.head.appendChild(r); } r.content = "noindex,follow"; }
+  else if (r) r.remove();
+}
+seoSync();
+</script>
 <link rel="icon" type="image/svg+xml" href="/assets/logo-books.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
@@ -214,6 +232,7 @@ function readUrl(){
   state.person = p.get("person") || "";
   state.publisher = p.get("publisher") || "";
   state.page = Math.max(1, parseInt(p.get("page") || "1", 10) || 1);
+  seoSync();
 }
 function writeUrl(replace){
   const p = new URLSearchParams();
@@ -224,6 +243,7 @@ function writeUrl(replace){
   if (state.page > 1) p.set("page", String(state.page));
   const url = location.pathname + (p.toString() ? "?" + p.toString() : "");
   history[replace ? "replaceState" : "pushState"](null, "", url);
+  seoSync();
 }
 
 async function fetchJson(url){
