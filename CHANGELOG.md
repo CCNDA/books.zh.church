@@ -13,12 +13,7 @@
 
 ## [Unreleased]
 
-### 修正（搜尋引擎）
-
-- **首頁列表／篩選／換頁的 canonical 不再一律寫成首頁**（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」；Asana 1220369842396285）：`public/index.html` 拿掉寫死的 `<link rel="canonical" href="/">`，改由 `<head>` 裡的 `seoSync()` 依網址算：分類／作者／出版社篩選與第 2 頁以後指向自己（參數順序跟前端網址一樣：q、category、person、publisher、page；utm 等不認得的參數不算）；首頁、`?page=1`、不認得的參數 → `/`；站內搜尋結果（有 `q`）加 `<meta name="robots" content="noindex,follow">`。前端換頁（writeUrl）、上一頁（popstate）都會跟著更新。HTML 不寫死、只由 JS 設（開頁、換頁、上一頁都會重算同一個 link），是 Google 對 JS 設 canonical 的建議做法（避免兩個 canonical 打架）
-- 測試：cora-lab 本機 php -S＋Playwright 12 項全過（9 種網址＋換頁、改搜尋、上一頁）；拿 main 原版跑同一支 9 項 FAIL（證明測得到原本的問題）
-
-## [1.21.3] - 2026-11-09 —— 抓取失效【警報】信
+## [1.21.3] - 2026-11-10 —— 抓取失效【警報】信、列表頁 canonical
 
 ### 新功能（排程）
 
@@ -28,7 +23,12 @@
 - 還沒做：「商品節點 0 個」「關鍵欄位缺漏超過門檻」要各爬蟲自己回報（summary TSV 沒有這些資料）；網站改版抓到 0 個商品時，先由「連續 14 天 0 本」接住；某來源只壞一部分頁面（例如微讀第 2 頁以後失敗）不會叫
 - 測試：cora-lab 假 SMTP＋自簽憑證 30 項全過（測試腳本會蓋 config/app.local.php，不放進 repo，存在 cora-lab ~/keep/books-alert/）；暫停 16 天不叫、對照組（同樣 16 天但抓了 0 本）會叫；tests/test_daily_new.sh 27 項全過
 
-### 正式機執行順序（熊哥 11/7 TG 選甲：11/9 09:00 上、Discord 照草稿發）
+### 修正（搜尋引擎）
+
+- **首頁列表／篩選／換頁的 canonical 不再一律寫成首頁**（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」；Asana 1220369842396285）：`public/index.html` 拿掉寫死的 `<link rel="canonical" href="/">`，改由 `<head>` 裡的 `seoSync()` 依網址算：分類／作者／出版社篩選與第 2 頁以後指向自己（參數順序跟前端網址一樣：q、category、person、publisher、page；utm 等不認得的參數不算）；首頁、`?page=1`、不認得的參數 → `/`；站內搜尋結果（有 `q`）加 `<meta name="robots" content="noindex,follow">`。前端換頁（writeUrl）、上一頁（popstate）都會跟著更新。HTML 不寫死、只由 JS 設（開頁、換頁、上一頁都會重算同一個 link），是 Google 對 JS 設 canonical 的建議做法（避免兩個 canonical 打架）
+- 測試：cora-lab 本機 php -S＋Playwright 12 項全過（9 種網址＋換頁、改搜尋、上一頁）；拿 main 原版跑同一支 9 項 FAIL（證明測得到原本的問題）
+
+### 正式機執行順序（熊哥 11/7 TG 選甲：11/9 09:00 上、Discord 照草稿發；11/10 TG 選乙：canonical 修正併入，當天下午上）
 
 1. `cd /home/ubuntu/books && ./deploy/deploy.sh`（1.21.3）
 2. ubuntu crontab 加一行（小芯可以用 ubuntu 自己加）：`15 */6 * * * cd /home/ubuntu/books && php tools/send_alert.php --only=no-success >/dev/null 2>&1`
