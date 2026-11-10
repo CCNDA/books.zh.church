@@ -13,6 +13,8 @@
 
 ## [Unreleased]
 
+## [1.22.0] - 2026-11-11 —— 收錄天道北美網路書房（北美購書管道）
+
 ### 新增（購書管道＋新來源）
 
 - **天道北美網路書房（www.ustiendao.com）**（熊叔叔 2026-11-10 TG 選「做，當北美購書管道」，同日再選「乙 新書也收（先沒有分類）」；Asana 1220373285067379，可行性 1220372458497220）：已收的書如果天道北美也有賣（ISBN 對得到），書目頁多一個「天道北美網路書房」購書連結，價格是美金；書目網沒有的中文書照一般流程收成新書（抽樣約 5%）
@@ -25,6 +27,18 @@
   - ★ 新書會有一部分其實是站上已有、但沒有 ISBN 的書：站方作者常寫英文原名（MYRON AUGSBURG ↔ 奧米倫）、出版社寫簡稱（橄欖 ↔ 橄欖文化事業基金會），模糊比對和書名＋出版社比對都對不上。11/10 開發庫抽樣「新書 5 本」裡有 2 本是這種（81077 抽絲剝繭話信仰、73404／92273 異邦中的屬靈人）。第一次全量匯入前要先看 dry-run 的新書清單；匯入後跑 tools/find_title_publisher_duplicates.php，照既有重複書流程（人看過 → merge_duplicate_books.php）合併
   - 還沒做（另開票 1220374760596931）：改價、下架、有沒有貨每週對一次
   - 測試：tests/test_ustiendao_parse.py 47 項（不連網；含假 session：驗證頁 403 只請求 1 次、sitemap 被擋、整輪 404 都回失敗；拿 7d10049 的爬蟲跑同一支：驗證頁被打 10 次、回 []、sitemap 被擋直接丟例外）；tests/test_daily_new.sh 加第 8 段；cora-lab 實抓 60 頁 → 書 54、禮品 6，對開發庫匯入：ISBN 合併 49
+
+
+### 正式機執行順序（v1.22.0）
+
+1. `cd /home/ubuntu/books && ./deploy/deploy.sh`
+2. **先暫停每日排程的 ustiendao**（全量抓取跟每日排程不能同時寫主檔）：`echo "ustiendao 第一次全量進行中" >> crawler/data/paused_sources.txt`
+3. 第一次全量（約 13k 頁、12 小時）：`cd crawler && nohup python3 ustiendao_crawler.py > logs/ustiendao-full-$(date +%Y%m%d).log 2>&1 &`；跑完看最後一行「結果:ok …」，有「[停]」就是被擋了，回報、不繞過
+4. 抽 20 本新書對照 mpn（作者欄）跟簡介裡寫的作者（小布 11/10 附註：mpn 不一定是作者）
+5. `php tools/import.php --file=crawler/data/ustiendao_books.jsonl --source=ustiendao --dry-run --fuzzy-all`：看合併、新書清單；用書名在站上抽查新書是不是真的新的 → 數字報熊叔叔
+6. 拿掉 --dry-run 匯入 → `php tools/classify_categories.php` → `php tools/find_title_publisher_duplicates.php` 走重複書流程
+7. 拿掉 paused_sources.txt 裡 ustiendao 那一行（之後每日排程接手，一輪最多 300 頁）
+8. 更新說明用實際數字寫、熊叔叔看過 → Discord；GitHub Issue #5、里程碑 v1.22.0 關閉
 
 ## [1.21.3] - 2026-11-10 —— 抓取失效【警報】信、列表頁 canonical
 
