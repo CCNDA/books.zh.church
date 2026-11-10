@@ -863,7 +863,7 @@ def main():
             writer.close()
             sys.exit(2)
     elif args.source == "ustiendao":
-        # 天道北美(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁;匯入在 daily_new.sh 加 --merge-only
+        # 天道北美(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁;匯入照一般流程(新書也收)
         writer = _writer("ustiendao_books.jsonl", "product_id")
         fresh = ust.collect_new(writer, cap=args.max_pages or 300, dry_run=args.dry_run)
         if fresh is None:

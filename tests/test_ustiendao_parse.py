@@ -70,11 +70,55 @@ check("979 合法", valid_isbn13("9798887690605"), True)
 check("12 碼", valid_isbn13("978988142127"), False)
 check("非 978／979 開頭的 EAN", valid_isbn13("4713008131138"), False)
 
-print("sitemap")
-xml = ("<loc>https://www.ustiendao.com/.html</loc><loc>https://www.ustiendao.com/1889-1951.html</loc>"
-       "<loc>https://www.ustiendao.com/brands/x/</loc><loc>https://www.ustiendao.com/tags/a.html</loc>")
+print("書名拆分：版本代號")
+check("尾巴是聖經版本代號 NIV → 不切", split_title("聖經 和合本 NIV"), ("聖經 和合本 NIV", None))
+check("尾巴是 ESV → 不切", split_title("中英對照聖經 ESV"), ("中英對照聖經 ESV", None))
+check("真的原文書名照切", split_title("聖經 NIV Study Bible"), ("聖經", "NIV Study Bible"))
+
+# ── 網路行為（假 session，不連網）：小布 11/10 審查 —— 驗證頁是 HTTP 403，原本會被 polite_fetch 重試 5 次 ──
+import tempfile
 import ustiendao_crawler as uc
-class S: pass
-uc.polite_fetch = lambda *a, **k: xml
-check("「/.html」（沒有代號）與子目錄不算書頁", uc.sitemap_urls(S()), ["https://www.ustiendao.com/1889-1951.html"])
+tmp = pathlib.Path(tempfile.mkdtemp())
+uc.CACHE = tmp / "cache"; uc.SKIPPED = tmp / "skipped.jsonl"; uc.THROTTLE = (0, 0)
+SM = "https://www.ustiendao.com/sitemap.xml"
+B1, B2 = "https://www.ustiendao.com/b1.html", "https://www.ustiendao.com/b2.html"
+xml = ("<loc>https://www.ustiendao.com/.html</loc><loc>" + B1 + "</loc><loc>" + B2 + "</loc>"
+       "<loc>https://www.ustiendao.com/brands/x/</loc><loc>https://www.ustiendao.com/tags/a.html</loc>")
+CF = "<html><head><title>Just a moment...</title></head></html>"
+class R:
+    def __init__(self, code, text): self.status_code, self.text, self.encoding, self.apparent_encoding = code, text, "utf-8", "utf-8"
+    def raise_for_status(self):   # 舊版走 polite_fetch 會呼叫（對照組用）
+        import requests
+        if self.status_code >= 400: raise requests.HTTPError(f"{self.status_code}")
+class Sess:
+    def __init__(self, routes): self.routes, self.calls = routes, []
+    def get(self, url, timeout=None):
+        self.calls.append(url); return R(*self.routes[url])
+class W:
+    def __init__(self): self.rows = []
+    def has(self, k): return False
+    def write(self, r): self.rows.append(r); return True
+def run(routes):
+    import shutil; shutil.rmtree(tmp, ignore_errors=True); tmp.mkdir()
+    sess = Sess(routes); uc.make_session = lambda: sess
+    w = W(); out = uc.collect_new(w, cap=10)
+    return out, sess.calls, w.rows
+
+print("網路行為（假 session）")
+out, calls, rows = run({SM: (200, xml), B1: (403, CF), B2: (403, CF)})
+check("書頁是 403 驗證頁 → collect_new 回 None", out, None)
+check("驗證頁只請求 1 次就停（不重試、不打下一頁）", calls.count(B1) + calls.count(B2), 1)
+check("「/.html」與子目錄不算書頁（sitemap 只請求 1 次）", calls.count(SM), 1)
+
+out, calls, rows = run({SM: (403, CF)})
+check("sitemap 是驗證頁 → 回 None", out, None)
+check("sitemap 驗證頁只請求 1 次", len(calls), 1)
+
+out, calls, rows = run({SM: (200, xml), B1: (404, "not found"), B2: (404, "gone")})
+check("這輪每頁都抓不到（404）→ 回 None，不是「成功、0 本」", out, None)
+check("404 不重試：每頁各 1 次", (calls.count(B1), calls.count(B2)), (1, 1))
+
+out, calls, rows = run({SM: (200, xml), B1: (200, page("9789622449640", "陶恕系列02：超然的經歷")), B2: (404, "gone")})
+check("一頁成功、一頁 404 → 回成功的那 1 本", [r["isbn"] for r in (out or [])], ["9789622449640"])
+check("寫進主檔 1 筆", len(rows), 1)
 sys.exit(1 if fail else 0)

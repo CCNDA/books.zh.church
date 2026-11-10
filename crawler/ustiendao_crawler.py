@@ -28,14 +28,19 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import html as _html
 import json
+import random
 import re
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-from common import JsonlWriter, make_session, polite_fetch
+import requests
+
+from common import JsonlWriter, _cache_path, make_session, polite_fetch
 
 BASE = "https://www.ustiendao.com"
 SITEMAP = BASE + "/sitemap.xml"
@@ -72,7 +77,11 @@ def strip_html(s: str | None) -> str:
 
 
 def sitemap_urls(session, force: bool = False) -> list[str]:
-    xml = polite_fetch(session, SITEMAP, CACHE, THROTTLE, force=force)
+    """sitemap 也可能變成驗證頁或抓不到:印原因、回空清單(collect_new 會當成失敗)。"""
+    xml, why = get_page(session, SITEMAP, force=force)
+    if xml is None:
+        print(f"[ustiendao] sitemap 抓不到({why})", flush=True)
+        return []
     # 11/10 實測 sitemap 裡有一筆「/.html」(沒有代號、404)→ 代號是空的不算書頁
     return re.findall(r"<loc>(https://www\.ustiendao\.com/[^/<]+?\.html)</loc>", xml)
 
@@ -103,6 +112,9 @@ def split_title(t: str) -> tuple[str, str | None]:
     for m in re.finditer(r"\s([A-Za-z])", t):
         i = m.start(1)
         head, tail = t[:i].rstrip(" \t|｜:：-–—"), t[i:].strip()
+        # 尾巴只是一個全大寫短代號(聖經版本 NIV、ESV、KJV…)就不是原文書名,不切(小布 11/10 附註 2)
+        if re.fullmatch(r"[A-Z0-9]{2,6}", tail):
+            continue
         if CJK.search(head) and not CJK.search(tail):
             return head, tail
     return t, None
@@ -161,14 +173,49 @@ def pid_of(url: str) -> str:
     return url.rsplit("/", 1)[-1][:-5]
 
 
+def get_page(session, url: str, force: bool = False) -> tuple[str | None, str]:
+    """回 (內容, 狀態),狀態是 ok／challenge／fetch_error。
+
+    ★ Cloudflare 驗證頁是 **HTTP 403**(內文 Just a moment...)。common.polite_fetch 會先 raise_for_status、
+      把它當一般錯誤重試 5 次(退避約 52 秒)→ 每頁都對驗證頁重打 5 次,parse_product 的 challenge 判斷永遠走不到
+      (小布 11/10 審查 7d10049 抓到;原本的測試直接餵 200 的頁面字串,所以沒測出來)。
+      → 沒有快取時先自己 GET 一次:403／503 而且內文是驗證頁就直接回 challenge、不重試;
+        200 照 polite_fetch 的格式寫快取;429／5xx(不是驗證頁)才交給 polite_fetch 照它的退避重試;其他(404 下架)回 fetch_error。
+    """
+    if _cache_path(CACHE, url, None).exists() and not force:
+        return polite_fetch(session, url, CACHE, THROTTLE), "ok"          # 命中快取,不發請求
+    time.sleep(random.uniform(*THROTTLE))
+    try:
+        r = session.get(url, timeout=60)
+    except requests.RequestException as e:
+        print(f"  [抓不到] {url}:{e}")
+        return None, "fetch_error"
+    if r.status_code in (403, 503) and CHALLENGE in r.text[:5000]:
+        return None, "challenge"
+    if r.status_code == 200:
+        if not r.encoding or r.encoding.lower() == "iso-8859-1":
+            r.encoding = r.apparent_encoding
+        page = r.text
+        cp = _cache_path(CACHE, url, None)
+        cp.parent.mkdir(parents=True, exist_ok=True)
+        cp.write_bytes(gzip.compress(page.encode("utf-8")))
+        return page, "ok"
+    if r.status_code in (429, 500, 502, 503, 504):
+        try:
+            return polite_fetch(session, url, CACHE, THROTTLE, force=True), "ok"
+        except RuntimeError as e:
+            print(f"  [抓不到] {url}:{str(e).splitlines()[-1][:120]}")
+            return None, "fetch_error"
+    print(f"  [抓不到] {url}:HTTP {r.status_code}")
+    return None, "fetch_error"
+
+
 def fetch_one(session, url: str, force: bool = False) -> tuple[dict | None, str]:
     """抓一頁並解析。單頁抓不到(下架 404、暫時故障)回 (None, "fetch_error"):不中斷整輪、
-    也不寫進 skipped(下次會再試)。"""
-    try:
-        page = polite_fetch(session, url, CACHE, THROTTLE, force=force)
-    except RuntimeError as e:
-        print(f"  [抓不到] {url}:{str(e).splitlines()[-1][:120]}")
-        return None, "fetch_error"
+    也不寫進 skipped(下次會再試)。驗證頁回 (None, "challenge")。"""
+    page, why = get_page(session, url, force=force)
+    if page is None:
+        return None, why
     return parse_product(page, url)
 
 
@@ -179,7 +226,8 @@ def collect_new(writer, cap: int = 300, dry_run: bool = False) -> list[dict] | N
       第一次全量(約 13k 頁、12 小時)不要靠這裡:先在主機另外跑 `python3 ustiendao_crawler.py`。
     - 禮品、英文書也要記進 skipped,不然每天都會重抓那約兩成的頁面。
     - sitemap 0 頁 → 回 None(站方改版或被擋,不能當成「沒新書」)。
-    - 書頁變成驗證頁 → 停在那裡、回已經寫好的;一本都沒有就回 None(讓排程記失敗、警報信會叫)。
+    - 書頁變成驗證頁(HTTP 403,見 get_page)→ 只請求那一次就停,回已經寫好的;一本都沒有就回 None(讓排程記失敗、警報信會叫)。
+    - 這輪每一頁都抓不到 → 回 None(不能記成「成功、0 本」)。
       已寫進 master 的書都在 delta(writer tee)裡,不能回 None 讓它們被丟掉。
     """
     session = make_session()
@@ -189,14 +237,18 @@ def collect_new(writer, cap: int = 300, dry_run: bool = False) -> list[dict] | N
         return None
     sk = JsonlWriter(SKIPPED, "product_id")
     fresh: list[dict] = []
+    tried = errors = 0
     try:
         todo = [u for u in urls if not writer.has(pid_of(u)) and not sk.has(pid_of(u))]
         print(f"[ustiendao] sitemap {len(urls)} 頁、還沒看過 {len(todo)} 頁、這輪做 {min(cap, len(todo))} 頁", flush=True)
         for url in todo[:cap]:
             rec, why = fetch_one(session, url)
+            tried += 1
             if why == "challenge":
                 print(f"[ustiendao][停] 書頁變成 Cloudflare 驗證頁:{url} —— 不繞過,請回報", flush=True)
                 return fresh or None
+            if why == "fetch_error":
+                errors += 1
             if rec is None:
                 if why != "fetch_error" and not dry_run:
                     sk.write({"product_id": pid_of(url), "source_url": url, "reason": why})
@@ -207,6 +259,10 @@ def collect_new(writer, cap: int = 300, dry_run: bool = False) -> list[dict] | N
                 fresh.append(rec)
     finally:
         sk.close()
+    # 這輪做的每一頁都抓不到 → 不是「沒新書」,是站方出狀況(回 None 讓排程記失敗)
+    if tried and errors == tried and not fresh:
+        print(f"[ustiendao] 這輪 {tried} 頁全部抓不到,視為失敗", flush=True)
+        return None
     return fresh
 
 
