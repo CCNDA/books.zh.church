@@ -15,7 +15,7 @@
 
 ### 修正（搜尋引擎）
 
-- **首頁列表／篩選／換頁的 canonical 不再一律寫成首頁**（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」；Asana 1220369842396285）：`public/index.html` 拿掉寫死的 `<link rel="canonical" href="/">`，改由 `<head>` 裡的 `seoSync()` 依網址算：分類／作者／出版社篩選與第 2 頁以後指向自己（參數固定順序 category、person、publisher、q、page；utm 等不認得的參數不算）；首頁、`?page=1`、不認得的參數 → `/`；站內搜尋結果（有 `q`）加 `<meta name="robots" content="noindex,follow">`。前端換頁（writeUrl）、上一頁（popstate）都會跟著更新。HTML 不寫死、只由 JS 設一次，是 Google 對 JS 設 canonical 的建議做法（避免兩個 canonical 打架）
+- **首頁列表／篩選／換頁的 canonical 不再一律寫成首頁**（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」；Asana 1220369842396285）：`public/index.html` 拿掉寫死的 `<link rel="canonical" href="/">`，改由 `<head>` 裡的 `seoSync()` 依網址算：分類／作者／出版社篩選與第 2 頁以後指向自己（參數順序跟前端網址一樣：q、category、person、publisher、page；utm 等不認得的參數不算）；首頁、`?page=1`、不認得的參數 → `/`；站內搜尋結果（有 `q`）加 `<meta name="robots" content="noindex,follow">`。前端換頁（writeUrl）、上一頁（popstate）都會跟著更新。HTML 不寫死、只由 JS 設（開頁、換頁、上一頁都會重算同一個 link），是 Google 對 JS 設 canonical 的建議做法（避免兩個 canonical 打架）
 - 測試：cora-lab 本機 php -S＋Playwright 12 項全過（9 種網址＋換頁、改搜尋、上一頁）；拿 main 原版跑同一支 9 項 FAIL（證明測得到原本的問題）
 
 ## [1.21.3] - 2026-11-09 —— 抓取失效【警報】信

@@ -11,12 +11,13 @@
 <script>
 /* canonical／robots 依網址參數算（Search Console 2026-11-09「Google 選擇的標準網頁與使用者不同」：
    原本列表、篩選、換頁的 canonical 都寫死成首頁，內容卻不同）。HTML 不寫死 canonical，免得跟這裡算的打架。
-   篩選（category／person／publisher）與第 2 頁以後 → 指向自己（參數固定順序）；其他不認得的參數不算。
+   篩選（category／person／publisher）與第 2 頁以後 → 指向自己（參數順序跟 writeUrl 一樣：q、category、person、publisher、page）；
+   其他不認得的參數不算。日後加新的篩選參數，這裡跟 readUrl／writeUrl 要一起加。
    搜尋結果（q）→ noindex,follow（站內搜尋結果頁不該被收錄，連結照樣讓 Google 跟）。 */
 function seoSync(){
   var p = new URLSearchParams(location.search), c = new URLSearchParams();
-  ["category", "person", "publisher"].forEach(function (k) { var v = p.get(k); if (v) c.set(k, v); });
   var q = p.get("q"); if (q) c.set("q", q);
+  ["category", "person", "publisher"].forEach(function (k) { var v = p.get(k); if (v) c.set(k, v); });
   var pg = parseInt(p.get("page") || "1", 10); if (pg > 1) c.set("page", String(pg));
   var l = document.querySelector('link[rel="canonical"]');
   if (!l) { l = document.createElement("link"); l.rel = "canonical"; document.head.appendChild(l); }
