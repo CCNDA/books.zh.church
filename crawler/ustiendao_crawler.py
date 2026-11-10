@@ -123,7 +123,7 @@ def parse_product(page: str, url: str) -> tuple[dict | None, str]:
         offers = offers[0] if offers else {}
     avail = str(offers.get("availability") or "").rsplit("/", 1)[-1] or None
     rec = {
-        "product_id": url.rsplit("/", 1)[-1][:-5],
+        "product_id": pid_of(url),
         "source_url": url,
         "title": title,
         "authors_raw": _html.unescape(str(ld.get("mpn") or "")).strip() or None,

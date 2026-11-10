@@ -111,7 +111,9 @@ echo "== 8. 天道北美只當購書管道：匯入要帶 --merge-only，其他�
 reset
 run env MODE_ustiendao=write2_ok MODE_akow=write2_ok
 check "ustiendao 有跑" "$(grep -c 'crawl:ustiendao' $S)" 1
-check "ustiendao 兩筆匯入都帶 --merge-only" "$(grep 'https://x/ustiendao/' $T/db.txt | grep -c ' merge-only$')" 2
+check "ustiendao 匯入都帶 --merge-only（delta 2 筆＋主檔重新對 2 筆）" "$(grep 'https://x/ustiendao/' $T/db.txt | grep -c ' merge-only$')" 4
+check "ustiendao 沒有不帶 --merge-only 的匯入" "$(grep 'https://x/ustiendao/' $T/db.txt | grep -vc ' merge-only$')" 0
+check "summary 記 rematch:ustiendao ok" "$(awk -F'\t' '$2=="rematch:ustiendao" && $3=="ok"' $S | wc -l)" 1
 check "akow 兩筆匯入都沒帶 --merge-only" "$(grep 'https://x/akow/' $T/db.txt | grep -vc ' merge-only$')" 2
 
 pkill -f '^sleep 300$' 2>/dev/null; pkill -f "$T/crawler" 2>/dev/null; rm -rf $T
