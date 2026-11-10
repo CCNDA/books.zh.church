@@ -13,16 +13,18 @@
 
 ## [Unreleased]
 
-### 新增（購書管道）
+### 新增（購書管道＋新來源）
 
-- **天道北美網路書房（www.ustiendao.com）當作北美購書管道**（熊叔叔 2026-11-10 TG 選「做，當北美購書管道」；Asana 1220373285067379，可行性 1220372458497220）：已收的書如果天道北美也有賣（ISBN 對得到），書目頁多一個「天道北美網路書房」購書連結，價格是美金
+- **天道北美網路書房（www.ustiendao.com）**（熊叔叔 2026-11-10 TG 選「做，當北美購書管道」，同日再選「乙 新書也收（先沒有分類）」；Asana 1220373285067379，可行性 1220372458497220）：已收的書如果天道北美也有賣（ISBN 對得到），書目頁多一個「天道北美網路書房」購書連結，價格是美金；書目網沒有的中文書照一般流程收成新書（抽樣約 5%）
   - crawler/ustiendao_crawler.py：只走 sitemap 和書頁的 JSON-LD Product（gtin13、og:title、brand、mpn、price USD、availability）；首頁的 Cloudflare 驗證頁**不繞過**，書頁也變成驗證頁就停下來回報。只收合法 ISBN-13（978／979）、書名有中文字的；禮品、英文書記進 ustiendao_skipped.jsonl，不再重抓。站方 JSON 字串夾真的換行 → json.loads(strict=False)
-  - tools/import.php 加 `--merge-only`：只把「ISBN 對到在庫書」的紀錄併進去（版本、價格、購書連結），沒對到、或只靠書名模糊比對到的一律不寫，結尾列前 50 筆。站方書頁沒有分類，新書進來會沒有主分類，所以先不收新書（抽樣約 5% 是書目網還沒有的中文書，日後另外決定）
-  - 每日新品：new_arrivals.py --source ustiendao（sitemap 差集，一輪最多 300 頁，約 20 分鐘）；daily_new.sh 匯入時只對 ustiendao 加 --merge-only
-  - 沒對到的書留在主檔裡：daily_new.sh 每天再拿整個主檔 `--merge-only` 對一次（已匯入的以 source_url 跳過），書目網日後收了同一本書，天道北美的連結就補得上（summary 記 rematch:ustiendao）
+  - 書名「中文 English」「中文 | English」切開：中文當書名、英文進原文書名（title_en），原值留 title_raw；跨站模糊比對才比得中
+  - 站方書頁沒有分類 → 不做 apply_map，新書由 daily_new.sh 後段的 classify 關鍵字回填
+  - 每日新品：new_arrivals.py --source ustiendao（sitemap 差集，一輪最多 300 頁，約 20 分鐘）
   - 登記：SOURCE_CURRENCY（USD）、購書平台名稱與排序（排在海外站最後）、API 地區（美國）、後台來源名、封面來源清單、關於本站
-  - 第一次全量約 13k 頁、間隔 3～4 秒，約 12 小時：要在主機另外跑 `python3 crawler/ustiendao_crawler.py`，跑完再 `php tools/import.php --file=crawler/data/ustiendao_books.jsonl --source=ustiendao --merge-only`（先 --dry-run）
-  - 測試：tests/test_ustiendao_parse.py 28 項（不連網）；tests/test_daily_new.sh 加第 8 段（ustiendao 匯入都帶 --merge-only、主檔重新對一次、其他來源不帶），32 項全過；cora-lab 實抓 60 頁 → 書 54、禮品 6，對開發庫 --merge-only --dry-run：ISBN 合併 49、沒收 5、新書 0
+  - 第一次全量約 13k 頁、間隔 3～4 秒，約 12 小時：要在主機另外跑 `python3 crawler/ustiendao_crawler.py`，跑完先 `php tools/import.php --file=crawler/data/ustiendao_books.jsonl --source=ustiendao --dry-run --fuzzy-all` 看新書清單和模糊比對（抽查新書真的是新的），再拿掉 --dry-run 匯入、跑 classify_categories.php
+  - ★ 新書會有一部分其實是站上已有、但沒有 ISBN 的書：站方作者常寫英文原名（MYRON AUGSBURG ↔ 奧米倫）、出版社寫簡稱（橄欖 ↔ 橄欖文化事業基金會），模糊比對和書名＋出版社比對都對不上。11/10 開發庫抽樣「新書 5 本」裡有 2 本是這種（81077 抽絲剝繭話信仰、73404／92273 異邦中的屬靈人）。第一次全量匯入前要先看 dry-run 的新書清單；匯入後跑 tools/find_title_publisher_duplicates.php，照既有重複書流程（人看過 → merge_duplicate_books.php）合併
+  - 還沒做（另開票 1220374760596931）：改價、下架、有沒有貨每週對一次
+  - 測試：tests/test_ustiendao_parse.py（不連網）；tests/test_daily_new.sh 加第 8 段；cora-lab 實抓 60 頁 → 書 54、禮品 6，對開發庫匯入：ISBN 合併 49
 
 ## [1.21.3] - 2026-11-10 —— 抓取失效【警報】信、列表頁 canonical
 

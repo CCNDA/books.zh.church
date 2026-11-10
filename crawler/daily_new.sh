@@ -2,7 +2,6 @@
 # 每日新品增量檢查 + 匯入(伺服器 cron 專用)。設定與部署見 deploy/cron-new-arrivals.md
 #
 # 流程:new_arrivals.py 抓十七站新品(校園/基道/以琳/天恩/微讀/衛理/格子外面/道聲/橄欖華宣/宇宙光/真哪噠/福音書房/教會公報社/天道書樓/突破機構/麥種傳道會/天道北美)→ 產生當日 delta jsonl
-#      (天道北美只當購書管道:匯入加 --merge-only,不建新書;主檔每天再對一次 ISBN)
 #      → tools/import.php 匯入(以 source_url 去重)→ 十五站套對映分類 → 其餘分類回填。
 # 全程寫入當日 log;任一步驟失敗會記錄但不中斷另一來源。
 set -uo pipefail
@@ -74,8 +73,6 @@ run_source() {
     return
   fi
   log "--- $src:抓取新品 ---"
-  # 只當購書管道的來源:匯入只併進 ISBN 對到的在庫書,不建新書(天道北美,熊叔叔 2026-11-10)
-  local imp=(); [ "$src" = ustiendao ] && imp=(--merge-only)
   rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
   timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
   local rc=$?
@@ -87,7 +84,7 @@ run_source() {
     # 停掉前已寫進 master 的新書都在 delta 裡(writer 邊寫邊出):照樣匯入,不然它們會永久漏掉
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
-      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" "${imp[@]}" >>"$LOG" 2>&1; then
+      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
         log "$src:停掉前已找到 $n 本,已匯入"
         rec "crawl:$src" fail "$n" "$sec" "$why,已匯入 $n 本"
       else
@@ -103,7 +100,7 @@ run_source() {
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
       log "$src:偵測到 $n 本新書,匯入中…"
-      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" "${imp[@]}" >>"$LOG" 2>&1; then
+      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
         log "$src:匯入完成($n 本)"
         rec "crawl:$src" ok "$n" $((SECONDS - t0))
       else
@@ -184,16 +181,10 @@ fi
 #   全掃與增量成本幾乎相同。前提是 sitemap 仍等於全站量 —— 書目量長大時要回頭重驗。
 run_source akow
 
-# 天道北美網路書房(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁(約 20 分鐘);
-# 只併進 ISBN 對到的在庫書(匯入加 --merge-only,見 run_source)。第一次全量要先在主機另外跑。
+# 天道北美網路書房(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁(約 20 分鐘)。
+# ISBN 對到的書加一個購書連結;沒對到的中文書照一般流程收成新書(熊叔叔 11/10 選「新書也收」),
+# 站方沒有分類 → 不跑 apply_map,由後面的 classify 關鍵字回填。第一次全量要先在主機另外跑。
 run_source ustiendao
-# 沒對到的書留在主檔(ustiendao_books.jsonl)裡,delta 只有當天新抓的 → 每天拿整個主檔再對一次
-# (已匯入的以 source_url 跳過);書目網日後收了同一本書,天道北美的連結就補得上(11/10 需求面審查)
-if [ -s "$CRAWLER_DIR/data/ustiendao_books.jsonl" ]; then
-  log "--- ustiendao:主檔重新對一次 ISBN ---"
-  step "rematch:ustiendao" "$IMPORT" --file="$CRAWLER_DIR/data/ustiendao_books.jsonl" --source=ustiendao --merge-only \
-    || log "[錯誤] ustiendao 主檔重新對 ISBN 失敗(可手動重跑,加 --merge-only)"
-fi
 
 # 註:基道官網分類對照的重爬不在本腳本內 —— 全站 64 類、9/3 實測 356 分鐘,會把 apply
 #     與 classify 推到中午。改由 crawler/logos_cat_refresh.sh 於**每週二 22:00** 獨立排程,

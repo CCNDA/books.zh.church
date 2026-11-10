@@ -39,6 +39,19 @@ check("ISBN 檢查碼不對 → 不收", parse_product(page("9789622449641", "�
 check("gtin 空的 → 不收", parse_product(page("", "某某紀念品"), U)[1], "not_isbn")
 check("英文書（書名沒有中文）→ 不收", parse_product(page("9781400338689", "The Love and Respect Devotional"), U)[1], "english")
 check("中英並列書名 → 收", parse_product(page("9789575564759", "慕安得烈每日靈修01：交通的訣要（中英對照） The Secret to Fellowship"), U)[1], "ok")
+r2 = parse_product(page("9789575561635", "抽絲剝繭話信仰 When Reason Fails"), U)[0]
+check("中英並列 → 書名只留中文", r2["title"], "抽絲剝繭話信仰")
+check("中英並列 → 英文進 title_en", r2["title_en"], "When Reason Fails")
+check("原書名另存 title_raw", r2["title_raw"], "抽絲剝繭話信仰 When Reason Fails")
+
+print("書名拆分")
+from ustiendao_crawler import split_title
+check("「中文 | English」", split_title("異邦中的屬靈人：路得與但以理（十二課歸納查經材料 ） | Ruth & Daniel: God's People"),
+      ("異邦中的屬靈人：路得與但以理（十二課歸納查經材料 ）", "Ruth & Daniel: God's People"))
+check("後面接數字不切", split_title("時代的星火 01"), ("時代的星火 01", None))
+check("英文後面還有中文 → 往後找", split_title("陶恕系列 A 版：受教的心 God Tells The Man"), ("陶恕系列 A 版：受教的心", "God Tells The Man"))
+check("沒有英文 → 不切", split_title("陶恕系列 05：受教的心"), ("陶恕系列 05：受教的心", None))
+check("英文在前、中文在後 → 不切", split_title("Kosmos 紅包祝福卡"), ("Kosmos 紅包祝福卡", None))
 check("沒有 JSON-LD → 不收、原因 no_ld", parse_product("<html><title>x</title></html>", U)[1], "no_ld")
 check("Cloudflare 驗證頁 → challenge（呼叫端要停）", parse_product("<html><head><title>Just a moment...</title></head></html>", U)[1], "challenge")
 check("沒有 availability → None", parse_product(page("9789622449640", "陶恕系列02", avail=""), U)[0]["availability"], None)

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""天道北美網路書房(www.ustiendao.com)爬蟲——北美購書管道(熊叔叔 2026-11-10 TG 選「做，當北美購書管道」)。
+"""天道北美網路書房(www.ustiendao.com)爬蟲——北美購書管道(熊叔叔 2026-11-10 TG 選「做，當北美購書管道」,
+同日再選「乙 新書也收（先沒有分類）」:書目網沒有的中文書照一般流程收成新書,分類由 classify 關鍵字回填)。
 
 2026-11-10 偵察實測(Asana 1220372458497220):
 - **Lightspeed eCommerce**。首頁有 Cloudflare 驗證頁(curl 拿到「Just a moment…」),
@@ -22,7 +23,7 @@
     python3 ustiendao_crawler.py --probe --limit 30   # 抽樣看欄位覆蓋率與收／不收原因
     python3 ustiendao_crawler.py                      # 全量(約 13k 頁,間隔 3～4 秒,約 12 小時;有快取可續跑)
     python3 ustiendao_crawler.py --new                # 重抓 sitemap 後,只做還沒見過的書頁
-    每日新品走 new_arrivals.py --source ustiendao(collect_new,一輪最多 300 頁);匯入一律加 --merge-only
+    每日新品走 new_arrivals.py --source ustiendao(collect_new,一輪最多 300 頁);匯入照一般流程
 """
 from __future__ import annotations
 
@@ -95,6 +96,18 @@ def og_title(page: str) -> str | None:
     return _html.unescape(m.group(1)).strip() if m else None
 
 
+def split_title(t: str) -> tuple[str, str | None]:
+    """站方書名常是「中文 English」或「中文 | English」:從第一個「空白後接英文字母、而且後面再也沒有中文」的位置切開。
+    「時代的星火 01」(後面不是英文字母)、「陶恕系列 05：受教的心」(後面還有中文)不切。
+    切不出來就回 (原書名, None)。原書名另存 title_raw。"""
+    for m in re.finditer(r"\s([A-Za-z])", t):
+        i = m.start(1)
+        head, tail = t[:i].rstrip(" \t|｜:：-–—"), t[i:].strip()
+        if CJK.search(head) and not CJK.search(tail):
+            return head, tail
+    return t, None
+
+
 def publisher_zh(brand: str | None) -> str | None:
     """brand 是「建道神學院 Alliance Bible Seminary」「宣道 China Alliance Press」「歸主 (TW)」這種中英／地區並列:
     取第一個英文字母或半形括號之前的部分;那部分沒有中文就照原樣(原值另存 publisher_raw)。"""
@@ -122,10 +135,13 @@ def parse_product(page: str, url: str) -> tuple[dict | None, str]:
     if isinstance(offers, list):
         offers = offers[0] if offers else {}
     avail = str(offers.get("availability") or "").rsplit("/", 1)[-1] or None
+    zh, en = split_title(title)
     rec = {
         "product_id": pid_of(url),
         "source_url": url,
-        "title": title,
+        "title": zh,
+        "title_en": en,          # import.php 對到 original_title
+        "title_raw": title,
         "authors_raw": _html.unescape(str(ld.get("mpn") or "")).strip() or None,
         "publisher": publisher_zh(ld.get("brand")),
         "publisher_raw": _html.unescape(str(ld.get("brand") or "")).strip() or None,
