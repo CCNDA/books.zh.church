@@ -108,7 +108,7 @@ const SOURCE_CURRENCY = [
     'logos'      => 'HKD', 'tiendao' => 'HKD', 'rockhouse'  => 'HKD',
     'btproduct'  => 'HKD', 'bappress' => 'HKD',
     // 美國
-    'akow'       => 'USD',
+    'akow'       => 'USD', 'ustiendao' => 'USD',
     // 馬來西亞(衛理書房,砂拉越;既有行為即 MYR 標價但先前落 TWD,一併更正)
     'methodist'  => 'MYR',
 ];
@@ -143,7 +143,11 @@ const NO_BUY_SOURCES = ['btproduct'];
  */
 const ISBN_NOT_UNIQUE_SOURCES = ['akow'];
 
-$opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run', 'fuzzy-all']);
+$opt    = getopt('', ['file:', 'source:', 'limit::', 'dry-run', 'fuzzy-all', 'merge-only']);
+// --merge-only：只把「ISBN 對到在庫書」的紀錄併進去（加版本、價格、購書連結），其他一律不寫。
+//   2026-11-10 天道北美：熊叔叔選「當北美購書管道」。站方書頁沒有分類，新書進來會沒有主分類；
+//   只靠書名模糊比對到的也不收（誤併風險）。沒收的列在結尾清單，日後要收新書再另外決定。
+$mergeOnly = array_key_exists('merge-only', $opt);
 // --fuzzy-all：dry-run 時列出「全部」模糊比對命中（預設只列 30 筆樣本）。
 //   2026-10-12 海天書樓：沒有 ISBN、熊哥選「寬鬆比對，比到的先給我看過再合併」→ 要完整清單給人核對，不能只看樣本。
 $fuzzyCap = array_key_exists('fuzzy-all', $opt) ? PHP_INT_MAX : 30;
@@ -538,7 +542,10 @@ $stats = ['read' => 0, 'skip_done' => 0, 'skip_bad' => 0, 'new_book' => 0, 'merg
           'merge_isbn' => 0, 'merge_fuzzy' => 0, 'merge_infile' => 0, 'merge_titlepub' => 0,
           // 站方 ISBN 不唯一而擋下的合併(akow)——正常應該只有個位數,
           // 若某次突然變多,代表站方又批次抄錯,要回頭看來源不是看程式
-          'isbn_conflict' => 0];
+          'isbn_conflict' => 0,
+          // --merge-only 沒收的（沒對到在庫書，或只靠模糊比對對到）
+          'skip_nomatch' => 0];
+$noMatch = [];       // --merge-only：沒收的前 50 筆，供人眼核對
 $fuzzySamples = [];   // dry-run:模糊命中的前 N 筆,供人眼核對
 $newSamples   = [];   // dry-run:判定為新書的全部筆數,供抽查「新書真的是新書」
 $fh = fopen($file, 'r');
@@ -570,7 +577,9 @@ while (($line = fgets($fh)) !== false) {
                     // 海外(2026-09 起,一站一版 v1.11.0～v1.15.0)
                     'tiendao' => '天道書樓', 'btproduct' => '突破機構',
                     'rockhouse' => '海天書樓', 'bappress' => '浸信會出版社',
-                    'akow' => '麥種傳道會'][$source] ?? null;
+                    'akow' => '麥種傳道會',
+                    // 北美購書管道(2026-11-10 熊叔叔 TG 選「做，當北美購書管道」;只走 --merge-only)
+                    'ustiendao' => '天道北美網路書房'][$source] ?? null;
     // 漏登名稱會讓購書鈕變成空標題,寧可當場中止也不要產出無名連結
     if ($platformName === null) {
         exit("來源 $source 未登錄購書平台名稱,請補 \$platformName 對映表\n");
@@ -670,6 +679,12 @@ while (($line = fgets($fh)) !== false) {
                 $mergeVia = 'titlepub';
             }
         }
+    }
+
+    if ($mergeOnly && !($bookId && $mergeVia === 'isbn')) {
+        $stats['skip_nomatch']++;
+        if (count($noMatch) < 50) $noMatch[] = [$m['title'], $m['isbn13'] ?? '', $mergeVia ?? '沒對到'];
+        continue;
     }
 
     // 記住本次匯入已出現過的 ISBN(同檔內撞號時要拿來比對是不是同一作品)
@@ -904,6 +919,10 @@ fclose($fh);
 echo ($dry ? "[dry-run 模擬] " : "") . "完成:讀 {$stats['read']}、新書 {$stats['new_book']}、"
    . "合併 {$stats['merged']}、版本 {$stats['edition']}、已存在跳過 {$stats['skip_done']}、"
    . "無效跳過 {$stats['skip_bad']}\n";
+if ($mergeOnly) {
+    echo "  --merge-only 沒收 {$stats['skip_nomatch']}（沒對到在庫書，或只靠模糊比對對到）" . ($noMatch ? "，前 " . count($noMatch) . " 筆：" : "") . "\n";
+    foreach ($noMatch as [$t, $i, $v]) echo "    {$i}  {$t}  （{$v}）\n";
+}
 
 // dry-run 合併明細:ISBN 命中是硬證據,模糊比對(書名+第一作者)才需要人眼把關。
 // 沿 8/19 橄欖華宣慣例——合併率偏高時,先確認高的是 ISBN 那一段再正式匯入。

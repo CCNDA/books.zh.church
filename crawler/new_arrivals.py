@@ -64,6 +64,7 @@ import methodist_crawler as methodist
 import tiendao_crawler as tiendao
 import btproduct_crawler as btproduct
 import akow_crawler as akow
+import ustiendao_crawler as ust
 import osb_crawler as osb
 import taosheng_crawler as taosheng
 import wdbook_crawler as wdbook
@@ -763,7 +764,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", required=True, choices=["campus", "logos", "elim", "grace", "wdbook", "methodist", "osb",
                              "taosheng", "cclm", "cosmiccare", "mezu", "twgbr", "pctpress",
-                             "tiendao", "btproduct", "akow"])
+                             "tiendao", "btproduct", "akow", "ustiendao"])
     ap.add_argument("--year", type=int, default=2021,
                     help="基道年份錨(檢索該年以後,日期倒序);校園忽略。預設 2021")
     ap.add_argument("--max-pages", type=int, default=0, help="列表頁處理上限(0=自動,依站方宣稱頁數)")
@@ -858,6 +859,13 @@ def main():
     elif args.source == "akow":
         writer = _writer("akow_books.jsonl", "pid")
         fresh = collect_akow(writer, args.max_pages, args.dry_run)
+        if fresh is None:
+            writer.close()
+            sys.exit(2)
+    elif args.source == "ustiendao":
+        # 天道北美(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁;匯入在 daily_new.sh 加 --merge-only
+        writer = _writer("ustiendao_books.jsonl", "product_id")
+        fresh = ust.collect_new(writer, cap=args.max_pages or 300, dry_run=args.dry_run)
         if fresh is None:
             writer.close()
             sys.exit(2)

@@ -24,7 +24,8 @@ const BUY_PLATFORM_LABELS = ['campus' => '校園書房', 'logos' => '基道 Book
                              'tiendao' => '天道書樓',      // 香港,v1.11.0
                              'akow' => '麥種傳道會',        // 美國,v1.13.0
                              'bappress' => '浸信會出版社',  // 香港,v1.15.0
-                             'rockhouse' => '海天書樓'];    // 香港,v1.16.0(先登錄備用)
+                             'rockhouse' => '海天書樓',     // 香港,v1.16.0(先登錄備用)
+                             'ustiendao' => '天道北美網路書房'];  // 美國,北美購書管道(2026-11)
 
 const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '基道 BookFinder' => 2, '基道' => 2,
                              'elim' => 3, '以琳書房' => 3, 'grace' => 4, '天恩出版社' => 4, '天恩出版社(電子書)' => 5,
@@ -49,7 +50,8 @@ const BUY_PLATFORM_ORDER  = ['campus' => 1, '校園書房' => 1, 'logos' => 2, '
                              'akow' => 16, '麥種傳道會' => 16,
                              '麥種傳道會(正體)' => 16, '麥種傳道會(簡體)' => 16,
                              'bappress' => 17, '浸信會出版社' => 17,
-                             'rockhouse' => 18, '海天書樓' => 18];
+                             'rockhouse' => 18, '海天書樓' => 18,
+                             'ustiendao' => 19, '天道北美網路書房' => 19];
 
 function book_detail(int $id): ?array
 {

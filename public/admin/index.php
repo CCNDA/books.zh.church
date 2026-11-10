@@ -33,7 +33,7 @@ const SOURCE_LABELS = ['campus' => '校園書房', 'logos' => '基道', 'elim' =
                        'wdbook' => '微讀書城', 'methodist' => '衛理書房', 'osb' => '格子外面', 'taosheng' => '道聲',
                        'cclm' => '橄欖華宣', 'cosmiccare' => '宇宙光', 'mezu' => '真哪噠', 'twgbr' => '福音書房',
                        'pctpress' => '教會公報社', 'tiendao' => '天道書樓', 'btproduct' => '突破機構',
-                       'bappress' => '浸信會出版社', 'akow' => '麥種傳道會'];
+                       'bappress' => '浸信會出版社', 'akow' => '麥種傳道會', 'ustiendao' => '天道北美'];
 const PAGE_SIZE = 30;
 
 function e(mixed $s): string

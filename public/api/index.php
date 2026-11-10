@@ -32,7 +32,7 @@ const SOURCE_REGIONS = ['campus' => '台灣', 'elim' => '台灣', 'grace' => '�
                         'twgbr' => '台灣', 'pctpress' => '台灣',
                         'logos' => '香港', 'tiendao' => '香港', 'btproduct' => '香港', 'bappress' => '香港',
                         'rockhouse' => '香港',
-                        'methodist' => '馬來西亞', 'akow' => '美國', 'wdbook' => '電子書'];
+                        'methodist' => '馬來西亞', 'akow' => '美國', 'ustiendao' => '美國', 'wdbook' => '電子書'];
 // BUY_PLATFORM_LABELS 沒登記的來源，在「關於本站」用的名稱。只影響 /api/sources，不動購書連結的標籤。
 // ★ btproduct（突破機構）不在 BUY_PLATFORM_LABELS：2026-10-11 抽查一本突破的書（38599），購書連結裡也沒有突破，
 //   兩者是否相關留待除錯階段查，這裡先不改 BUY_PLATFORM_LABELS。

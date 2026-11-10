@@ -73,6 +73,8 @@ run_source() {
     return
   fi
   log "--- $src:抓取新品 ---"
+  # 只當購書管道的來源:匯入只併進 ISBN 對到的在庫書,不建新書(天道北美,熊叔叔 2026-11-10)
+  local imp=(); [ "$src" = ustiendao ] && imp=(--merge-only)
   rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
   timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
   local rc=$?
@@ -84,7 +86,7 @@ run_source() {
     # 停掉前已寫進 master 的新書都在 delta 裡(writer 邊寫邊出):照樣匯入,不然它們會永久漏掉
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
-      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
+      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" "${imp[@]}" >>"$LOG" 2>&1; then
         log "$src:停掉前已找到 $n 本,已匯入"
         rec "crawl:$src" fail "$n" "$sec" "$why,已匯入 $n 本"
       else
@@ -100,7 +102,7 @@ run_source() {
     if [ -s "$out" ]; then
       local n; n="$(wc -l < "$out" | tr -d ' ')"
       log "$src:偵測到 $n 本新書,匯入中…"
-      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" >>"$LOG" 2>&1; then
+      if php "$IMPORT" --file="$CRAWLER_DIR/$out" --source="$src" "${imp[@]}" >>"$LOG" 2>&1; then
         log "$src:匯入完成($n 本)"
         rec "crawl:$src" ok "$n" $((SECONDS - t0))
       else
@@ -180,6 +182,10 @@ fi
 #   URL 逐筆零差集(十七站唯一權威清單三方一致者),且全站僅 144 本、兩次請求就掃完,
 #   全掃與增量成本幾乎相同。前提是 sitemap 仍等於全站量 —— 書目量長大時要回頭重驗。
 run_source akow
+
+# 天道北美網路書房(北美購書管道,2026-11):sitemap 差集,一輪最多 300 頁(約 20 分鐘);
+# 只併進 ISBN 對到的在庫書(匯入加 --merge-only,見 run_source)。第一次全量要先在主機另外跑。
+run_source ustiendao
 
 # 註:基道官網分類對照的重爬不在本腳本內 —— 全站 64 類、9/3 實測 356 分鐘,會把 apply
 #     與 classify 推到中午。改由 crawler/logos_cat_refresh.sh 於**每週二 22:00** 獨立排程,

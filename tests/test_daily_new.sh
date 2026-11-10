@@ -36,7 +36,8 @@ PY
 cat > $T/tools/import.php <<'PHP'
 <?php
 $file = ''; foreach ($argv as $x) if (str_starts_with($x, '--file=')) $file = substr($x, 7);
-foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $l) file_put_contents(getenv('FAKE_DB'), json_decode($l, true)['source_url'] . "\n", FILE_APPEND);
+$mo = in_array('--merge-only', $argv, true) ? ' merge-only' : '';   // 第 8 段：記下有沒有帶 --merge-only
+foreach (file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $l) file_put_contents(getenv('FAKE_DB'), json_decode($l, true)['source_url'] . $mo . "\n", FILE_APPEND);
 PHP
 for f in $(grep -o -E 'python3 (-u )?[a-z_]+\.py' "$1" | awk '{print $NF}' | sort -u); do [ -f $T/crawler/$f ] || echo 'import sys; sys.exit(0)' > $T/crawler/$f; done
 ok=0; bad=0; check() { if [ "$2" = "$3" ]; then ok=$((ok+1)); echo "  PASS $1"; else bad=$((bad+1)); echo "  FAIL $1（預期 $3，實際 $2）"; fi; }
@@ -105,6 +106,13 @@ want=$(awk -F'\t' 'NR>1 && ($3=="fail" || ($3=="skip" && ($2=="classify" || $2==
 check "暫停的 cclm 不算失敗步驟（fail_steps＝fail＋關鍵步驟 skip；假環境沒有 classify 等工具所以有 $want）" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fail_steps"])' $T/crawler/logs/last_run.json 2>/dev/null)" "$want"
 check "crawl:cclm 沒有記成 fail" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="fail"' $S | wc -l)" 0
 rm -f $T/crawler/data/paused_sources.txt
+
+echo "== 8. 天道北美只當購書管道：匯入要帶 --merge-only，其他來源不帶（熊叔叔 2026-11-10；Asana 1220373285067379）"
+reset
+run env MODE_ustiendao=write2_ok MODE_akow=write2_ok
+check "ustiendao 有跑" "$(grep -c 'crawl:ustiendao' $S)" 1
+check "ustiendao 兩筆匯入都帶 --merge-only" "$(grep 'https://x/ustiendao/' $T/db.txt | grep -c ' merge-only$')" 2
+check "akow 兩筆匯入都沒帶 --merge-only" "$(grep 'https://x/akow/' $T/db.txt | grep -vc ' merge-only$')" 2
 
 pkill -f '^sleep 300$' 2>/dev/null; pkill -f "$T/crawler" 2>/dev/null; rm -rf $T
 echo; echo "OK $ok / FAIL $bad"; [ "$bad" -eq 0 ]

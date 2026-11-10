@@ -28,7 +28,7 @@ require dirname(__DIR__) . '/app/lib/db.php';
  * 新增來源時只改這一行。 */
 const COVER_SOURCES = ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist',
                        'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr',
-                       'pctpress', 'tiendao', 'btproduct', 'akow', 'bappress', 'rockhouse'];
+                       'pctpress', 'tiendao', 'btproduct', 'akow', 'bappress', 'rockhouse', 'ustiendao'];
 
 $opt   = getopt('', ['limit::', 'dry-run', 'source::']);
 $limit = (int) ($opt['limit'] ?? 0);
