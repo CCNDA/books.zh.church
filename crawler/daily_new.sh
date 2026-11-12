@@ -35,6 +35,9 @@ fi
 # 每個來源最多跑多久(秒)。超過就停掉、記 fail、接著跑下一個來源,後面的步驟和摘要信照常。
 # 正常最久的是 logos 約 2,130 秒;站方一直回 503 時每頁重試要 15 分鐘,沒有上限會一直卡住。
 SOURCE_TIMEOUT="${SOURCE_TIMEOUT:-3600}"
+# 基道（logos）一天要翻約 206 頁，平常 2,050～2,380 秒；站方時好時壞時（11/12 逾時重試 12 次、空殼頁 8 次）會超過 3600 被停掉。
+# 熊叔叔 11/12 TG 按「甲 放寬到 90 分鐘」：只放寬基道，其他來源照舊 3600（某站卡住才不會整輪拖更久）。
+LOGOS_TIMEOUT="${LOGOS_TIMEOUT:-5400}"
 
 # 暫停名單（熊叔叔 11/3：cclm 網站維修中，先暫停、恢復再開；Asana 1217767336780488）：
 # 一行一個「來源 原因」，# 開頭是註解。放在 crawler/data/（不進 git、部署不會動），
@@ -74,12 +77,14 @@ run_source() {
   fi
   log "--- $src:抓取新品 ---"
   rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
-  timeout --kill-after=60 "$SOURCE_TIMEOUT" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
+  local limit="$SOURCE_TIMEOUT"
+  [ "$src" = "logos" ] && limit="$LOGOS_TIMEOUT"
+  timeout --kill-after=60 "$limit" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
   local rc=$?
   if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     # 137 也可能是記憶體不足被系統殺掉:用跑了多久分辨
-    local why="逾時 ${SOURCE_TIMEOUT} 秒" sec=$((SECONDS - t0))
-    if [ "$rc" -eq 137 ] && [ "$sec" -lt "$SOURCE_TIMEOUT" ]; then why="被強制停(跑 ${sec} 秒,可能記憶體不足)"; fi
+    local why="逾時 ${limit} 秒" sec=$((SECONDS - t0))
+    if [ "$rc" -eq 137 ] && [ "$sec" -lt "$limit" ]; then why="被強制停(跑 ${sec} 秒,可能記憶體不足)"; fi
     log "$src:[錯誤] $why,已停掉"
     # 停掉前已寫進 master 的新書都在 delta 裡(writer 邊寫邊出):照樣匯入,不然它們會永久漏掉
     if [ -s "$out" ]; then

@@ -113,5 +113,13 @@ check "ustiendao 有跑" "$(grep -c 'crawl:ustiendao' $S)" 1
 check "summary 記 crawl:ustiendao ok 2 本" "$(awk -F'\t' '$2=="crawl:ustiendao" && $3=="ok" && $4==2' $S | wc -l)" 1
 check "ustiendao 2 筆進資料庫" "$(grep -c 'https://x/ustiendao/' $T/db.txt)" 2
 
+echo "== 9. 基道單獨放寬（熊叔叔 11/12「甲 放寬到 90 分鐘」）：logos 用 LOGOS_TIMEOUT、其他來源用 SOURCE_TIMEOUT"
+reset
+run env SOURCE_TIMEOUT=3 LOGOS_TIMEOUT=6 MODE_logos=write2_hang MODE_cclm=write2_hang
+check "logos 記「逾時 6 秒」（用自己的上限）" "$(awk -F'\t' '$2=="crawl:logos" && $3=="fail" && $6 ~ /逾時 6 秒/' $S | wc -l)" 1
+check "logos 真的跑到 6 秒以上才停" "$(awk -F'\t' '$2=="crawl:logos" && $5>=6' $S | wc -l)" 1
+check "cclm 還是「逾時 3 秒」" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="fail" && $6 ~ /逾時 3 秒/' $S | wc -l)" 1
+check "cclm 不會拖到 6 秒" "$(awk -F'\t' '$2=="crawl:cclm" && $5<6' $S | wc -l)" 1
+
 pkill -f '^sleep 300$' 2>/dev/null; pkill -f "$T/crawler" 2>/dev/null; rm -rf $T
 echo; echo "OK $ok / FAIL $bad"; [ "$bad" -eq 0 ]
