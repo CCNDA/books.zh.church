@@ -98,9 +98,10 @@ th{background:#eef4f8;font-weight:600}
 </header>
 <main id="main">
   <h1 class="serif">開放 API</h1>
+  <p class="note">這一頁是給會寫程式的同工看的；不寫程式的話，直接用<a href="/">網站搜尋</a>就好。</p>
 
-  <p>屬靈共同書目的書目資料以 JSON 開放取用,<strong>不用申請、不用金鑰</strong>,教會、機構與開發者都可以直接使用。只提供讀取(GET);回應都包在 <code>data</code> 裡,錯誤時是 <code>{"error": "說明"}</code> 與對應的 HTTP 狀態碼(例如找不到書是 404)。</p>
-  <p class="note">請合理使用:需要大量資料時,請放慢速度、把結果暫存起來,不要短時間內反覆抓取。引用書目時請註明出處「屬靈共同書目(books.zh.church)」,並以各出版社公布的資訊為準。</p>
+  <p>屬靈共同書目的書目資料以 JSON 開放取用,<strong>不用申請、不用金鑰</strong>,教會、機構與開發者都可以直接使用。只提供讀取(GET);回應都包在 <code>data</code> 裡,錯誤時是 <code>{"error": "說明"}</code> 與對應的 HTTP 狀態碼(例如找不到書是 404)。已開放跨網域(CORS),可以從網頁前端直接呼叫。</p>
+  <p class="note">請合理使用:需要大量資料時,請放慢速度、把結果暫存起來,不要短時間內反覆抓取。書目資料可以自由引用,請註明出處「屬靈共同書目(books.zh.church)」,並以各出版社公布的資訊為準;內容簡介與書封的版權屬於各出版社,轉載請自行取得同意。</p>
 
   <h2 class="serif">搜尋與瀏覽書目</h2>
   <p><span class="ep">GET /api/books</span>:所有條件都可以一起用;沒有任何條件時依上架時間由新到舊列出。</p>
@@ -146,7 +147,7 @@ th{background:#eef4f8;font-weight:600}
 curl "https://books.zh.church/api/books?person=編號"         # 再用編號查他的書</code></pre>
 
   <h2 class="serif">其他</h2>
-  <p>給 AI 與搜尋引擎的網站說明在 <a href="/llms.txt">llms.txt</a>,所有書目頁的清單在 <a href="/sitemap.xml">sitemap.xml</a>。發現資料有誤或有使用上的問題,歡迎與<a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a>聯繫。</p>
+  <p>給 AI 與搜尋引擎的網站說明在 <a href="/llms.txt">llms.txt</a>,所有書目頁的清單在 <a href="/sitemap.xml">sitemap.xml</a>。發現資料有誤或有使用上的問題,歡迎透過<a href="https://www.ccnda.org/contact" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)聯絡頁</a>跟我們聯繫。</p>
 </main>
 <footer><div class="ft">
   <span style="display:inline-flex;align-items:center;gap:8px"><img class="ft-logo" src="/assets/logo-ccnda.png" alt="CCNDA">© 2026 <a href="https://www.ccnda.org" target="_blank" rel="noopener">中華基督教網路發展協會(CCNDA)</a></span>
