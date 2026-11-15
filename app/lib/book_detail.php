@@ -229,6 +229,44 @@ function book_detail(int $id): ?array
         <=> [BUY_PLATFORM_ORDER[$b['platform']] ?? 99, $b['label']]);
     $book['buy_links'] = $buy;    // 所有購書來源(校園/基道/未來新增)
     $book['links']     = $others; // 延伸連結(已排除購書,避免與按鈕重複)
+    $book['related_editions'] = book_related_editions($id); // 另有簡體／正體版(簡繁互連③,只含後台確認過的)
 
     return $book;
+}
+
+/**
+ * 同一本書的另一個文字版本（簡體 ↔ 正體），只回後台判「是同一本的簡繁版」（decision=same）而且還在架上的。
+ * 簡繁互連③（Asana 1220314648578598）；對照表 edition_pairs 由 tools/load_edition_pairs.php 載入、/admin/editions.php 確認。
+ * 表還沒建（migration 還沒跑）時回空陣列，書目頁照常顯示。
+ *
+ * @return list<array{book_id:int, title:string, script:string, url:string}>
+ */
+function book_related_editions(int $id): array
+{
+    try {
+        $stmt = db()->prepare(
+            "SELECT p.simp_book_id, p.trad_book_id, o.book_id, o.title
+               FROM edition_pairs p
+               JOIN books o ON o.book_id = IF(p.simp_book_id = :id1, p.trad_book_id, p.simp_book_id)
+              WHERE p.decision = 'same' AND (p.simp_book_id = :id2 OR p.trad_book_id = :id3) AND o.is_published = 1
+              ORDER BY o.book_id"
+        );
+        $stmt->execute([':id1' => $id, ':id2' => $id, ':id3' => $id]);
+    } catch (PDOException $e) {
+        if (($e->errorInfo[1] ?? 0) === 1146) {   // 表不存在
+            return [];
+        }
+        throw $e;
+    }
+    $out = [];
+    foreach ($stmt->fetchAll() as $r) {
+        $oid = (int) $r['book_id'];
+        $out[] = [
+            'book_id' => $oid,
+            'title'   => (string) $r['title'],
+            'script'  => $oid === (int) $r['simp_book_id'] ? '簡體' : '正體',
+            'url'     => '/book/' . $oid,
+        ];
+    }
+    return $out;
 }

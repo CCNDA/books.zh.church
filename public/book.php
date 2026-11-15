@@ -90,6 +90,16 @@ function ssr_publishers(array $b): array
     return $seen;
 }
 
+/** 另有簡體／正體版的連結（簡繁互連③）。 */
+function ssr_related_editions(array $b): string
+{
+    $out = [];
+    foreach ($b['related_editions'] ?? [] as $r) {
+        $out[] = e($r['script']) . '版：<a href="/book/' . (int) $r['book_id'] . '">' . e($r['title']) . '</a>';
+    }
+    return implode('<br>', $out);
+}
+
 function ssr_publisher_links(array $b): string
 {
     $seen = ssr_publishers($b);
@@ -308,6 +318,7 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
       . ssr_meta_row('語言', $b['language'])
       . ssr_meta_row('ISBN', implode('、', array_filter([$b['isbn13'], $b['isbn10']])))
       . ssr_meta_row('版本說明', $b['edition_statement'])
+      . ssr_meta_row('另有版本', ssr_related_editions($b), true)
     ?></dl>
     <div class="tagrow" id="bTags"><?php
       if ($b['category_name']) { echo '<a class="tag" href="/?category=' . (int) $b['category_id'] . '">' . e($b['category_name']) . '</a>'; }
@@ -408,6 +419,12 @@ function contributorRows(b){
 }
 
 /* 出版社:有 publisher_id 則做連結(可多版本多出版社),否則純文字後備 */
+/* 另有簡體／正體版（簡繁互連③，API related_editions） */
+function relatedEditions(b){
+  return (b.related_editions || []).map(r =>
+    `${esc(r.script)}版：<a href="/book/${Number(r.book_id)}">${esc(r.title)}</a>`).join("<br>");
+}
+
 function publisherLinks(b){
   const seen = new Map();
   for (const ed of (b.editions || [])){
@@ -448,7 +465,8 @@ function render(b){
     metaRow("裝訂", b.binding) +
     metaRow("語言", b.language) +
     metaRow("ISBN", [b.isbn13, b.isbn10].filter(Boolean).join("、")) +
-    metaRow("版本說明", b.edition_statement);
+    metaRow("版本說明", b.edition_statement) +
+    metaRow("另有版本", relatedEditions(b), true);
 
   const tags = [];
   if (b.category_name) tags.push(`<a class="tag" href="/?category=${b.category_id}">${esc(b.category_name)}</a>`);
