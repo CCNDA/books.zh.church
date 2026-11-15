@@ -47,10 +47,20 @@ function deny_page(int $code, string $msg): never
 }
 
 /** 判定完導回原分頁，帶一句結果（只帶白名單內的值）。 */
-function back_to(string $tab, int $page, string $msgKey, int $id = 0): never
+function back_to(string $tab, int $page, string $msgKey, int $id = 0, array $prefill = []): never
 {
-    header('Location: ?tab=' . $tab . '&p=' . max(1, $page) . '&ok=' . $msgKey . '&id=' . $id, true, 303);
+    $q = '?tab=' . $tab . '&p=' . max(1, $page) . '&ok=' . $msgKey . '&id=' . $id;
+    if ($prefill) {
+        $q .= '&ps=' . (int) $prefill[0] . '&pt=' . (int) $prefill[1];
+    }
+    header('Location: ' . $q, true, 303);
     exit;
+}
+
+/** 看起來是簡體版：language 寫簡體，或書名帶「簡體／简体」（跟 tools/load_edition_pairs.php 的第一道判斷一樣）。 */
+function looks_simplified(?string $lang, ?string $title): bool
+{
+    return (bool) preg_match('/簡|简/u', (string) $lang) || (bool) preg_match('/簡體|简体/u', (string) $title);
 }
 
 // ── 登入（同 dup.php）─────────────────────────────────
@@ -114,9 +124,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($s <= 0 || $t <= 0 || $s === $t) {
             back_to($back, $page, 'add_bad');
         }
-        $chk = $pdo->prepare('SELECT COUNT(*) FROM books WHERE book_id IN (?, ?)');
+        $chk = $pdo->prepare('SELECT book_id, language, title FROM books WHERE book_id IN (?, ?)');
         $chk->execute([$s, $t]);
-        if ((int) $chk->fetchColumn() !== 2) {
+        $bk = [];
+        foreach ($chk->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $bk[(int) $r['book_id']] = $r;
+        }
+        if (count($bk) !== 2) {
             back_to($back, $page, 'add_nobook');
         }
         // 兩個方向都查：同一組（或被填反的同一組）已經在表上就不重複加
@@ -124,6 +138,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dup->execute([$s, $t, $t, $s]);
         if ($old = (int) $dup->fetchColumn()) {
             back_to($back, $page, 'add_exists', $old);
+        }
+        // 填反了會讓書目頁把「簡體版／正體版」標反（小布 11/15 審查）：看起來反了就先不寫，表單幫忙對調好
+        if (empty($_POST['sure_order'])
+            && looks_simplified($bk[$t]['language'], $bk[$t]['title'])
+            && ! looks_simplified($bk[$s]['language'], $bk[$s]['title'])) {
+            back_to($back, $page, 'add_reversed', 0, [$t, $s]);
         }
         $ins = $pdo->prepare("INSERT INTO edition_pairs (simp_book_id, trad_book_id, match_how, same_ratio, pub_how, decision, decided_by, decided_at)
                               VALUES (?, ?, '人工加入', NULL, NULL, 'same', ?, NOW())");
@@ -161,12 +181,13 @@ $flashText = [
     'd_same' => '已記錄：是同一本的簡繁版', 'd_different' => '已記錄：不是', 'd_unsure' => '已記錄：看不出來',
     'add_ok' => '已加入，記成「是同一本的簡繁版」', 'add_exists' => '這兩本已經在表上了（第 %d 組），請在列表裡判',
     'add_bad' => '兩個編號都要填，而且不能一樣', 'add_nobook' => '找不到這個書目編號，請再確認',
+    'add_reversed' => '看起來填反了：正體欄那本像簡體版、簡體欄那本不像。下面已經對調好，確認後再按一次；方向其實沒錯的話，勾「方向沒錯」再送',
 ];
 $flash = null;
 $flashBad = false;
 if (isset($_GET['ok'], $flashText[$_GET['ok']])) {
     $flash = sprintf($flashText[$_GET['ok']], (int) ($_GET['id'] ?? 0));
-    $flashBad = in_array($_GET['ok'], ['add_bad', 'add_nobook', 'add_exists'], true);
+    $flashBad = in_array($_GET['ok'], ['add_bad', 'add_nobook', 'add_exists', 'add_reversed'], true);
     if (str_starts_with($_GET['ok'], 'd_')) {
         $flash = '第 ' . (int) ($_GET['id'] ?? 0) . ' 組' . $flash;
     }
@@ -289,15 +310,16 @@ footer{margin-top:64px;border-top:1px solid var(--line);background:var(--card)}
 <p class="note">左邊是簡體那本、右邊是正體那本（書名與出版社比對出來的，大約八成準）。按「是同一本的簡繁版」的，
 書目頁才會顯示「本書另有簡體／正體版」；按「不是」的不會顯示。<span class="tag weak">書名部分相同</span>的請多看一眼。</p>
 
-<details class="add"<?= in_array($_GET['ok'] ?? '', ['add_bad', 'add_nobook', 'add_exists'], true) ? ' open' : '' ?>>
+<details class="add"<?= in_array($_GET['ok'] ?? '', ['add_bad', 'add_nobook', 'add_exists', 'add_reversed'], true) ? ' open' : '' ?>>
   <summary>手動加一組（自動比對沒配到的）</summary>
   <form method="post" class="addform">
     <input type="hidden" name="csrf" value="<?= e($_SESSION['csrf']) ?>">
     <input type="hidden" name="action" value="add">
     <input type="hidden" name="back" value="<?= $tab ?>">
     <input type="hidden" name="p" value="<?= $page ?>">
-    <label>簡體那本的編號<input name="simp_book_id" inputmode="numeric" pattern="[0-9]+" required></label>
-    <label>正體那本的編號<input name="trad_book_id" inputmode="numeric" pattern="[0-9]+" required></label>
+    <label>簡體那本的編號<input name="simp_book_id" inputmode="numeric" pattern="[0-9]+" required<?= ($ps = (int) ($_GET['ps'] ?? 0)) > 0 ? ' value="' . $ps . '"' : '' ?>></label>
+    <label>正體那本的編號<input name="trad_book_id" inputmode="numeric" pattern="[0-9]+" required<?= ($pt = (int) ($_GET['pt'] ?? 0)) > 0 ? ' value="' . $pt . '"' : '' ?>></label>
+    <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="sure_order" value="1" style="width:auto">方向沒錯（不要檢查簡繁）</label>
     <button type="submit">加入，記成「是」</button>
   </form>
   <p class="note" style="margin:0">編號就是書目頁網址 /book/ 後面的數字。</p>

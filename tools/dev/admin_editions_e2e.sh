@@ -36,6 +36,17 @@ ok $([ "$code" = 400 ]; echo $?) "6 判定值不在白名單 → 400"
 curl -s -o $OUT -H "$H" -c $CK -b $CK "$B?tab=done"
 ok $(grep -q "id=\"r$first\"" $OUT && grep -q 'aria-pressed="true">是同一本的簡繁版' $OUT; echo $?) "7 已判分頁有這組、「是」按鈕標成已按"
 
+# 填反（小布 11/15 審查）：簡體欄填正體那本 81275、正體欄填簡體那本 64263（書名「（簡體字）」）→ 不寫、提示、表單對調好
+n0=$(sql "select count(*) from edition_pairs")
+loc=$(curl -s -o /dev/null -w '%{redirect_url}' -H "$H" -c $CK -b $CK -d "csrf=$csrf&action=add&simp_book_id=81275&trad_book_id=64263&back=pending&p=1" "$B")
+ok $([[ "$loc" == *ok=add_reversed*ps=64263*pt=81275* ]] && [ "$n0" = "$(sql "select count(*) from edition_pairs")" ]; echo $?) "8a 簡繁填反 → 不寫、提示填反、表單對調成 64263／81275"
+curl -s -o $OUT -H "$H" -c $CK -b $CK "$B?ok=add_reversed&ps=64263&pt=81275"
+ok $(grep -q 'name="simp_book_id"[^>]*value="64263"' $OUT && grep -q 'name="trad_book_id"[^>]*value="81275"' $OUT && grep -q '<details class="add" open' $OUT; echo $?) "8b 提示頁：手動加入展開、兩個編號已對調預填"
+code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -c $CK -b $CK -d "csrf=$csrf&action=add&simp_book_id=81275&trad_book_id=64263&sure_order=1&back=pending&p=1" "$B")
+m=$(sql "select count(*) from edition_pairs where simp_book_id=81275 and trad_book_id=64263")
+ok $([ "$code" = 303 ] && [ "$m" = 1 ]; echo $?) "8c 勾「方向沒錯」→ 照填的方向寫入"
+sql "delete from edition_pairs where simp_book_id=81275 and trad_book_id=64263 and match_how='人工加入'"
+
 # 手動加一組：64263（簡）／81275（正，書名多副標，自動規則配不到）
 code=$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -c $CK -b $CK -d "csrf=$csrf&action=add&simp_book_id=64263&trad_book_id=81275&back=pending&p=1" "$B")
 m=$(sql "select match_how, decision from edition_pairs where simp_book_id=64263 and trad_book_id=81275")
