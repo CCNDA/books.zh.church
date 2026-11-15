@@ -12,7 +12,9 @@ declare(strict_types=1);
  *   step-fail:<步驟>      其他步驟失敗(分類、搜尋欄、守門、sitemap;PHP fatal 會讓步驟失敗)
  *   step-skip:<步驟>      關鍵步驟被略過(工具不見了)
  *   summary-missing       當天的摘要檔不見,或只有表頭(排程沒跑、或跑到一半就停)
- *   zero-days:<來源>      某來源連續 N 天(預設 14)都是 0 本新書——可能不是沒新書,是壞了
+ *   list-empty:<來源>     某來源今天「無新書」但清單讀到 0 件——網站改版或被擋,當天就叫(熊哥 2026-11-15)
+ *   zero-days:<來源>      某來源連續 N 天(預設 14)都是 0 本新書,而且摘要沒有「清單 N 件」可以證明讀得到
+ *                         (舊摘要、或爬蟲沒回報件數時的後備)。清單讀得到 → 只是沒新書,不叫(熊哥 11/15「讀不到才報」)
  *   no-success            超過 26 小時沒有「全部步驟成功」(last_ok.json 太舊或不存在)
  *
  * 還沒做:「商品節點 0 個」「關鍵欄位缺漏超過門檻」要各爬蟲自己回報,目前 summary TSV 沒有這些資料。
@@ -125,10 +127,25 @@ if ($only === '') {
                 $add('step-skip:' . $r['step'], "關鍵步驟 $name 被略過$note:工具可能不見了");
             }
         }
+        // 清單件數(daily_new.sh 在「無新書」那列備註寫「清單 N 件」):讀到 0 件 = 讀不到,當天就叫;
+        // 讀得到 → 只是沒新書,不進下面的「連續 N 天」(小出版社 14 天沒新書是常態,熊哥 2026-11-15「讀不到才報」)
+        $scanned = [];
+        foreach ($rows as $r) {
+            if (str_starts_with($r['step'], 'crawl:') && $r['status'] === 'none'
+                && preg_match('/清單 (\d+) 件/u', $r['note'], $m)) {
+                $scanned[$r['step']] = true;   // 有件數就由件數判,不再進下面的「連續 N 天」(同一件事不叫兩次)
+                if ((int) $m[1] === 0) {
+                    $src = substr($r['step'], 6);
+                    $add("list-empty:$src", "{$label($src)} 今天清單讀到 0 件:網站可能改版或擋了爬蟲,不是沒有新書");
+                }
+            }
+        }
         // 連續 N 天 0 本:往回看 N 份摘要(今天算第 1 天);中間缺一天就不判(資料不夠不能說它壞了)
+        // 只看「今天沒有清單件數可證明讀得到」的來源(後備)
         $zero = [];
         foreach ($rows as $r) {
-            if (str_starts_with($r['step'], 'crawl:') && in_array($r['status'], ['ok', 'none'], true) && $r['count'] === 0) {
+            if (str_starts_with($r['step'], 'crawl:') && in_array($r['status'], ['ok', 'none'], true) && $r['count'] === 0
+                && ! isset($scanned[$r['step']])) {
                 $zero[$r['step']] = 1;
             }
         }

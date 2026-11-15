@@ -76,7 +76,7 @@ run_source() {
     return
   fi
   log "--- $src:抓取新品 ---"
-  rm -f "$out"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
+  rm -f "$out" "${out%.jsonl}.scanned"   # delta 是邊寫邊出、沒新書就不建檔:同一分鐘重跑時不能讀到上一輪留下的同名檔
   local limit="$SOURCE_TIMEOUT"
   [ "$src" = "logos" ] && limit="$LOGOS_TIMEOUT"
   timeout --kill-after=60 "$limit" python3 -u new_arrivals.py --source "$src" --out "$out" "$@" >>"$LOG" 2>&1
@@ -114,7 +114,9 @@ run_source() {
       fi
     else
       log "$src:無新書"
-      rec "crawl:$src" none 0 $((SECONDS - t0))
+      # 清單讀到幾件(new_arrivals.py 寫的 .scanned):警報靠它分「沒新書」和「讀不到」(熊哥 11/15)
+      local scanned=""; [ -f "${out%.jsonl}.scanned" ] && scanned="$(tr -dc '0-9' < "${out%.jsonl}.scanned")"
+      rec "crawl:$src" none 0 $((SECONDS - t0)) "${scanned:+清單 $scanned 件}"
     fi
   else
     log "$src:[錯誤] 抓取失敗(見上方 log),略過匯入"

@@ -887,6 +887,14 @@ def main():
             sys.exit(2)
 
     writer.close()
+    # 清單讀到幾件（給 daily_new.sh 記進摘要、警報判斷「讀不到」用）。寫失敗不影響本業；dry-run 不寫。
+    if not args.dry_run:
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.with_suffix(".scanned").write_text(str(writer.asked_count), encoding="utf-8")
+        except OSError as e:
+            print(f"[{args.source}] 清單件數寫不進去:{e}", flush=True)
+    print(f"[{args.source}] 清單讀到 {writer.asked_count} 件", flush=True)
 
     if not fresh:
         print(f"[{args.source}] 無新書")

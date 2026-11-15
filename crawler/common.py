@@ -87,6 +87,23 @@ def polite_fetch(
     raise RuntimeError(f"抓取失敗(已重試 {max_retries} 次):{url}\n{last_err}")
 
 
+class _AskedSet(set):
+    """跟 set 一樣，另外記下「被用 in 問過的不同 key」——每日新品用來算今天清單讀到幾件。
+
+    各來源的 collect_* 都是拿清單上的商品一個一個問「見過嗎」（p in writer.seen／writer.has(p)），
+    問過幾個不同的 key ≈ 今天清單讀到幾件。清單讀到 0 件（網站改版、被擋）就問 0 次。
+    （熊哥 2026-11-15「讀不到才報」：小書房 14 天沒新書是常態，不該叫；Asana 1220550095018569）
+    """
+
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.asked: set[str] = set()
+
+    def __contains__(self, key) -> bool:
+        self.asked.add(str(key))
+        return super().__contains__(key)
+
+
 class JsonlWriter:
     """附加式 JSONL 輸出;啟動時載入既有 key 避免重複。
 
@@ -101,7 +118,7 @@ class JsonlWriter:
         self.key_field = key_field
         self.tee = tee
         self._tee_fh = None
-        self.seen: set[str] = set()
+        self.seen: set[str] = _AskedSet()
         if path.exists():
             with path.open("r", encoding="utf-8") as f:
                 for line in f:
@@ -117,6 +134,11 @@ class JsonlWriter:
 
     def has(self, key: str) -> bool:
         return str(key) in self.seen
+
+    @property
+    def asked_count(self) -> int:
+        """今天清單上被問過「見過嗎」的不同商品數（見 _AskedSet）。"""
+        return len(self.seen.asked) if isinstance(self.seen, _AskedSet) else -1
 
     def write(self, record: dict) -> bool:
         key = str(record[self.key_field])
