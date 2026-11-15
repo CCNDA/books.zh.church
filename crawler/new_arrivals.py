@@ -888,7 +888,7 @@ def main():
 
     writer.close()
     # 清單讀到幾件（給 daily_new.sh 記進摘要、警報判斷「讀不到」用）。寫失敗不影響本業；dry-run 不寫。
-    if not args.dry_run:
+    if not args.dry_run and writer.asked_count >= 0:   # -1＝算不出來:不寫,交給警報的 14 天後備(小布 11/15 審查)
         try:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.with_suffix(".scanned").write_text(str(writer.asked_count), encoding="utf-8")

@@ -115,7 +115,7 @@ run_source() {
     else
       log "$src:無新書"
       # 清單讀到幾件(new_arrivals.py 寫的 .scanned):警報靠它分「沒新書」和「讀不到」(熊哥 11/15)
-      local scanned=""; [ -f "${out%.jsonl}.scanned" ] && scanned="$(tr -dc '0-9' < "${out%.jsonl}.scanned")"
+      local scanned=""; [ -f "${out%.jsonl}.scanned" ] && scanned="$(head -c 20 "${out%.jsonl}.scanned")"; [[ "$scanned" =~ ^[0-9]+$ ]] || scanned=""  # 只收純數字(-1 之類不收,小布 11/15)
       rec "crawl:$src" none 0 $((SECONDS - t0)) "${scanned:+清單 $scanned 件}"
     fi
   else
