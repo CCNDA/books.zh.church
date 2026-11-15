@@ -13,6 +13,16 @@
 
 ## [Unreleased]
 
+## [1.24.0] - 未定（等熊叔叔試判、排上線日）
+
+### 新增
+- 簡繁互連：同一本書的簡體版和正體版（ISBN 不同、站上是兩本）互相連起來。書目頁多一列「另有版本　正體版／簡體版：<書名連結>」，API GET /api/books/{id} 多 related_editions
+  （熊叔叔 2026-09-14「簡體繁體在詳細內容頁可以註明有繁體和簡體版」；11/7 TG 選「甲 對照表＋後台確認」）
+- 只顯示後台確認過「是同一本的簡繁版」的；自動比對（書名＋出版社，約八成準）出來的 464 組先進後台待判
+- 後台 /admin/editions.php：左簡右正並排，是／不是／看不出來三個按鈕、可改判；「手動加一組」補自動規則配不到的（例如正體版書名多了副標）
+- 資料表 edition_pairs（migration 2026-11-07_edition_pairs.sql，要熊叔叔先跑）＋載入工具 tools/load_edition_pairs.php（預設試跑、--apply 才寫，可重跑、不蓋判過的）
+- 測試：tools/dev/admin_editions_e2e.sh（14 項）、tools/dev/related_editions_e2e.sh（10 項）
+
 ## [1.23.1] - 2026-11-16
 
 ### 修正
