@@ -24,6 +24,8 @@ foreach ([
     '臺裔美籍視覺發展設計師及插畫家¬陳永絃曾於小學任教十年之後，毅然決然辭去教職，回歸她兒時的最愛:插畫。',
     '艾爾雷德、丹尼斯．比利 (Aelred Of Rievaulx，Dennis J',
     '王小明（主編',
+    '甲某&#12290;乙某說了一段話&#12290;',                       // 「。」存成 entity
+    '丹尼斯．比利 &#40;Aelred Of Rievaulx，Dennis J',           // 「(」存成 entity
 ] as $raw) {
     $got = pn_split_names($raw);
     ok($got === [], '不建人:' . mb_substr($raw, 0, 20), json_encode(array_column($got, 'name'), JSON_UNESCAPED_UNICODE));
@@ -33,6 +35,7 @@ foreach ([
     '艾爾雷德、丹尼斯．比利 (Aelred Of Rievaulx，Dennis J. Billy)' => 2,
     '柏饒齊、Peter H. Davids、F. F. Bruce'                         => 3,
     '劉良淑、魏啟源 譯'                                            => 2,
+    '王小明 著。'                                                  => 1,   // 結尾一個句號不算簡介
     '連達傑'                                                       => 1,
 ] as $raw => $min) {
     $n = count(pn_split_names($raw));
