@@ -18,6 +18,27 @@ function ok(bool $cond, string $what, string $got = ''): void
     echo "  [FAIL] {$what}" . ($got !== '' ? "  實得:{$got}" : '') . "\n";
 }
 
+echo "\n== 0. 整段不是人名清單 → 一個人都不建(2026-11-16 開發庫抽查的三個假人) ==\n";
+foreach ([
+    '帶着謙卑自省的心靈，藉再思哈巴谷書探索在混亂不安、道德淪亡和前景不明朗的世代，「人」特別作成神的子民，應如何從個人生命、社會羣體道德和靈性反省，盼望可以尋回生命和歷史的曙光。',
+    '臺裔美籍視覺發展設計師及插畫家¬陳永絃曾於小學任教十年之後，毅然決然辭去教職，回歸她兒時的最愛:插畫。',
+    '艾爾雷德、丹尼斯．比利 (Aelred Of Rievaulx，Dennis J',
+    '王小明（主編',
+] as $raw) {
+    $got = pn_split_names($raw);
+    ok($got === [], '不建人:' . mb_substr($raw, 0, 20), json_encode(array_column($got, 'name'), JSON_UNESCAPED_UNICODE));
+}
+// 對照組：真的多人署名、成對括號照樣切
+foreach ([
+    '艾爾雷德、丹尼斯．比利 (Aelred Of Rievaulx，Dennis J. Billy)' => 2,
+    '柏饒齊、Peter H. Davids、F. F. Bruce'                         => 3,
+    '劉良淑、魏啟源 譯'                                            => 2,
+    '連達傑'                                                       => 1,
+] as $raw => $min) {
+    $n = count(pn_split_names($raw));
+    ok($n >= $min, "照樣切:{$raw}", (string) $n);
+}
+
 echo "\n== 1. entity 解碼(必須在 split 之前) ==\n";
 $cases = [
     'Anselm Gr&uuml;n'        => 'Anselm Grün',
