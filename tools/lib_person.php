@@ -1025,8 +1025,35 @@ function pn_segments(?string $raw, ?callable $warn = null): array
  *   kind   見 normalize_person_name() 的說明
  *   hold   非空 = 規則不敢動這一段,已退回原值,要列進人工清單
  */
+/**
+ * 整段原始署名「看起來不是人名清單」：來源欄位抓錯（整段簡介、作者介紹）或被截斷。
+ * 2026-11-16 開發庫 --resplit-only 抽查：mezu 的 authors_raw 是整句簡介、elim 的 illustrators_raw 是繪者生平、
+ * bappress 的 authors_raw 截在「(… Dennis J」→ 切出「社會羣體道德和靈性反省」「毅然決然辭去教職」「Dennis J」三個假人。
+ * 判準只用「人名清單不會有」的形狀，避免誤擋真的多人署名：
+ *   - 含句號「。」或「¬」（抓取時的換行殘骸）
+ *   - 括號不成對（半形或全形，開的比關的多＝被截斷）
+ */
+function pn_raw_not_names(string $raw): ?string
+{
+    // 小布 11/16：短的署名結尾帶一個句號（「王小明 著。」）是抓取時把句尾帶進來，不算簡介 → 先去掉結尾的「。」再看。
+    // 只限 30 字以內：mezu 那段簡介只有結尾一個「。」，長句不能放過（開發庫實例 #38332）
+    if (mb_strlen($raw) <= 30) $raw = preg_replace('/\x{3002}+\s*$/u', '', $raw);
+    if (mb_strpos($raw, '。') !== false) return '含句號「。」，像一段簡介';
+    if (mb_strpos($raw, '¬') !== false) return '含「¬」，像抓取時的換行殘骸';
+    $open  = substr_count($raw, '(') + mb_substr_count($raw, '（');
+    $close = substr_count($raw, ')') + mb_substr_count($raw, '）');
+    if ($open > $close) return '括號沒有關起來，像被截斷';
+    return null;
+}
+
 function pn_split_names(?string $raw, ?callable $warn = null): array
 {
+    // modify by Claude 2026.11.16 -- Asana 1219716935005910：整段不是人名清單就一個人都不建
+    // 小布 11/16：先 decode 再判斷（來源把「。」括號存成 &#12290;／&#40; 時才看得到）；只拿來判斷，後面照舊傳原 $raw
+    if ($raw !== null && ($why = pn_raw_not_names(decode_person_entities($raw))) !== null) {
+        if ($warn) $warn("整段不建人（{$why}）：" . mb_substr($raw, 0, 40));
+        return [];
+    }
     // ★ 複合角色標籤要在切割之前剝(「文、圖:王小明」的「、」是連接號不是分隔符),
     //   decode 也要在切割之前(entity 結尾的 `;` 就是分隔符)—— 順序在 pn_segments() 裡。
     ['segs' => $segs, 'roles' => $leadRoles] = pn_segments($raw, $warn);
