@@ -14,6 +14,12 @@ declare(strict_types=1);
  *   php tools/covers_to_r2.php                        # 全量
  *
  * 節流:每張間隔 0.6-1.2 秒(對來源站禮貌);失敗記數跳過,重跑再試。
+ *
+ * 永久失敗(Asana 1217982001242514,熊叔叔 2026-11-11 TG「甲 標成永久失敗、不再重試」):
+ *   所有候選網址都回 404/410 的,記進 storage/covers_dead.tsv(media_id、網址、狀態碼、日期),
+ *   之後同一筆 media、同一個網址就不再下載。來源網址換了(爬蟲重抓到新封面)會自動再試。
+ *   php tools/covers_to_r2.php --retry-dead           # 忽略清單、全部再試一次(例如改過網址編碼後)
+ *   其他失敗(逾時、403、5xx、非圖片)不記,照舊每次重試。
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -30,10 +36,33 @@ const COVER_SOURCES = ['campus', 'logos', 'elim', 'grace', 'wdbook', 'methodist'
                        'osb', 'taosheng', 'cclm', 'cosmiccare', 'mezu', 'twgbr',
                        'pctpress', 'tiendao', 'btproduct', 'akow', 'bappress', 'rockhouse', 'ustiendao'];
 
-$opt   = getopt('', ['limit::', 'dry-run', 'source::']);
+$opt   = getopt('', ['limit::', 'dry-run', 'source::', 'retry-dead']);
 $limit = (int) ($opt['limit'] ?? 0);
 $srcFilter = (string) ($opt['source'] ?? '');  // 只轉指定來源(見 COVER_SOURCES)
 $dry   = array_key_exists('dry-run', $opt);
+$retryDead = array_key_exists('retry-dead', $opt);
+const DEAD_FILE = __DIR__ . '/../storage/covers_dead.tsv';
+
+/** 讀永久失敗清單:media_id => 網址 */
+function dead_load(): array
+{
+    $out = [];
+    if (!is_file(DEAD_FILE)) return $out;
+    foreach (file(DEAD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
+        $f = explode("\t", $line);
+        if (count($f) >= 2 && ctype_digit($f[0])) $out[(int) $f[0]] = $f[1];
+    }
+    return $out;
+}
+
+/** 加一筆永久失敗(同一 media 換了網址就再加一行,讀取時以最後一行為準) */
+function dead_add(int $mediaId, string $url, int $code): void
+{
+    $dir = dirname(DEAD_FILE);
+    if (!is_dir($dir)) mkdir($dir, 0775, true);
+    $url = str_replace(["\t", "\n", "\r"], ' ', $url);
+    file_put_contents(DEAD_FILE, "$mediaId\t$url\t$code\t" . date('Y-m-d') . "\n", FILE_APPEND | LOCK_EX);
+}
 
 $r2 = app_config()['r2'] ?? null;
 if (!$r2 || empty($r2['access_key_id'])) {
@@ -151,7 +180,7 @@ function encode_url_path(string $url): string
     return $out;
 }
 
-function fetch_image(string $url, ?string &$why = null): ?array
+function fetch_image(string $url, ?string &$why = null, ?int &$code = null): ?array
 {
     // 以琳(elimbookstore)擋非瀏覽器請求:圖檔需瀏覽器 UA + Referer 才回 200
     // (2026-07-31 實測;瀏覽器直開同網址皆正常,bot UA 大面積失敗)。
@@ -223,20 +252,38 @@ $sql = "SELECT t.book_id, t.media_id, m2.url_or_path AS src
         JOIN media m2 ON m2.media_id = t.media_id
         ORDER BY t.book_id";
 $rows = $pdo->query($sql)->fetchAll();
-echo '待轉存:' . count($rows) . ' 本' . ($srcFilter ? "(僅 $srcFilter)" : '') . "\n";
+$dead = $retryDead ? [] : dead_load();
+$skipped = 0;
+if ($dead) {
+    $rows = array_values(array_filter($rows, function ($r) use ($dead, &$skipped) {
+        $hit = ($dead[(int) $r['media_id']] ?? null) === $r['src'];
+        if ($hit) $skipped++;
+        return !$hit;
+    }));
+}
+echo '待轉存:' . count($rows) . ' 本' . ($srcFilter ? "(僅 $srcFilter)" : '')
+   . ($skipped ? "(另有 $skipped 本來源已 404,不再重試;要再試加 --retry-dead)" : '') . "\n";
 
-$ok = $fail = 0;
+$ok = $fail = $newDead = 0;
 foreach ($rows as $i => $r) {
     if ($limit && ($ok + $fail) >= $limit) break;
     if ($dry) { echo "  [{$r['book_id']}] {$r['src']}\n"; $ok++; continue; }
 
     usleep(random_int(600000, 1200000));
     $img = null;
+    $allGone = true;   // 每個候選網址都回 404/410 才算來源已無封面
     foreach (url_candidates($r['src']) as $cand) {
-        $img = fetch_image($cand, $why);
+        $code = 0;
+        $img = fetch_image($cand, $why, $code);
         if ($img) break;
+        if ($code !== 404 && $code !== 410) $allGone = false;
     }
-    if (!$img) { echo "  [下載失敗 " . ($why ?? '?') . "] book {$r['book_id']} {$r['src']}\n"; $fail++; continue; }
+    if (!$img) {
+        echo "  [下載失敗 " . ($why ?? '?') . "] book {$r['book_id']} {$r['src']}\n";
+        $fail++;
+        if ($allGone) { dead_add((int) $r['media_id'], $r['src'], $code); $newDead++; }
+        continue;
+    }
     [$body, $ext, $ct] = $img;
     $key = $prefix . $r['book_id'] . '.' . $ext;
     if (!r2_put($endpoint, $bucket, $key, $body, $ct, $r2['access_key_id'], $r2['secret_access_key'])) {
@@ -250,4 +297,6 @@ foreach ($rows as $i => $r) {
     $ok++;
     if ($ok % 50 === 0) echo "  進度:$ok 成功 / $fail 失敗(共 " . count($rows) . ")\n";
 }
-echo ($dry ? "[dry-run] " : "") . "完成:$ok 成功、$fail 失敗(失敗者重跑會再試)\n";
+echo ($dry ? "[dry-run] " : "") . "完成:$ok 成功、$fail 失敗"
+   . ($newDead ? "(其中 $newDead 本來源 404/410,記入 storage/covers_dead.tsv 不再重試)" : '')
+   . "(其他失敗重跑會再試)\n";
