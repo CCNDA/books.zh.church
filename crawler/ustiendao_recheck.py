@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,14 +50,17 @@ def load_snapshot(path: Path) -> dict[str, dict]:
 
 
 def fetch(session, url: str) -> tuple[str, str | None]:
-    """不用快取、自己抓一次。回 (狀態, 內容)：ok／gone（404、410）／challenge／error。"""
+    """不用快取、自己抓一次。回 (狀態, 內容)：ok／gone（404、410）／challenge／throttled／error。
+    驗證頁不看狀態碼（Cloudflare 有時回 200 也是驗證頁）；429 被限流也算要停（小布 11/24 審查）。"""
     time.sleep(random.uniform(*THROTTLE))
     try:
         r = session.get(url, timeout=60)
     except requests.RequestException:
         return "error", None
-    if r.status_code in (403, 503) and CHALLENGE in r.text[:5000]:
+    if CHALLENGE in r.text[:5000]:
         return "challenge", None
+    if r.status_code == 429:
+        return "throttled", None
     if r.status_code in (404, 410):
         return "gone", None
     if r.status_code != 200:
@@ -64,6 +68,15 @@ def fetch(session, url: str) -> tuple[str, str | None]:
     if not r.encoding or r.encoding.lower() == "iso-8859-1":
         r.encoding = r.apparent_encoding
     return "ok", r.text
+
+
+PID = re.compile(r"/([^/?#]+)\.html(?:[?#].*)?$")
+MAX_MISSING = 0.05   # sitemap 不見的比例超過 5%：多半是解析出錯，不是真的下架
+
+
+def pid_from_url(url: str) -> str | None:
+    m = PID.search(url.strip().rstrip("/"))
+    return m.group(1) if m else None
 
 
 def compare(old: dict, page: str, url: str) -> list[dict]:
@@ -77,14 +90,17 @@ def compare(old: dict, page: str, url: str) -> list[dict]:
         return out   # 換成別本書了，其他欄位比了也沒意義
     if (rec.get("price_list") or None) != (old.get("price_list") or None):
         out.append({"kind": "price", "old": old.get("price_list"), "new": rec.get("price_list")})
-    if (rec.get("availability") or None) != (old.get("availability") or None):
-        out.append({"kind": "availability", "old": old.get("availability"), "new": rec.get("availability")})
+    new_av, old_av = rec.get("availability") or None, old.get("availability") or None
+    if new_av != old_av:
+        # 書頁沒標 availability ＝ 不明，不是缺貨：另立一類，寫回時也不能拿 None 蓋掉已知值（小布 11/24 審查）
+        out.append({"kind": "availability_unknown" if new_av is None else "availability", "old": old_av, "new": new_av})
     return out
 
 
 def run(snapshot: dict[str, dict], sitemap: list[str], fetcher, limit: int = 0, seed: int | None = None) -> dict:
-    in_map = {u.rsplit("/", 1)[-1][:-5] for u in sitemap}
+    in_map = {p for p in (pid_from_url(u) for u in sitemap) if p}
     not_in_sitemap = sorted(pid for pid in snapshot if pid not in in_map)
+    sitemap_suspect = bool(snapshot) and len(not_in_sitemap) / len(snapshot) > MAX_MISSING
     todo = sorted(snapshot)
     if limit:
         rnd = random.Random(seed)
@@ -93,8 +109,9 @@ def run(snapshot: dict[str, dict], sitemap: list[str], fetcher, limit: int = 0, 
     for pid in todo:
         old = snapshot[pid]
         status, page = fetcher(old["source_url"])
-        if status == "challenge":
-            stopped = f"書頁變成驗證頁（{old['source_url']}），停下來不繞過"
+        if status in ("challenge", "throttled"):
+            stopped = (f"書頁變成驗證頁（{old['source_url']}），停下來不繞過" if status == "challenge"
+                       else f"被限流（429，{old['source_url']}），停下來")
             break
         counts["checked"] += 1
         if status == "error":
@@ -107,7 +124,7 @@ def run(snapshot: dict[str, dict], sitemap: list[str], fetcher, limit: int = 0, 
         for c in changes:
             counts[c["kind"]] = counts.get(c["kind"], 0) + 1
             rows.append({"product_id": pid, "isbn": old.get("isbn"), "title": old.get("title"), "url": old["source_url"], **c})
-    return {"counts": counts, "not_in_sitemap": not_in_sitemap, "changes": rows, "stopped": stopped,
+    return {"counts": counts, "not_in_sitemap": not_in_sitemap, "sitemap_suspect": sitemap_suspect, "changes": rows, "stopped": stopped,
             "snapshot_size": len(snapshot), "sitemap_size": len(in_map)}
 
 
@@ -123,7 +140,6 @@ def main():
     if status != "ok" or not xml:
         print(f"sitemap 抓不到（{status}），不做比對")
         return 2
-    import re
     sitemap = re.findall(r"<loc>(https://www\.ustiendao\.com/[^/<]+?\.html)</loc>", xml)
     if not sitemap:
         print("sitemap 0 個書頁：站方可能改版或擋了，不做比對（不能當成全部下架）")
@@ -134,9 +150,11 @@ def main():
     out = Path(a.out) if a.out else DATA / f"ustiendao_recheck_{datetime.now():%Y%m%d}.json"
     out.write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     c = rep["counts"]
-    print(f"快照 {rep['snapshot_size']} 本、sitemap {rep['sitemap_size']} 頁；sitemap 不見了 {len(rep['not_in_sitemap'])} 本")
+    print(f"快照 {rep['snapshot_size']} 本、sitemap {rep['sitemap_size']} 頁；sitemap 不見了 {len(rep['not_in_sitemap'])} 本"
+          + ("（🔴 超過 5%，多半是 sitemap 解析出錯，不要當成下架）" if rep["sitemap_suspect"] else ""))
     print(f"抽查 {c['checked']} 頁：沒變 {c['same']}、改價 {c.get('price', 0)}、有沒有貨變了 {c.get('availability', 0)}、"
-          f"下架 {c.get('gone', 0)}、換成別本 {c.get('isbn_changed', 0)}、讀不出 {c.get('unparsable', 0)}、抓不到 {c['error']}")
+          f"下架 {c.get('gone', 0)}、換成別本 {c.get('isbn_changed', 0)}、讀不出 {c.get('unparsable', 0)}、抓不到 {c['error']}、"
+          f"書頁沒標有沒有貨 {c.get('availability_unknown', 0)}")
     if rep["stopped"]:
         print("🛑 " + rep["stopped"])
         return 3

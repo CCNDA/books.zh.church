@@ -3,7 +3,7 @@
 不連網：假的快照、假的 sitemap、假的抓取結果。"""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "crawler"))
-from ustiendao_recheck import compare, run
+from ustiendao_recheck import compare, pid_from_url, run
 
 fail = 0
 def check(what, got, want):
@@ -27,6 +27,11 @@ check("缺貨", compare(OLD, page(avail="https://schema.org/OutOfStock"), U), [{
 check("改價又缺貨 → 兩筆", [c["kind"] for c in compare(OLD, page(price="1", avail="https://schema.org/OutOfStock"), U)], ["price", "availability"])
 check("網址換成別本書 → 只報 isbn_changed", compare(OLD, page(gtin="9789570536065", price="1"), U), [{"kind": "isbn_changed", "old": "9789622449640", "new": "9789570536065"}])
 check("讀不出（沒有 JSON-LD）", compare(OLD, "<html></html>", U), [{"kind": "unparsable", "why": "no_ld"}])
+check("沒標 availability → 另一類（不是缺貨）", compare(OLD, page(avail=""), U), [{"kind": "availability_unknown", "old": "InStock", "new": None}])
+check("product_id：一般", pid_from_url("https://www.ustiendao.com/abc-123.html"), "abc-123")
+check("product_id：帶查詢字串", pid_from_url("https://www.ustiendao.com/abc-123.html?x=1"), "abc-123")
+check("product_id：結尾斜線", pid_from_url("https://www.ustiendao.com/abc-123.html/"), "abc-123")
+check("product_id：不是書頁", pid_from_url("https://www.ustiendao.com/blog/"), None)
 
 print("整輪")
 snap = {"a": OLD, "b": dict(OLD, product_id="b", source_url="https://www.ustiendao.com/b.html"),
@@ -44,6 +49,18 @@ check("沒有停", rep["stopped"], None)
 answers["https://www.ustiendao.com/b.html"] = ("challenge", None)
 rep = run(snap, sitemap, lambda u: answers[u])
 check("遇到驗證頁就停（b 之後的 c、d 不抓）", (rep["stopped"] is not None, rep["counts"]["checked"]), (True, 1))
+
+answers["https://www.ustiendao.com/b.html"] = ("throttled", None)
+rep = run(snap, sitemap, lambda u: answers[u])
+check("被限流（429）也停", (rep["stopped"] is not None and "429" in rep["stopped"], rep["counts"]["checked"]), (True, 1))
+answers["https://www.ustiendao.com/b.html"] = ("ok", page())
+rep = run(snap, ["https://www.ustiendao.com/zzz.html"], lambda u: answers[u])
+check("sitemap 不見太多（>5%）→ 標成可疑", rep["sitemap_suspect"], True)
+rep = run(snap, sitemap, lambda u: answers[u])
+check("不見 1/4 也超過 5% → 可疑（小快照）", rep["sitemap_suspect"], True)
+big = {f"p{i}": dict(OLD, product_id=f"p{i}", source_url=f"https://www.ustiendao.com/p{i}.html") for i in range(100)}
+rep = run(big, [f"https://www.ustiendao.com/p{i}.html" for i in range(97)], lambda u: ("ok", page()), limit=1, seed=1)
+check("不見 3%（≤5%）→ 不可疑", (rep["sitemap_suspect"], len(rep["not_in_sitemap"])), (False, 3))
 
 calls = []
 rep = run(snap, sitemap, lambda u: (calls.append(u), ("ok", page()))[1], limit=2, seed=1)
