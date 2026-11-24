@@ -47,19 +47,73 @@ function dm_authors_match(?string $rawA, ?string $rawB): bool
 }
 
 /**
+ * 一欄作者拆成「每位作者 → 他的各種寫法」(2026-11-24,Asana 1220592217365786)。
+ * 寫法:原樣正規化、去括號後、括號裡的(多半是英文原名);太短(< 2 字)的不算,避免單字誤中。
+ * 例:「John R. Kohlenberger、王正中（譯）」→ [[johnrkohlenberger], [王正中譯, 王正中, 譯→丟掉]]
+ * @return array<int, string[]>
+ */
+function dm_author_parts(?string $raw): array
+{
+    $out = [];
+    foreach (preg_split('/[;,' . "\u{FF1B}\u{FF0C}\u{3001}" . '\/]/u', (string) $raw) as $p) {
+        $p = trim(preg_replace('/\s*等$/u', '', $p));
+        if ($p === '') continue;
+        $v = [dm_norm($p), dm_norm(preg_replace('/[（(][^（）()]*[）)]/u', '', $p))];
+        if (preg_match_all('/[（(]([^（）()]*)[）)]/u', $p, $m)) {
+            foreach ($m[1] as $x) $v[] = dm_norm($x);
+        }
+        $v = array_values(array_unique(array_filter($v, fn($x) => mb_strlen($x) >= 2)));
+        if ($v) $out[] = $v;
+    }
+    return $out;
+}
+
+/**
+ * 作者集合包含:一邊的每一位作者,都能在另一邊找到(任一寫法相同、或較長的包含較短的)就算相容。
+ * 起因:主檔作者欄會累積別名(「John R. Kohlenberger、王正中」),第一作者比對就對不到「王正中」(小霏 11/17)。
+ */
+function dm_author_sets_match(?string $rawA, ?string $rawB): bool
+{
+    $A = dm_author_parts($rawA);
+    $B = dm_author_parts($rawB);
+    if (!$A || !$B) return false;
+    $covered = function (array $X, array $Y): bool {
+        $all = array_merge(...$Y);
+        foreach ($X as $variants) {
+            $hit = false;
+            foreach ($variants as $v) {
+                foreach ($all as $w) {
+                    if (dm_compatible($v, $w)) { $hit = true; break 2; }
+                }
+            }
+            if (!$hit) return false;
+        }
+        return true;
+    };
+    return $covered($A, $B) || $covered($B, $A);
+}
+
+/**
  * 判一對書的等級:'高'(可以合併)/'待判'(留給人)/'不併'。
+ * $setMatch=true(只有 find_title_publisher_duplicates.php 用):第一作者對不上時,再看作者集合包含(dm_author_sets_match)。
+ * import.php 的自動合併不開(放寬自動併要另外決定)。
  * - 兩邊都沒作者 → 待判(《聖經》這類書誤併就是災難)
  * - 作者不相容 → 不併
  * - 同一家書房各上一筆 → 待判(多半是平裝/精裝、套書分冊、電子書等不同商品)
  * @param string[] $srcsA @param string[] $srcsB 兩本書各自的版本來源
  * @return array{0: string, 1: string} [等級, 理由]
  */
-function dm_judge(?string $authorA, ?string $authorB, array $srcsA, array $srcsB): array
+function dm_judge(?string $authorA, ?string $authorB, array $srcsA, array $srcsB, bool $setMatch = false): array
 {
     $a = dm_first_author($authorA);
     $b = dm_first_author($authorB);
     if ($a === '' && $b === '') return ['待判', '兩邊都沒有作者'];
-    if (!dm_authors_match($authorA, $authorB)) return ['不併', '作者不同'];
+    $bySet = false;
+    if (!dm_authors_match($authorA, $authorB)) {
+        if (!$setMatch || !dm_author_sets_match($authorA, $authorB)) return ['不併', '作者不同'];
+        $bySet = true;
+    }
     if (array_intersect($srcsA, $srcsB)) return ['待判', '同一家書房上了兩筆(可能是不同版本或商品)'];
+    if ($bySet) return ['高', '一邊的作者都在另一邊的作者欄裡(主檔累積別名)'];
     return ['高', $a === $b ? '作者相同' : ($a === '' || $b === '' ? '一邊沒有作者' : '作者寫法不同但互相包含')];
 }

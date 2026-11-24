@@ -94,7 +94,7 @@ foreach ($groups as $g) {
     $stat['groups']++;
     $ks = explode(',', (string) $keep['srcs']);
     foreach ($g as $d) {
-        [$level, $why] = dm_judge($keep['author'], $d['author'], $ks, explode(',', (string) $d['srcs']));
+        [$level, $why] = dm_judge($keep['author'], $d['author'], $ks, explode(',', (string) $d['srcs']), true);   // 作者集合包含也算(小霏 11/17)
         $stat[$level]++;
         $rows[] = [$level === '高' ? '併入' : ($level === '不併' ? '不併' : ''), $level, $why,
                    $d['book_id'], $d['title'], $keep['book_id'], $keep['title'], (string) $keep['publisher'],
