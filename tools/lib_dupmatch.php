@@ -49,18 +49,28 @@ function dm_authors_match(?string $rawA, ?string $rawB): bool
 /**
  * 一欄作者拆成「每位作者 → 他的各種寫法」(2026-11-24,Asana 1220592217365786)。
  * 寫法:原樣正規化、去括號後、括號裡的(多半是英文原名);太短(< 2 字)的不算,避免單字誤中。
+ * 身分詞(主編、編著、譯者…)先去掉,不然「張三（主編）」「李四（主編）」會因為括號裡都是「主編」被當成同一位(小布 11/24 審查)。
  * 例:「John R. Kohlenberger、王正中（譯）」→ [[johnrkohlenberger], [王正中譯, 王正中, 譯→丟掉]]
  * @return array<int, string[]>
  */
+const DM_ROLE = '(?:總編輯|編委會|主編|編著|編譯|譯者|作者|繪者|繪圖|校閱|審訂|編輯|編|著|譯|繪|撰)';
+
+/** 去掉身分詞:只剩身分詞的括號整個拿掉,結尾的身分詞也拿掉(「王正中 譯」→「王正中」) */
+function dm_strip_role(string $s): string
+{
+    $s = preg_replace('/[（(]\s*(?:' . DM_ROLE . '[\s、,，\/]*)+[）)]/u', '', $s);
+    return trim(preg_replace('/[\s:：]*(?:' . DM_ROLE . ')+\s*$/u', '', $s));
+}
+
 function dm_author_parts(?string $raw): array
 {
     $out = [];
     foreach (preg_split('/[;,' . "\u{FF1B}\u{FF0C}\u{3001}" . '\/]/u', (string) $raw) as $p) {
-        $p = trim(preg_replace('/\s*等$/u', '', $p));
+        $p = dm_strip_role(trim(preg_replace('/\s*等$/u', '', $p)));
         if ($p === '') continue;
-        $v = [dm_norm($p), dm_norm(preg_replace('/[（(][^（）()]*[）)]/u', '', $p))];
+        $v = [dm_norm($p), dm_norm(dm_strip_role(preg_replace('/[（(][^（）()]*[）)]/u', '', $p)))];
         if (preg_match_all('/[（(]([^（）()]*)[）)]/u', $p, $m)) {
-            foreach ($m[1] as $x) $v[] = dm_norm($x);
+            foreach ($m[1] as $x) $v[] = dm_norm(dm_strip_role($x));
         }
         $v = array_values(array_unique(array_filter($v, fn($x) => mb_strlen($x) >= 2)));
         if ($v) $out[] = $v;
