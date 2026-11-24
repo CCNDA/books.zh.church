@@ -251,8 +251,7 @@ function readUrl(){
   state.category = p.get("category") || "";
   state.person = p.get("person") || "";
   state.publisher = p.get("publisher") || "";
-  state.yearFrom = /^\d{4}$/.test(p.get("year_from") || "") ? p.get("year_from") : "";
-  state.yearTo = /^\d{4}$/.test(p.get("year_to") || "") ? p.get("year_to") : "";
+  [state.yearFrom, state.yearTo] = yearRange(p.get("year_from") || "", p.get("year_to") || "");
   state.source = /^[a-z0-9_]{1,30}$/.test(p.get("source") || "") ? p.get("source") : "";
   state.page = Math.max(1, parseInt(p.get("page") || "1", 10) || 1);
   seoSync();
@@ -304,9 +303,18 @@ function catChip(id, name, n){
 }
 
 /* 篩選列:出版年、來源書房(API /books 的 year_from、year_to、source) */
+// 出版年檢查：網址和輸入框共用（小布 11/24）。不合法的那一端丟掉；兩端都有又填反就對調
+function yearOk(v){ return /^\d{4}$/.test(v) && +v >= 1800 && +v <= new Date().getFullYear() + 1; }
+function yearRange(a, b){
+  a = yearOk(a) ? a : ""; b = yearOk(b) ? b : "";
+  return (a && b && +a > +b) ? [b, a] : [a, b];
+}
 async function loadSources(){
   try { sources = (await fetchJson(API + "/sources")).sources || []; } catch(_) { sources = []; }
   sources.sort((a, b) => (b.book_count || 0) - (a.book_count || 0));
+  if (sources.length && state.source && !sources.some(x => x.code === state.source)){
+    state.source = ""; writeUrl(true); // 網址帶了不認得的書房代碼：畫面、查詢、網址一起清掉（小布 11/24 審查一）
+  }
   $("src").innerHTML = `<option value="">全部書房</option>` + sources.map(x =>
     `<option value="${esc(x.code)}">${esc(x.name)}(${x.book_count})</option>`).join("");
   syncFilters();
@@ -317,21 +325,21 @@ function syncFilters(){
   if ($("src").value !== state.source) $("src").value = ""; // 網址帶了不認得的書房代碼
   $("fClear").hidden = !(state.yearFrom || state.yearTo || state.source);
 }
-function applyFilters(){
+function applyFilters(replace){
   const yf = $("yf").value.trim(), yt = $("yt").value.trim(), max = new Date().getFullYear() + 1;
-  const bad = v => v !== "" && (!/^\d{4}$/.test(v) || +v < 1800 || +v > max);
+  const bad = v => v !== "" && !yearOk(v);
   if (bad(yf) || bad(yt)){ $("fErr").textContent = `出版年請填 1800～${max} 的西元四位數`; return; }
   $("fErr").textContent = "";
-  let [a, b] = [yf, yt];
-  if (a && b && +a > +b) [a, b] = [b, a]; // 前後填反就對調
+  const [a, b] = yearRange(yf, yt); // 前後填反就對調
   const src = $("src").value;
   if (a === state.yearFrom && b === state.yearTo && src === state.source){ syncFilters(); return; } // 沒變就不重查、不多一筆上一頁
   state.yearFrom = a; state.yearTo = b; state.source = src;
-  state.page = 1; syncFilters(); writeUrl(); load();
+  state.page = 1; syncFilters(); writeUrl(replace); load();
 }
-$("yf").addEventListener("change", applyFilters);
-$("yt").addEventListener("change", applyFilters);
-$("src").addEventListener("change", applyFilters);
+// 年份：取代網址（從「從」跳到「到」不會多一筆上一頁；小布 11/24）；書房：新增一筆
+$("yf").addEventListener("change", () => applyFilters(true));
+$("yt").addEventListener("change", () => applyFilters(true));
+$("src").addEventListener("change", () => applyFilters(false));
 $("fClear").addEventListener("click", () => {
   state.yearFrom = ""; state.yearTo = ""; state.source = ""; $("fErr").textContent = "";
   state.page = 1; syncFilters(); writeUrl(); load();
@@ -444,7 +452,7 @@ async function load(){
   const extra = [yLabel, sLabel].filter(Boolean).map(x => "・" + x).join("");
   if (!items.length){
     $("statusText").textContent = "共 0 本";
-    showMsg("📖", (yLabel || sLabel) ? `符合條件（${[yLabel, sLabel].filter(Boolean).join("、")}）的書目目前沒有`
+    showMsg("📖", (yLabel || sLabel) ? `符合條件（${[state.q ? `關鍵字「${esc(state.q)}」` : "", fLabel, yLabel, sLabel].filter(Boolean).join("、")}）的書目目前沒有`
                         : fLabel ? `${fLabel}目前沒有書目`
                         : (state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目"));
     return;
