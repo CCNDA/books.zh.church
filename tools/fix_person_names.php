@@ -53,7 +53,10 @@ const FPN_RAW_FIELDS = [
     'editors_raw'      => 'editor',
 ];
 
-$opt    = getopt('', ['apply', 'fast', 'source::', 'book::', 'limit::', 'resplit-only']);
+$opt    = getopt('', ['apply', 'fast', 'source::', 'book::', 'limit::', 'resplit-only', 'stale-tsv::']);
+// 2026-11-26 小芯：--stale-tsv=檔案 把「可能作廢的關聯」全部寫成 TSV（畫面只列前 20），給人審、再產清理 SQL（Asana 1219636880806976）
+$staleTsv = (string) ($opt['stale-tsv'] ?? '');
+$staleAll = [];
 $apply  = array_key_exists('apply', $opt);
 // ★★ 只處理「非重切不可」的書(2026-10-03 裁示的分工):
 //    needs_resplit / fullwidth_semi / entity 這三類要**新建人**,非這支不可;
@@ -206,6 +209,7 @@ while ($b = $st->fetch(PDO::FETCH_ASSOC)) {
         $nStale++;
         [$n, $r] = explode("\t", $k);
         if (count($staleRows) < 500) $staleRows[] = [$bid, $pid, $n, $r];
+        if ($staleTsv !== '') $staleAll[] = [$bid, $pid, $n, $r];
     }
 
     $order = 0;
@@ -309,6 +313,21 @@ if ($staleRows) {
         echo "   #{$bid}  person {$pid}  " . mb_strimwidth($n, 0, 40, '…', 'UTF-8') . "  ({$r})\n";
     }
     echo "   ★ 這些要不要刪,由 tools/check_person_names.php 產的清理 SQL 決定,人審過才跑。\n";
+}
+if ($staleTsv !== '') {
+    // 2026-11-26 小芯：全部的可能作廢關聯（不只前 500）；多帶書名與 books.author 原值，人審時才看得出該不該刪。只寫檔、不動資料庫。
+    $fh = @fopen($staleTsv, 'w');
+    if (!$fh) { fwrite(STDERR, "寫不了 {$staleTsv}\n"); exit(2); }
+    fwrite($fh, "book_id\tperson_id\tname\trole\ttitle\tauthor_raw\n");
+    $ti = $pdo->prepare("SELECT title, author FROM books WHERE book_id = :b");
+    $clean = fn($v) => str_replace(["\t", "\r", "\n"], ' ', (string) $v);
+    foreach ($staleAll as [$bid, $pid, $n, $r]) {
+        $ti->execute([':b' => $bid]);
+        $bk = $ti->fetch(PDO::FETCH_ASSOC) ?: ['title' => '', 'author' => ''];
+        fwrite($fh, implode("\t", [$bid, $pid, $clean($n), $r, $clean($bk['title']), $clean($bk['author'])]) . "\n");
+    }
+    fclose($fh);
+    echo "   → 可能作廢的關聯全部 " . count($staleAll) . " 筆寫到 {$staleTsv}\n";
 }
 
 // ── 4. 回查對帳 ──────────────────────────────────────────────────────────
