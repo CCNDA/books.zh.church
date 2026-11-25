@@ -200,7 +200,6 @@ function parse_date(?string $s): array
     return [null, null];
 }
 
-/** 舊 bug 殘值(「出版社：」等純標籤)視為空 */
 /**
  * 封面網址要指到檔案:以琳、衛理沒有封面時 og:image 會給站台根網址或目錄
  * (https://www.elimbookstore.com.tw/、…/image/methodistbookroom/image/),收進來只會讓
@@ -214,6 +213,7 @@ function cover_url_or_null(?string $u): ?string
     return ($path === '' || str_ends_with($path, '/')) ? null : $u;
 }
 
+/** 舊 bug 殘值(「出版社：」等純標籤)視為空 */
 function tidy(?string $s): ?string
 {
     $s = trim((string) $s);
