@@ -101,7 +101,10 @@ check "cclm 沒有被執行（master 沒有東西）" "$([ -s $T/crawler/data/cc
 check "log 寫「暫停中,這輪不抓」" "$(grep -c 'cclm:暫停中,這輪不抓' $L)" 1
 check "註解掉的 osb 照常跑" "$(awk -F'\t' '$2=="crawl:osb" && $3!="skip"' $S | wc -l)" 1
 check "cclm 之後的 akow 有跑" "$(grep -c 'crawl:akow' $S)" 1
-want=$(awk -F'\t' 'NR>1 && ($3=="fail" || ($3=="skip" && ($2=="classify" || $2=="search_text" || $2=="guard:year" || $2=="guard:nonbook" || $2=="guard:promo")))' $S | wc -l)
+# 關鍵步驟清單直接讀 daily_new.sh 的 CRITICAL_RE（小布 11/26：不要再抄一份，v1.25.1 就是兩份只改到一份）
+CRIT=$(sed -n "s/^CRITICAL_RE='\(.*\)'$/\1/p" $T/crawler/daily_new.sh)
+check "讀得到 daily_new.sh 的 CRITICAL_RE" "$([ -n "$CRIT" ] && echo 1 || echo 0)" 1
+want=$(awk -F'\t' -v re="$CRIT" 'NR>1 && ($3=="fail" || ($3=="skip" && $2 ~ re))' $S | wc -l)
 check "暫停的 cclm 不算失敗步驟（fail_steps＝fail＋關鍵步驟 skip；假環境沒有 classify 等工具所以有 $want）" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fail_steps"])' $T/crawler/logs/last_run.json 2>/dev/null)" "$want"
 check "crawl:cclm 沒有記成 fail" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="fail"' $S | wc -l)" 0
 rm -f $T/crawler/data/paused_sources.txt
