@@ -16,7 +16,10 @@ declare(strict_types=1);
 
 const USTD_GONE_MARK = '[天道北美已下架]';
 const USTD_HALT_ABS = 50;      // 下架或改價超過這個數就停
-const USTD_HALT_RATIO = 0.01;  // 任一類超過天道北美總數 1% 就停
+const USTD_HALT_RATIO = 0.01;  // 「真的變了」任一類超過天道北美總數 1% 就停
+const USTD_HALT_FILL_RATIO = 0.20;       // 第一次讀到有沒有貨（舊值 None）超過 20% 才停（小布 11/26）
+const USTD_HALT_FILL_SAME_MIN = 500;     // 第一次讀到超過 500 本……
+const USTD_HALT_FILL_SAME_SHARE = 0.95;  // ……而且 95% 以上同一個值也停（爬蟲讀壞）
 
 /** 網址最後一段 .html 前面那串（http／https、www、尾端參數不影響） */
 function ustd_slug(?string $url): ?string
@@ -56,13 +59,28 @@ function ustd_plan(array $report, array $editions): array
     $total = max(1, (int) ($report['snapshot_size'] ?? count($editions)));
     $counts = $report['counts'] ?? [];
 
-    // 異常閘（設計第 7 條）：先看報告數字，超過就整份不產
+    // 異常閘（設計第 7 條；小布 11/26 同意的算法）：從 changes 自己分類算，不用報告 counts（它把「第一次讀到」和「真的變了」混在一起）
+    $n = ['gone' => 0, 'price' => 0, 'isbn_changed' => 0, 'av_change' => 0, 'av_fill' => 0];
+    $fillVals = [];
+    foreach ($report['changes'] ?? [] as $c) {
+        $k = $c['kind'] ?? '';
+        if (isset($n[$k])) $n[$k]++;
+        if ($k === 'availability' && ($c['new'] ?? null) !== null) {
+            if (($c['old'] ?? null) === null) { $n['av_fill']++; $fillVals[$c['new']] = ($fillVals[$c['new']] ?? 0) + 1; }
+            elseif ($c['old'] !== $c['new']) $n['av_change']++;
+        }
+    }
     foreach (['gone', 'price'] as $k) {
-        if ((int) ($counts[$k] ?? 0) > USTD_HALT_ABS) { $plan['halt'] = "$k 有 {$counts[$k]} 本，超過 " . USTD_HALT_ABS; return $plan; }
+        if ($n[$k] > USTD_HALT_ABS) { $plan['halt'] = "$k 有 {$n[$k]} 本，超過 " . USTD_HALT_ABS; return $plan; }
     }
-    foreach (['gone', 'price', 'availability', 'isbn_changed'] as $k) {
-        if ((int) ($counts[$k] ?? 0) > $total * USTD_HALT_RATIO) { $plan['halt'] = "$k 有 {$counts[$k]} 本，超過總數 1%"; return $plan; }
+    foreach (['gone', 'price', 'isbn_changed', 'av_change'] as $k) {   // 真的變了：超過總數 1% 就停
+        if ($n[$k] > $total * USTD_HALT_RATIO) { $plan['halt'] = "$k 有 {$n[$k]} 本，超過總數 1%"; return $plan; }
     }
+    if ($n['av_fill'] > $total * USTD_HALT_FILL_RATIO) { $plan['halt'] = "第一次讀到有沒有貨 {$n['av_fill']} 本，超過總數 20%"; return $plan; }
+    if ($n['av_fill'] > USTD_HALT_FILL_SAME_MIN && max($fillVals) / $n['av_fill'] >= USTD_HALT_FILL_SAME_SHARE) {   // 爬蟲讀壞常是每頁同一個值
+        $plan['halt'] = "第一次讀到有沒有貨 {$n['av_fill']} 本、95% 以上同一個值，像爬蟲讀壞"; return $plan;
+    }
+    $plan['gate'] = $n;
     if (!empty($report['stopped'])) { $plan['halt'] = '對照中途停了：' . $report['stopped']; return $plan; }
 
     $idx = ustd_index($editions);

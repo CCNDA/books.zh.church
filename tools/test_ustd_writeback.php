@@ -70,12 +70,18 @@ $p4 = ustd_plan(['changes' => [['kind' => 'availability', 'url' => 'https://www.
 $ops41 = array_values(array_filter($p4['ops'], fn($o) => ($o['format_id'] ?? 0) === 41));
 t('重新上架又有新值：只有一個操作、值是 OutOfStock', count($ops41) === 1 && $ops41[0]['new'] === 'OutOfStock', json_encode($ops41));
 
-// 異常閘
-t('下架 51 本 → 停', ustd_plan(['counts' => ['gone' => 51]] + $rep, $eds)['halt'] !== null);
-t('改價 51 本 → 停', ustd_plan(['counts' => ['price' => 51]] + $rep, $eds)['halt'] !== null);
-t('有貨 101 本（>1%）→ 停', ustd_plan(['counts' => ['availability' => 101]] + $rep, $eds)['halt'] !== null);
+// 異常閘（小布 11/26：真的變了算 1%；第一次讀到另算 20%＋同值保險）
+$mk = fn(string $kind, int $n, $old = null, $new = null) => array_map(fn($i) => ['kind' => $kind, 'url' => "https://www.ustiendao.com/x-$i.html", 'old' => $old, 'new' => $new ?? "v$i"], range(1, $n));
+$gate = fn(array $changes) => ustd_plan(['changes' => $changes] + $rep, $eds)['halt'];
+t('下架 51 本 → 停', $gate($mk('gone', 51)) !== null);
+t('改價 51 本 → 停', $gate($mk('price', 51, '1', '2')) !== null);
+t('有沒有貨真的變了 101 本（>1%）→ 停', $gate($mk('availability', 101, 'InStock', 'OutOfStock')) !== null);
+t('第一次讀到 2,001 本（>20%）→ 停', $gate($mk('availability', 2001, null, null)) !== null);
+t('第一次讀到 600 本、全是 InStock → 停（像爬蟲讀壞）', $gate($mk('availability', 600, null, 'InStock')) !== null);
+t('第一次讀到 600 本、值很分散 → 不停', $gate($mk('availability', 600, null, null)) === null);
 t('對照中途停 → 停', ustd_plan(['stopped' => 'Cloudflare'] + $rep, $eds)['halt'] !== null);
-t('這次實際數字（下架 13、改價 32、有貨 161）→ 有貨 161 超過 1%，會停', ustd_plan(['counts' => ['gone' => 13, 'price' => 32, 'availability' => 161]] + $rep, $eds)['halt'] !== null);
+t('這次實際：下架 13、改價 32、第一次讀到 161 全 InStock → 不停（161 < 500、< 20%）',
+  $gate(array_merge($mk('gone', 13), $mk('price', 32, '1', '2'), $mk('availability', 161, null, 'InStock'))) === null);
 
 echo "\n" . ($bad ? "失敗 {$bad} 項" : "全綠：{$ok} 項通過") . "\n";
 exit($bad ? 1 : 0);
