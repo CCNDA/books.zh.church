@@ -63,6 +63,8 @@ foreach ($plan['ops'] as $o) {
     elseif ($o['type'] === 'availability') $sql[] = "UPDATE formats_prices SET availability = {$q($o['new'])} WHERE format_id = {$o['format_id']} AND {$eq('availability', $o['old'])};";
     elseif ($o['type'] === 'link_note') $sql[] = "UPDATE links SET note = {$q($o['new'])} WHERE link_id = {$o['link_id']} AND {$eq('note', $o['old'])};";
 }
+// 小布 11/26：試跑實際筆數要等於這個數；少了＝產 SQL 之後有列被改過 → 不 commit、用當下的庫重產
+array_splice($sql, 3, 0, [sprintf('-- 預期 %d 列（每句剛好 1 列；試跑少於這個數就不 commit、重產）', count($plan['ops']))]);
 file_put_contents($sqlPath, implode("\n", $sql) . "\n");
 
 echo "異常閘：", json_encode($plan['gate'] ?? [], JSON_UNESCAPED_UNICODE), "\n";
