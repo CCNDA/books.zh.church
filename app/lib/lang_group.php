@@ -23,11 +23,12 @@ function lang_group(?string $raw): ?string
     if ($raw === null) return null;
     $v = trim($raw);
     if ($v === '' || in_array(strtolower($v), ['nan', 'null', 'map', 'none', 'n/a'], true)) return null;
-    $hant  = preg_match('/繁|zh-Hant|Traditional/iu', $v) === 1;
-    $hans  = preg_match('/簡|简|zh-Hans|Simplified/iu', $v) === 1;
-    $en    = preg_match('/英|English|^en$|NASB/iu', $v) === 1;
-    $other = preg_match('/台語|臺語|粵語|客語|^hak$|日文|日語|韓文|韓語|希臘|希伯來|拉丁|越南|泰文|泰語|西班牙|德文|法文|俄文|印尼|緬甸|義大利|阿拉伯|阿美|布農|卑南|達悟|泰雅|德固達雅|排灣|魯凱|賽夏|鄒語|白話字|羅馬字|漢羅/u', $v) === 1;
-    $zh    = preg_match('/中文|中英|中\(簡\)|中\/|華語|國語|普通話|^中/u', $v) === 1;
+    // 2026-11-26 小布審查 PR #18：補英文寫法的語言代碼（正式庫目前沒有，防日後匯入）
+    $hant  = preg_match('/繁|zh-Hant|Traditional|zh[-_]?(TW|HK)\b/iu', $v) === 1;
+    $hans  = preg_match('/簡|简|zh-Hans|Simplified|zh[-_]?CN\b/iu', $v) === 1;
+    $en    = preg_match('/英|English|^en(g|[-_]US)?$|NASB/iu', $v) === 1;
+    $other = preg_match('/台語|臺語|粵語|客語|^hak$|日文|日語|韓文|韓語|希臘|希伯來|拉丁|越南|泰文|泰語|西班牙|德文|法文|俄文|印尼|緬甸|義大利|阿拉伯|阿美|布農|卑南|達悟|泰雅|德固達雅|排灣|魯凱|賽夏|鄒語|白話字|羅馬字|漢羅|Japanese|Korean|Cantonese/iu', $v) === 1;
+    $zh    = preg_match('/中文|中英|中\(簡\)|中\/|華語|國語|普通話|^中|漢語|汉语|英漢|漢英|(?<!no )Chinese|^zh$/iu', $v) === 1;
     $n = (int) $hant + (int) $hans + (int) $en + (int) $other;
     if ($n >= 2 || (($en || $other) && $zh && !$hant && !$hans)) return 'multi';
     if ($hant) return 'zh-Hant';

@@ -22,6 +22,13 @@ $cases = [
     // 其他語言
     ['台語', 'other'], ['臺語白話字', 'other'], ['客語', 'other'], ['希臘文', 'other'], ['阿美語', 'other'], ['日文', 'other'],
     // 未填／雜訊
+    // 2026-11-26 小布審查：英文寫法（正式庫目前沒有，防日後匯入）
+    ['zh-TW', 'zh-Hant'], ['zh_TW', 'zh-Hant'], ['zh-HK', 'zh-Hant'], ['zh-CN', 'zh-Hans'], ['zh', 'zh-Hant'],
+    ['Chinese', 'zh-Hant'], ['漢語', 'zh-Hant'],
+    ['eng', 'en'], ['ENG', 'en'], ['en-US', 'en'],
+    ['English/Chinese', 'multi'], ['English & Chinese', 'multi'], ['英漢對照', 'multi'],
+    ['Japanese', 'other'], ['Korean', 'other'], ['Cantonese', 'other'], ['台語漢羅', 'other'],
+    ['英語(Engalish, no Chinese version )', 'en'],   // 正式庫真的有這一筆：no Chinese 不能算成多語
     [null, null], ['', null], ['  ', null], ['nan', null], ['NaN', null], ['map', null], ['20', null], ['平裝', null],
 ];
 
