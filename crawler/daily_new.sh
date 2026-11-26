@@ -289,6 +289,21 @@ else
   rec "search_text" skip 0 0 "找不到 $SEARCHTEXT"
 fi
 
+# ── 語言分組：book_lang 小表全量重建（2026-11-26，M1-B 語言篩選；Asana 1220724721485985）──
+# 搜尋頁「語言」篩選查的是 book_lang；新書沒分組只會在選了語言時看不到，不會搜不到，所以不列入 CRITICAL_RE。
+# 全量重建約 6 秒（開發庫 64,022 本），冪等。
+BOOKLANG="$ROOT/tools/build_book_lang.php"
+if [ -f "$BOOKLANG" ]; then
+  log "--- 語言分組：book_lang 重建 ---"
+  if step "book_lang" "$BOOKLANG"; then
+    log "語言分組完成"
+  else
+    log "[錯誤] 語言分組失敗 —— 新書選了語言篩選會看不到,請手動重跑 php tools/build_book_lang.php"
+  fi
+else
+  rec "book_lang" skip 0 0 "找不到 $BOOKLANG"
+fi
+
 # ── 年份後備層守門:確認「有平面欄日期卻沒有任何 edition 日期」的書仍是 0 本 ──
 # ★★ 2026-09-28 補上(v1.15.1,Asana 1218643959919910)。
 #   API 的年份篩選改成只看 editions.publish_date(COUNT 5,140ms → 167ms),
