@@ -14,17 +14,18 @@
    篩選（category／person／publisher）與第 2 頁以後 → 指向自己（參數順序跟 writeUrl 一樣：q、category、person、publisher、page）；
    其他不認得的參數不算。日後加新的篩選參數，這裡跟 readUrl／writeUrl 要一起加。
    搜尋結果（q）→ noindex,follow（站內搜尋結果頁不該被收錄，連結照樣讓 Google 跟）。
-   出版年（year_from／year_to）、來源書房（source）篩選（11/24 加）→ 也算進 canonical，同樣 noindex,follow（組合太多）。 */
+   出版年（year_from／year_to）、來源書房（source）篩選（11/24 加）→ 也算進 canonical，同樣 noindex,follow（組合太多）。
+   語言（lang，11/26 加）同上。 */
 function seoSync(){
   var p = new URLSearchParams(location.search), c = new URLSearchParams();
   var q = p.get("q"); if (q) c.set("q", q);
-  ["category", "person", "publisher", "year_from", "year_to", "source"].forEach(function (k) { var v = p.get(k); if (v) c.set(k, v); });
+  ["category", "person", "publisher", "year_from", "year_to", "source", "lang"].forEach(function (k) { var v = p.get(k); if (v) c.set(k, v); });
   var pg = parseInt(p.get("page") || "1", 10); if (pg > 1) c.set("page", String(pg));
   var l = document.querySelector('link[rel="canonical"]');
   if (!l) { l = document.createElement("link"); l.rel = "canonical"; document.head.appendChild(l); }
   l.href = "https://books.zh.church/" + (c.toString() ? "?" + c.toString() : "");
   var r = document.querySelector('meta[name="robots"]');
-  if (q || p.get("year_from") || p.get("year_to") || p.get("source")) { if (!r) { r = document.createElement("meta"); r.name = "robots"; document.head.appendChild(r); } r.content = "noindex,follow"; }
+  if (q || p.get("year_from") || p.get("year_to") || p.get("source") || p.get("lang")) { if (!r) { r = document.createElement("meta"); r.name = "robots"; document.head.appendChild(r); } r.content = "noindex,follow"; }
   else if (r) r.remove();
 }
 seoSync();
@@ -114,6 +115,7 @@ h1 a{display:inline-flex;align-items:center;gap:.45em}
 .filters input{width:5.2em}
 .filters input:focus,.filters select:focus{border-color:var(--gold);outline:2px solid var(--gold);outline-offset:1px}
 .filters .ferr{color:#b42318;font-size:.82rem}
+.filters .fnote{font-size:.8rem;color:var(--ink-soft)}
 
 /* 狀態列 */
 .status{max-width:1080px;margin:18px auto 0;padding:0 20px;color:var(--ink-soft);font-size:.88rem;
@@ -200,13 +202,16 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
   <button class="dbtn" id="dbPerson" data-kind="person">👤 作者</button>
   <button class="dbtn" id="dbPublisher" data-kind="publisher">🏢 出版社</button>
 </div>
-<div class="filters" role="search" aria-label="依出版年、來源書房篩選">
+<div class="filters" role="search" aria-label="依出版年、來源書房、語言篩選">
   <span class="fgrp"><label for="yf">出版年</label>
     <input id="yf" inputmode="numeric" maxlength="4" placeholder="從" aria-label="出版年從（西元四位數）"> ～
     <input id="yt" inputmode="numeric" maxlength="4" placeholder="到" aria-label="出版年到（西元四位數）"></span>
   <span class="fgrp"><label for="src">來源書房</label>
     <select id="src"><option value="">全部書房</option></select></span>
-  <button class="dbtn" id="fClear" type="button" hidden>清除年份／書房</button>
+  <span class="fgrp"><label for="lng">語言</label>
+    <select id="lng" aria-describedby="lngNote"><option value="">全部語言</option><option value="zh-Hant">繁體中文</option><option value="zh-Hans">簡體中文</option><option value="en">英文</option><option value="multi">多語對照</option><option value="other">其他語言</option></select></span>
+  <button class="dbtn" id="fClear" type="button" hidden>清除篩選</button>
+  <span class="fnote" id="lngNote" hidden>約三分之二的書沒有標示語言，選了語言就看不到這些書</span>
   <span class="ferr" id="fErr" role="alert"></span>
 </div>
 <div class="dpanel" id="dpanel" hidden><div class="box">
@@ -236,7 +241,9 @@ footer{margin-top:56px;border-top:1px solid var(--line);background:var(--card)}
 <script>
 "use strict";
 const API = "/api";
-const state = { q: "", category: "", person: "", publisher: "", yearFrom: "", yearTo: "", source: "", page: 1, perPage: 20 };
+const state = { q: "", category: "", person: "", publisher: "", yearFrom: "", yearTo: "", source: "", lang: "", page: 1, perPage: 20 };
+// 語言分組（跟 app/lib/lang_group.php 的 LANG_GROUPS 同一組代碼）
+const LANGS = { "zh-Hant": "繁體中文", "zh-Hans": "簡體中文", "en": "英文", "multi": "多語對照", "other": "其他語言" };
 let sources = [];
 let cats = [];
 
@@ -253,6 +260,7 @@ function readUrl(){
   state.publisher = p.get("publisher") || "";
   [state.yearFrom, state.yearTo] = yearRange(p.get("year_from") || "", p.get("year_to") || "");
   state.source = /^[a-z0-9_]{1,30}$/.test(p.get("source") || "") ? p.get("source") : "";
+  state.lang = Object.prototype.hasOwnProperty.call(LANGS, p.get("lang") || "") ? p.get("lang") : ""; // 不認得的代碼當沒帶
   state.page = Math.max(1, parseInt(p.get("page") || "1", 10) || 1);
   seoSync();
 }
@@ -265,6 +273,7 @@ function writeUrl(replace){
   if (state.yearFrom) p.set("year_from", state.yearFrom);
   if (state.yearTo) p.set("year_to", state.yearTo);
   if (state.source) p.set("source", state.source);
+  if (state.lang) p.set("lang", state.lang);
   if (state.page > 1) p.set("page", String(state.page));
   const url = location.pathname + (p.toString() ? "?" + p.toString() : "");
   history[replace ? "replaceState" : "pushState"](null, "", url);
@@ -323,7 +332,8 @@ function sourceName(code){ const x = sources.find(s => s.code === code); return 
 function syncFilters(){
   $("yf").value = state.yearFrom; $("yt").value = state.yearTo; $("src").value = state.source;
   if ($("src").value !== state.source) $("src").value = ""; // 網址帶了不認得的書房代碼
-  $("fClear").hidden = !(state.yearFrom || state.yearTo || state.source);
+  $("lng").value = state.lang; $("lngNote").hidden = !state.lang;
+  $("fClear").hidden = !(state.yearFrom || state.yearTo || state.source || state.lang);
 }
 function applyFilters(replace){
   const yf = $("yf").value.trim(), yt = $("yt").value.trim(), max = new Date().getFullYear() + 1;
@@ -331,17 +341,18 @@ function applyFilters(replace){
   if (bad(yf) || bad(yt)){ $("fErr").textContent = `出版年請填 1800～${max} 的西元四位數`; return; }
   $("fErr").textContent = "";
   const [a, b] = yearRange(yf, yt); // 前後填反就對調
-  const src = $("src").value;
-  if (a === state.yearFrom && b === state.yearTo && src === state.source){ syncFilters(); return; } // 沒變就不重查、不多一筆上一頁
-  state.yearFrom = a; state.yearTo = b; state.source = src;
+  const src = $("src").value, lng = $("lng").value;
+  if (a === state.yearFrom && b === state.yearTo && src === state.source && lng === state.lang){ syncFilters(); return; } // 沒變就不重查、不多一筆上一頁
+  state.yearFrom = a; state.yearTo = b; state.source = src; state.lang = lng;
   state.page = 1; syncFilters(); writeUrl(replace); load();
 }
 // 年份：取代網址（從「從」跳到「到」不會多一筆上一頁；小布 11/24）；書房：新增一筆
 $("yf").addEventListener("change", () => applyFilters(true));
 $("yt").addEventListener("change", () => applyFilters(true));
 $("src").addEventListener("change", () => applyFilters(false));
+$("lng").addEventListener("change", () => applyFilters(false));
 $("fClear").addEventListener("click", () => {
-  state.yearFrom = ""; state.yearTo = ""; state.source = ""; $("fErr").textContent = "";
+  state.yearFrom = ""; state.yearTo = ""; state.source = ""; state.lang = ""; $("fErr").textContent = "";
   state.page = 1; syncFilters(); writeUrl(); load();
 });
 
@@ -389,7 +400,7 @@ async function loadDiscover(q){
 }
 
 /* 首頁區塊:本月熱門(無點擊資料自動隱藏)+ 新進書目 */
-function isHome(){ return !state.q && !state.category && !state.person && !state.publisher && !state.yearFrom && !state.yearTo && !state.source; }
+function isHome(){ return !state.q && !state.category && !state.person && !state.publisher && !state.yearFrom && !state.yearTo && !state.source && !state.lang; }
 async function loadHome(){
   const home = isHome();
   $("home").hidden = !home;
@@ -435,6 +446,7 @@ async function load(){
   if (state.yearFrom) p.set("year_from", state.yearFrom);
   if (state.yearTo) p.set("year_to", state.yearTo);
   if (state.source) p.set("source", state.source);
+  if (state.lang) p.set("lang", state.lang);
   let d;
   try{
     d = await fetchJson(API + "/books?" + p.toString());
@@ -449,10 +461,11 @@ async function load(){
     ? "出版年 " + (state.yearFrom && state.yearTo ? (state.yearFrom === state.yearTo ? state.yearFrom : `${state.yearFrom}～${state.yearTo}`)
                   : state.yearFrom ? `${state.yearFrom} 以後` : `${state.yearTo} 以前`) : "";
   const sLabel = state.source ? `來源「${esc(sourceName(state.source))}」` : "";
-  const extra = [yLabel, sLabel].filter(Boolean).map(x => "・" + x).join("");
+  const lLabel = state.lang ? `語言「${esc(LANGS[state.lang])}」` : "";
+  const extra = [yLabel, sLabel, lLabel].filter(Boolean).map(x => "・" + x).join("");
   if (!items.length){
     $("statusText").textContent = "共 0 本";
-    showMsg("📖", (yLabel || sLabel) ? `符合條件（${[state.q ? `關鍵字「${esc(state.q)}」` : "", fLabel, yLabel, sLabel].filter(Boolean).join("、")}）的書目目前沒有`
+    showMsg("📖", (yLabel || sLabel || lLabel) ? `符合條件（${[state.q ? `關鍵字「${esc(state.q)}」` : "", fLabel, yLabel, sLabel, lLabel].filter(Boolean).join("、")}）的書目目前沒有`
                         : fLabel ? `${fLabel}目前沒有書目`
                         : (state.q ? `找不到與「${esc(state.q)}」相關的書目` : "此分類目前沒有書目"));
     return;
