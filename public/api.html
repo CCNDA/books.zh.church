@@ -124,7 +124,7 @@ th{background:#eef4f8;font-weight:600}
   <pre><code>curl "https://books.zh.church/api/books?q=羅馬書&amp;per_page=5"</code></pre>
 
   <h2 class="serif">單本書目</h2>
-  <p><span class="ep">GET /api/books/{book_id}</span>:一本書的完整資料,包含內容簡介、作者與譯者(<code>contributors</code>)、各書房的版本與購書連結(<code>editions</code>、<code>buy_links</code>)、叢書與主題，以及同一本書的簡體／正體版(<code>related_editions</code>，人工確認過的才列)。網頁版是 <code>https://books.zh.church/book/{book_id}</code>。</p>
+  <p><span class="ep">GET /api/books/{book_id}</span>:一本書的完整資料,包含內容簡介、作者與譯者(<code>contributors</code>)、各書房的版本與購書連結(<code>editions</code>、<code>buy_links</code>)、叢書與主題，以及同一本書的簡體／正體版(<code>related_editions</code>，人工確認過的才列)。<code>buy_links</code> 每一筆有 <code>status</code>：<code>available</code>（照常）、<code>out_of_stock</code>（這個版本目前缺貨，連結照留）、<code>discontinued</code>（這個版本書房已下架，網頁不顯示購買鈕）。網頁版是 <code>https://books.zh.church/book/{book_id}</code>。</p>
   <pre><code>curl "https://books.zh.church/api/books/38080"</code></pre>
 
   <h2 class="serif">最新上架、熱門書目</h2>
