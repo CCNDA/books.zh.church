@@ -187,13 +187,14 @@ function book_detail(int $id): ?array
     // 購書連結彙整:links(link_type='buy',正規層)+ books.buy_links(平面後備)
     // URL 去重、平台固定排序;統一格式 {platform, label, url, note},來源增加時只需擴充上方常數
     // 2026-11-26 小芯（Asana 1220919560670331，熊叔叔「三題都照建議」）：購書鈕帶 status
-    //   discontinued＝這個版本已下架（格式 availability=Discontinued，或連結備註有「[天道北美已下架]」）→ 前台不給購買鈕
+    //   discontinued＝這個版本【所有】格式都是 Discontinued，或連結備註有「[天道北美已下架]」→ 前台不給購買鈕
+    //     （小布 11/26：只有部分格式下架＝還買得到，照舊顯示購買鈕；跟 out_of_stock 一樣用「全部」標準）
     //   out_of_stock＝這個版本所有格式都是 OutOfStock → 前台標「缺貨」、連結照留
-    //   null＝照舊。標記字樣只用來判斷，不顯示在備註裡。
+    //   available＝其他（照舊）。對外 API 一律有值，串接端好判斷。標記字樣只用來判斷，不顯示在備註裡。
     $statusByEd = [];
     foreach ($book['editions'] ?? [] as $ed) {
         $avs = array_map(static fn ($f) => $f['availability'] ?? null, $ed['formats'] ?? []);
-        if (in_array('Discontinued', $avs, true)) {
+        if ($avs && count(array_filter($avs, static fn ($a) => $a === 'Discontinued')) === count($avs)) {
             $statusByEd[$ed['edition_id']] = 'discontinued';
         } elseif ($avs && count(array_filter($avs, static fn ($a) => $a === 'OutOfStock')) === count($avs)) {
             $statusByEd[$ed['edition_id']] = 'out_of_stock';
@@ -217,7 +218,7 @@ function book_detail(int $id): ?array
                           : (BUY_PLATFORM_LABELS[$platform] ?? ($platform !== null && $platform !== '' ? $platform : '購書連結')),
             'url'      => $url,
             'note'     => ($note !== null && $note !== '') ? $note : null,
-            'status'   => $status,
+            'status'   => $status ?? 'available',
         ];
     };
     $others = [];
