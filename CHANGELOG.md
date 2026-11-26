@@ -14,6 +14,14 @@
 ## [Unreleased]
 
 
+## [1.25.0] - 2026-11-25
+
+### 搜尋
+
+- 搜尋畫面加「出版年」（從～到）與「來源書房」篩選（API /books 原本就有 year_from、year_to、source，這版只改畫面）
+- 網址同步 year_from、year_to、source，可分享、上一頁還原；年份檢查 1800～明年、填反對調；不認得的書房代碼清掉
+- 年份、書房篩選頁 noindex,follow，canonical 算進新參數
+
 ## [1.24.1] - 2026-11-20
 
 ### 封面
