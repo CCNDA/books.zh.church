@@ -53,7 +53,10 @@ const FPN_RAW_FIELDS = [
     'editors_raw'      => 'editor',
 ];
 
-$opt    = getopt('', ['apply', 'fast', 'source::', 'book::', 'limit::', 'resplit-only']);
+$opt    = getopt('', ['apply', 'fast', 'source::', 'book::', 'limit::', 'resplit-only', 'stale-tsv::']);
+// 2026-11-26 小芯：--stale-tsv=檔案 把「可能作廢的關聯」全部寫成 TSV（畫面只列前 20），給人審、再產清理 SQL（Asana 1219636880806976）
+$staleTsv = (string) ($opt['stale-tsv'] ?? '');
+$staleAll = [];
 $apply  = array_key_exists('apply', $opt);
 // ★★ 只處理「非重切不可」的書(2026-10-03 裁示的分工):
 //    needs_resplit / fullwidth_semi / entity 這三類要**新建人**,非這支不可;
@@ -145,12 +148,14 @@ while ($b = $st->fetch(PDO::FETCH_ASSOC)) {
     // 原始署名:extra[來源] 的四個 *_raw 最完整(books.author 是 cap(255) 的平面後備)
     $want = [];     // "name\trole" => ['name'=>, 'role'=>, 'credit'=>]
     $sawRaw = false;
+    $rawParts = [];  // --stale-tsv 用：這本書實際拿來重切的原始署名（小布 11/26：要跟重切同一個來源）
     foreach ($extra as $src => $rec) {
         if (!is_array($rec)) continue;
         foreach (FPN_RAW_FIELDS as $field => $role) {
             $raw = $rec[$field] ?? null;
             if (!is_string($raw) || trim($raw) === '') continue;
             $sawRaw = true;
+            if ($staleTsv !== '') $rawParts[] = [$src, $field, $raw];
             // 以琳多人名以「/」分隔 —— 與 import.php 的 map_record() 同一條特例,
             // 不同步就會補出跟匯入器不一樣的人名。
             if ($src === 'elim') $raw = str_replace('/', "\u{3001}", $raw);
@@ -206,6 +211,15 @@ while ($b = $st->fetch(PDO::FETCH_ASSOC)) {
         $nStale++;
         [$n, $r] = explode("\t", $k);
         if (count($staleRows) < 500) $staleRows[] = [$bid, $pid, $n, $r];
+        if ($staleTsv !== '') {
+            $rawUsed = $sawRaw
+                ? implode(' | ', array_map(fn($x) => "{$x[0]}.{$x[1]}={$x[2]}", $rawParts))
+                : (string) $b['author'];
+            $rawFrom = $sawRaw
+                ? 'extra:' . implode(',', array_values(array_unique(array_map(fn($x) => $x[0], $rawParts))))
+                : 'author';
+            $staleAll[] = [$bid, $pid, $n, $r, (string) $b['title'], $rawUsed, $rawFrom];
+        }
     }
 
     $order = 0;
@@ -309,6 +323,20 @@ if ($staleRows) {
         echo "   #{$bid}  person {$pid}  " . mb_strimwidth($n, 0, 40, '…', 'UTF-8') . "  ({$r})\n";
     }
     echo "   ★ 這些要不要刪,由 tools/check_person_names.php 產的清理 SQL 決定,人審過才跑。\n";
+}
+if ($staleTsv !== '') {
+    // 2026-11-26 小芯：全部的可能作廢關聯（不只前 500）。raw_used＝這本書實際拿來重切的原始署名
+    // （extra[來源] 的 *_raw 依欄位串起來；都沒有才退 books.author），raw_from 寫出處（小布 11/26 審查）。
+    // 譯者／繪者／編者只在 *_raw 裡，拿 books.author 對會誤以為「署名沒這個人＝該刪」。只寫檔、不動資料庫。
+    $fh = @fopen($staleTsv, 'w');
+    if (!$fh) { fwrite(STDERR, "寫不了 {$staleTsv}\n"); exit(2); }
+    fwrite($fh, "book_id\tperson_id\tname\trole\ttitle\traw_used\traw_from\n");
+    $clean = fn($v) => str_replace(["\t", "\r", "\n"], ' ', (string) $v);
+    foreach ($staleAll as $row) {
+        fwrite($fh, implode("\t", array_map($clean, $row)) . "\n");
+    }
+    fclose($fh);
+    echo "   → 可能作廢的關聯全部 " . count($staleAll) . " 筆寫到 {$staleTsv}\n";
 }
 
 // ── 4. 回查對帳 ──────────────────────────────────────────────────────────

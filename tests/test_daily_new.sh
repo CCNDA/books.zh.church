@@ -101,7 +101,7 @@ check "cclm 沒有被執行（master 沒有東西）" "$([ -s $T/crawler/data/cc
 check "log 寫「暫停中,這輪不抓」" "$(grep -c 'cclm:暫停中,這輪不抓' $L)" 1
 check "註解掉的 osb 照常跑" "$(awk -F'\t' '$2=="crawl:osb" && $3!="skip"' $S | wc -l)" 1
 check "cclm 之後的 akow 有跑" "$(grep -c 'crawl:akow' $S)" 1
-want=$(awk -F'\t' 'NR>1 && ($3=="fail" || ($3=="skip" && ($2=="classify" || $2=="search_text" || $2=="guard:year" || $2=="guard:nonbook")))' $S | wc -l)
+want=$(awk -F'\t' 'NR>1 && ($3=="fail" || ($3=="skip" && ($2=="classify" || $2=="search_text" || $2=="guard:year" || $2=="guard:nonbook" || $2=="guard:promo")))' $S | wc -l)
 check "暫停的 cclm 不算失敗步驟（fail_steps＝fail＋關鍵步驟 skip；假環境沒有 classify 等工具所以有 $want）" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fail_steps"])' $T/crawler/logs/last_run.json 2>/dev/null)" "$want"
 check "crawl:cclm 沒有記成 fail" "$(awk -F'\t' '$2=="crawl:cclm" && $3=="fail"' $S | wc -l)" 0
 check "語言分組 book_lang 有跑到（假環境沒工具→記 skip，不算失敗步驟）" "$(awk -F'\t' '$2=="book_lang"' $S | wc -l)" 1
