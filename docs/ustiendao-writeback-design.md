@@ -24,7 +24,8 @@
 
 1. **只動天道北美的 edition**：`editions.source='ustiendao'`。對應順序（小布 11/26 審查 b，依實查調整）：
    - 小布建議的 `identifiers(id_type='STORE')`：**正式庫實查 ustiendao 9,999 個 edition、有 STORE 的 0 個**（天道北美匯入沒寫），這個來源用不上
-   - ⇒ 先用 `editions.source_url` **完全比對**報告的 url（網址本身含 product_id，例 `/1-22357000.html`）
+   - ⇒ 先用 `editions.source_url` 對報告的 url：**兩邊都用正規式取出商品號再比**（網址最後一段 `.html` 前面那串，例 `/1-22357000.html` → `1-22357000`；也有 `copy-of-21`、`20063` 這種，不能只取數字），不整串比（http／https、www、尾端參數不同會對不到；小布 11/26）
+   - 同一個商品號對到兩個以上 edition（重複匯入）→ 不寫，列進人審清單（小布 11/26）
    - 再用 ISBN13 交叉核對：不符就歸「換本」（第 5 條），不寫
    - 對不到的列進「對不到」清單，不猜；之後可另開票替天道北美補寫 STORE 識別碼
 2. **改價**：`formats_prices.price` 更新為新值；`currency` 必須是 USD 才寫（不是就停、列出來）
