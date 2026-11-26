@@ -67,6 +67,8 @@ foreach ($plan['ops'] as $o) {
     elseif ($o['type'] === 'link_note') $sql[] = "UPDATE links SET note = {$q($o['new'])} WHERE link_id = {$o['link_id']} AND {$eq('note', $o['old'])};$cnt";
 }
 $sql[] = sprintf("SELECT @ustd_n AS actual_rows, %d AS expected_rows, IF(@ustd_n = %d, 'OK', 'MISMATCH') AS result;", count($plan['ops']), count($plan['ops']));
+// 小布 11/26：不符就直接出錯（子查詢多列 → 1242），沒看結果就 --commit 也會中止整個交易
+$sql[] = sprintf("SELECT IF(@ustd_n = %d, 'OK', (SELECT 1 UNION SELECT 2)) AS guard;", count($plan['ops']));
 // 小布 11/26：試跑實際筆數要等於這個數；少了＝產 SQL 之後有列被改過 → 不 commit、用當下的庫重產
 array_splice($sql, 3, 0, [sprintf('-- 預期 %d 列（每句剛好 1 列；試跑少於這個數就不 commit、重產）', count($plan['ops']))]);
 file_put_contents($sqlPath, implode("\n", $sql) . "\n");
