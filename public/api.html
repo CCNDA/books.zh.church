@@ -116,6 +116,7 @@ th{background:#eef4f8;font-weight:600}
       <tr><td><code>publisher</code></td><td>出版社編號(見 <code>/api/publishers</code>);同一家出版社的不同寫法會一起算</td><td><code>publisher=2748</code></td></tr>
       <tr><td><code>year_from</code>、<code>year_to</code></td><td>出版年範圍(西元四位數)</td><td><code>year_from=2020&amp;year_to=2025</code></td></tr>
       <tr><td><code>source</code></td><td>來源書房代碼(見 <code>/api/sources</code> 的 <code>code</code>)</td><td><code>source=logos</code></td></tr>
+      <tr><td><code>lang</code></td><td>語言:<code>zh-Hant</code> 繁體中文、<code>zh-Hans</code> 簡體中文、<code>en</code> 英文、<code>multi</code> 多語對照、<code>other</code> 其他語言。約三分之二的書沒有標示語言,帶了 <code>lang</code> 就不會出現在結果裡</td><td><code>lang=zh-Hant</code></td></tr>
       <tr><td><code>page</code>、<code>per_page</code></td><td>第幾頁、每頁幾本(1–50,預設 20)</td><td><code>page=2&amp;per_page=50</code></td></tr>
     </tbody>
   </table></div>
