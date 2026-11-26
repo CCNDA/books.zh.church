@@ -253,6 +253,10 @@ h1{margin:0 0 4px;font-size:1.7rem;line-height:1.4}
 .btn:hover{background:rgba(240,192,74,.08)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.primary:hover{background:#14617f}
+.btn.off{border-color:var(--line);color:var(--ink-soft);background:var(--paper);cursor:default}
+.btn.off:hover{background:var(--paper)}
+.btn.primary.oos{background:#6b8794;border-color:#6b8794}
+.btn.primary.oos:hover{background:#5a7480}
 
 .sec{max-width:1080px;margin:34px auto 0;padding:0 20px}
 .sec h2{font-size:1.15rem;margin:0 0 12px;border-left:4px solid var(--gold);padding-left:10px;letter-spacing:.08em}
@@ -330,7 +334,10 @@ footer{margin-top:60px;border-top:1px solid var(--line);background:var(--card)}
           if ($url === '' || !preg_match('#^https?://#i', $url)) { continue; }
           $label = is_string($l) ? '購書連結' : ($l['label'] ?: (SSR_PLATFORM_NAMES[$l['platform'] ?? ''] ?? ($l['platform'] ?: '購書連結')));
           $note = is_string($l) ? '' : (string) ($l['note'] ?? '');
-          echo '<a class="btn primary" href="' . e($url) . '"' . ($note !== '' ? ' title="' . e($note) . '"' : '') . ' target="_blank" rel="noopener nofollow">🛒 ' . e($label) . '</a>';
+          $st = is_string($l) ? null : ($l['status'] ?? null);
+          // 2026-11-26 小芯：已下架不給購買鈕；缺貨標示、連結照留（Asana 1220919560670331）
+          if ($st === 'discontinued') { echo '<span class="btn off" aria-disabled="true">' . e($label) . '：已下架</span>'; continue; }
+          echo '<a class="btn primary' . ($st === 'out_of_stock' ? ' oos' : '') . '" href="' . e($url) . '"' . ($note !== '' ? ' title="' . e($note) . '"' : '') . ' target="_blank" rel="noopener nofollow">🛒 ' . e($label) . ($st === 'out_of_stock' ? '（缺貨）' : '') . '</a>';
       }
     ?><button class="btn" id="copyBtn">🔗 複製本頁連結</button></div>
   </div>
@@ -480,7 +487,10 @@ function render(b){
     if (!url) continue;
     const label = typeof l === "string" ? "購書連結" : (l.label || PLATFORM_NAMES[l.platform] || l.platform || l.name || "購書連結");
     const note = typeof l === "string" ? "" : (l.note || "");
-    btns.push(`<a class="btn primary" href="${esc(url)}"${note ? ` title="${esc(note)}"` : ""} target="_blank" rel="noopener nofollow">🛒 ${esc(label)}</a>`);
+    const st = typeof l === "string" ? null : (l.status || null);
+    // 2026-11-26 小芯：已下架不給購買鈕；缺貨標示、連結照留（跟上面伺服器端同一規則）
+    if (st === "discontinued"){ btns.push(`<span class="btn off" aria-disabled="true">${esc(label)}：已下架</span>`); continue; }
+    btns.push(`<a class="btn primary${st === "out_of_stock" ? " oos" : ""}" href="${esc(url)}"${note ? ` title="${esc(note)}"` : ""} target="_blank" rel="noopener nofollow">🛒 ${esc(label)}${st === "out_of_stock" ? "（缺貨）" : ""}</a>`);
   }
   btns.push(`<button class="btn" id="copyBtn">🔗 複製本頁連結</button>`);
   $("bBtns").innerHTML = btns.join("");

@@ -175,7 +175,7 @@ function book_detail(int $id): ?array
 
     // 連結(作品層 + 版本層)
     $stmt = db()->prepare(
-        'SELECT l.link_type, l.platform, l.url, l.note
+        'SELECT l.link_type, l.platform, l.url, l.note, l.edition_id
          FROM links l
          WHERE l.book_id = :id1
             OR l.edition_id IN (SELECT edition_id FROM editions WHERE book_id = :id2)
@@ -186,11 +186,29 @@ function book_detail(int $id): ?array
 
     // 購書連結彙整:links(link_type='buy',正規層)+ books.buy_links(平面後備)
     // URL 去重、平台固定排序;統一格式 {platform, label, url, note},來源增加時只需擴充上方常數
+    // 2026-11-26 小芯（Asana 1220919560670331，熊叔叔「三題都照建議」）：購書鈕帶 status
+    //   discontinued＝這個版本已下架（格式 availability=Discontinued，或連結備註有「[天道北美已下架]」）→ 前台不給購買鈕
+    //   out_of_stock＝這個版本所有格式都是 OutOfStock → 前台標「缺貨」、連結照留
+    //   null＝照舊。標記字樣只用來判斷，不顯示在備註裡。
+    $statusByEd = [];
+    foreach ($book['editions'] ?? [] as $ed) {
+        $avs = array_map(static fn ($f) => $f['availability'] ?? null, $ed['formats'] ?? []);
+        if (in_array('Discontinued', $avs, true)) {
+            $statusByEd[$ed['edition_id']] = 'discontinued';
+        } elseif ($avs && count(array_filter($avs, static fn ($a) => $a === 'OutOfStock')) === count($avs)) {
+            $statusByEd[$ed['edition_id']] = 'out_of_stock';
+        }
+    }
+    $goneMark = '[天道北美已下架]';
     $buy = [];
-    $addBuy = static function (?string $platform, string $url, ?string $note = null, ?string $label = null) use (&$buy): void {
+    $addBuy = static function (?string $platform, string $url, ?string $note = null, ?string $label = null, ?string $status = null) use (&$buy, $goneMark): void {
         $url = trim($url);
         if ($url === '' || isset($buy[$url])) {
             return;
+        }
+        if ($note !== null && str_contains($note, $goneMark)) {
+            $status = 'discontinued';
+            $note = trim(str_replace($goneMark, '', $note));
         }
         $buy[$url] = [
             'platform' => $platform,
@@ -199,12 +217,14 @@ function book_detail(int $id): ?array
                           : (BUY_PLATFORM_LABELS[$platform] ?? ($platform !== null && $platform !== '' ? $platform : '購書連結')),
             'url'      => $url,
             'note'     => ($note !== null && $note !== '') ? $note : null,
+            'status'   => $status,
         ];
     };
     $others = [];
     foreach ($linkRows as $r) {
         if ($r['link_type'] === 'buy') {
-            $addBuy($r['platform'], (string) $r['url'], $r['note']);
+            $addBuy($r['platform'], (string) $r['url'], $r['note'], null,
+                    $r['edition_id'] !== null ? ($statusByEd[(int) $r['edition_id']] ?? null) : null);
         } else {
             $others[] = $r;
         }
