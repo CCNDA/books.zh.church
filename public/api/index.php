@@ -17,6 +17,7 @@ require dirname(__DIR__, 2) . '/app/lib/db.php';
 require dirname(__DIR__, 2) . '/app/lib/response.php';
 require dirname(__DIR__, 2) . '/app/lib/release.php';
 require dirname(__DIR__, 2) . '/app/lib/book_detail.php';
+require dirname(__DIR__, 2) . '/app/lib/lang_group.php';   // LANG_GROUPS（語言篩選）
 
 /**
  * 購書平台顯示名與排序(新增來源時在此擴充即可;platform 代碼由匯入器寫入
@@ -225,6 +226,7 @@ function get_books(): never
     $yearFrom  = trim((string) ($_GET['year_from'] ?? ''));  // 出版年下限(YYYY)
     $yearTo    = trim((string) ($_GET['year_to'] ?? ''));    // 出版年上限(YYYY)
     $source    = trim((string) ($_GET['source'] ?? ''));     // 來源書房代碼(logos/campus/…)
+    $lang      = trim((string) ($_GET['lang'] ?? ''));       // 語言分組 zh-Hant／zh-Hans／en／multi／other（book_lang 小表）
     $deep      = ($_GET['deep'] ?? '') === '1';              // 1=關鍵字也搜摘要內文(慢)
     $page      = max(1, (int) ($_GET['page'] ?? 1));
     $perPage   = min(50, max(1, (int) ($_GET['per_page'] ?? 20)));
@@ -388,6 +390,15 @@ function get_books(): never
         $where[] = 'EXISTS (SELECT 1 FROM editions es
                             WHERE es.book_id = b.book_id AND es.source = :src)';
         $params[':src'] = $source;
+    }
+    // ── 2026-11-26 語言篩選（M1-B；Asana 1220724721485985）──────────
+    // ★ 不在 books 上加欄位（約 500MB，正式庫 ALTER 會整表重建）；分組存在 book_lang 小表，
+    //   由 tools/build_book_lang.php 全量重建。只收 LANG_GROUPS 裡的代碼，其他值當沒帶（不報錯）。
+    // ★ 約三分之二的書沒有語言資料（book_lang 沒有那一列），選了語言就看不到它們——搜尋頁要註明。
+    if ($lang !== '' && array_key_exists($lang, LANG_GROUPS)) {
+        $where[] = 'EXISTS (SELECT 1 FROM book_lang bl
+                            WHERE bl.book_id = b.book_id AND bl.lang_group = :lang)';
+        $params[':lang'] = $lang;
     }
     $whereSql = implode(' AND ', $where);
 
