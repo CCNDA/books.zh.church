@@ -57,12 +57,16 @@ $q = fn($v) => $v === null ? 'NULL' : $pdo->quote((string) $v);
 $eq = fn($col, $v) => $v === null ? "$col IS NULL" : "$col = " . $q($v);
 $sql = ["-- 天道北美全量對照寫回（報告 " . basename($reportPath) . "，checked_at " . ($report['checked_at'] ?? '?') . "）",
         "-- 產生：tools/ustiendao_writeback.php；Asana 1220919560670331；冪等（帶舊值條件）",
-        "-- 先 sudo ccnda-db-run 試跑看筆數，對了再加 --commit"];
+        "-- 先 sudo ccnda-db-run 試跑看筆數，對了再加 --commit",
+        "SET @ustd_n = 0;"];
+// ccnda-db-run 不印影響列數 → 每句後面累加 ROW_COUNT()，最後印出來跟預期比
+$cnt = " SET @ustd_n = @ustd_n + ROW_COUNT();";
 foreach ($plan['ops'] as $o) {
-    if ($o['type'] === 'price') $sql[] = "UPDATE formats_prices SET price = {$q($o['new'])} WHERE format_id = {$o['format_id']} AND {$eq('price', $o['old'])};";
-    elseif ($o['type'] === 'availability') $sql[] = "UPDATE formats_prices SET availability = {$q($o['new'])} WHERE format_id = {$o['format_id']} AND {$eq('availability', $o['old'])};";
-    elseif ($o['type'] === 'link_note') $sql[] = "UPDATE links SET note = {$q($o['new'])} WHERE link_id = {$o['link_id']} AND {$eq('note', $o['old'])};";
+    if ($o['type'] === 'price') $sql[] = "UPDATE formats_prices SET price = {$q($o['new'])} WHERE format_id = {$o['format_id']} AND {$eq('price', $o['old'])};$cnt";
+    elseif ($o['type'] === 'availability') $sql[] = "UPDATE formats_prices SET availability = {$q($o['new'])} WHERE format_id = {$o['format_id']} AND {$eq('availability', $o['old'])};$cnt";
+    elseif ($o['type'] === 'link_note') $sql[] = "UPDATE links SET note = {$q($o['new'])} WHERE link_id = {$o['link_id']} AND {$eq('note', $o['old'])};$cnt";
 }
+$sql[] = sprintf("SELECT @ustd_n AS actual_rows, %d AS expected_rows, IF(@ustd_n = %d, 'OK', 'MISMATCH') AS result;", count($plan['ops']), count($plan['ops']));
 // 小布 11/26：試跑實際筆數要等於這個數；少了＝產 SQL 之後有列被改過 → 不 commit、用當下的庫重產
 array_splice($sql, 3, 0, [sprintf('-- 預期 %d 列（每句剛好 1 列；試跑少於這個數就不 commit、重產）', count($plan['ops']))]);
 file_put_contents($sqlPath, implode("\n", $sql) . "\n");
