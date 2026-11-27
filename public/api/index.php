@@ -9,6 +9,8 @@ declare(strict_types=1);
  * GET /api/books/{id}        單書完整資訊(含 contributors/editions/series/subjects/links)
  * GET /api/books/latest      新進書(limit,預設 6)
  * GET /api/books/popular     本月熱門(當月點擊數排序;limit,預設 6)
+ * GET /api/persons/{id}      作者頁:姓名、各角色書數、合作過的人(前 10)
+ * GET /api/publishers/{id}   出版社頁:名稱(正規名)、書數、常出分類(前 5)、出版年份範圍
  * POST /api/books/{id}/click 點擊回報(公開遙測:僅記 book_id/來源/關鍵字,無個資,
  *                            故為「寫入需 X-Api-Key」規範之例外)
  */
@@ -81,6 +83,12 @@ try {
     }
     if ($method === 'GET' && $path === '/publishers') {
         get_publishers();
+    }
+    if ($method === 'GET' && preg_match('#^/persons/(\d+)$#', $path, $m)) {
+        get_person((int) $m[1]);
+    }
+    if ($method === 'GET' && preg_match('#^/publishers/(\d+)$#', $path, $m)) {
+        get_publisher((int) $m[1]);
     }
     if ($method === 'POST' && preg_match('#^/books/(\d+)/click$#', $path, $m)) {
         post_book_click((int) $m[1]);
@@ -215,6 +223,117 @@ function get_publishers(): never
         $r['book_count']   = (int) $r['book_count'];
     }
     json_data($rows);
+}
+
+/**
+ * GET /api/persons/{id} —— 作者頁(2026-11-27;熊叔叔 11/24 TG「甲 先做頁面不放簡介」)
+ * 只算上架書(is_published=1)。書單本身走 /api/books?person={id}。
+ * 簡介目前沒有來源,先不給欄位,免得前端顯示空殼。
+ */
+function get_person(int $id): never
+{
+    $st = db()->prepare('SELECT person_id, name, name_en FROM persons WHERE person_id = :id');
+    $st->execute([':id' => $id]);
+    $p = $st->fetch();
+    if (!$p) {
+        json_error('找不到這位作者', 404);
+    }
+    $st = db()->prepare(
+        'SELECT bp.role, COUNT(DISTINCT bp.book_id) AS book_count
+           FROM book_persons bp
+           JOIN books b ON b.book_id = bp.book_id AND b.is_published = 1
+          WHERE bp.person_id = :id
+          GROUP BY bp.role
+          ORDER BY book_count DESC, bp.role');
+    $st->execute([':id' => $id]);
+    $roles = array_map(static fn(array $r): array =>
+        ['role' => (string) $r['role'], 'book_count' => (int) $r['book_count']], $st->fetchAll());
+
+    $st = db()->prepare(
+        'SELECT COUNT(DISTINCT bp.book_id)
+           FROM book_persons bp
+           JOIN books b ON b.book_id = bp.book_id AND b.is_published = 1
+          WHERE bp.person_id = :id');
+    $st->execute([':id' => $id]);
+    $total = (int) $st->fetchColumn();
+
+    // 合作過的人:同一本(上架)書上出現的其他人,依共同書數排序
+    $st = db()->prepare(
+        'SELECT p2.person_id, p2.name, p2.name_en, COUNT(DISTINCT me.book_id) AS shared
+           FROM book_persons me
+           JOIN books b ON b.book_id = me.book_id AND b.is_published = 1
+           JOIN book_persons other ON other.book_id = me.book_id AND other.person_id <> me.person_id
+           JOIN persons p2 ON p2.person_id = other.person_id
+          WHERE me.person_id = :id
+          GROUP BY p2.person_id, p2.name, p2.name_en
+          ORDER BY shared DESC, p2.name
+          LIMIT 10');
+    $st->execute([':id' => $id]);
+    $co = array_map(static fn(array $r): array => [
+        'person_id' => (int) $r['person_id'], 'name' => $r['name'], 'name_en' => $r['name_en'],
+        'shared_books' => (int) $r['shared']], $st->fetchAll());
+
+    json_data([
+        'person_id'     => (int) $p['person_id'],
+        'name'          => $p['name'],
+        'name_en'       => $p['name_en'],
+        'book_count'    => $total,
+        'roles'         => $roles,
+        'collaborators' => $co,
+    ]);
+}
+
+/**
+ * GET /api/publishers/{id} —— 出版社頁(2026-11-27)。publish_date 是 VARCHAR(YYYY／YYYY-MM／YYYY-MM-DD),年份取前 4 碼;資料裡有打錯的未來年份(開發庫見過 2110),超過明年的不算
+ * 任一變體 id 都回正規社(COALESCE(canonical_id, publisher_id)),書數合併整社所有變體,
+ * 跟 /api/books?publisher={id} 的展開方式一致。
+ */
+function get_publisher(int $id): never
+{
+    $st = db()->prepare(
+        'SELECT c.publisher_id, c.name_zh
+           FROM publishers p
+           JOIN publishers c ON c.publisher_id = COALESCE(p.canonical_id, p.publisher_id)
+          WHERE p.publisher_id = :id');
+    $st->execute([':id' => $id]);
+    $pub = $st->fetch();
+    if (!$pub) {
+        json_error('找不到這家出版社', 404);
+    }
+    $cid = (int) $pub['publisher_id'];
+    $st = db()->prepare('SELECT publisher_id FROM publishers WHERE COALESCE(canonical_id, publisher_id) = :cid');
+    $st->execute([':cid' => $cid]);
+    $ids = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)) ?: [$cid];
+    $in  = implode(',', $ids);   // 皆為整數,無注入風險
+
+    $row = db()->query(
+        "SELECT COUNT(DISTINCT e.book_id) AS n,
+                MIN(CASE WHEN e.publish_date REGEXP '^[12][0-9]{3}' AND LEFT(e.publish_date, 4) + 0 <= YEAR(CURDATE()) + 1 THEN LEFT(e.publish_date, 4) END) AS y0,
+                MAX(CASE WHEN e.publish_date REGEXP '^[12][0-9]{3}' AND LEFT(e.publish_date, 4) + 0 <= YEAR(CURDATE()) + 1 THEN LEFT(e.publish_date, 4) END) AS y1
+           FROM editions e
+           JOIN books b ON b.book_id = e.book_id AND b.is_published = 1
+          WHERE e.publisher_id IN ($in)")->fetch();
+
+    $cats = db()->query(
+        "SELECT c.category_id, c.name, COUNT(DISTINCT b.book_id) AS book_count
+           FROM editions e
+           JOIN books b ON b.book_id = e.book_id AND b.is_published = 1
+           JOIN categories c ON c.category_id = b.category_id
+          WHERE e.publisher_id IN ($in)
+          GROUP BY c.category_id, c.name
+          ORDER BY book_count DESC, c.name
+          LIMIT 5")->fetchAll();
+
+    json_data([
+        'publisher_id'   => $cid,
+        'name'           => $pub['name_zh'],
+        'book_count'     => (int) $row['n'],
+        'year_from'      => $row['y0'] !== null ? (int) $row['y0'] : null,
+        'year_to'        => $row['y1'] !== null ? (int) $row['y1'] : null,
+        'top_categories' => array_map(static fn(array $r): array => [
+            'category_id' => (int) $r['category_id'], 'name' => $r['name'],
+            'book_count' => (int) $r['book_count']], $cats),
+    ]);
 }
 
 function get_books(): never
