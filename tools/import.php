@@ -86,6 +86,7 @@ require_once __DIR__ . '/lib_dupmatch.php';   // 書名＋出版社比對規則(
 // 人名正規化規則(entity 解碼、角色詞、字尾註記、分隔符與括號定義)。
 // 與 tools/check_person_names.php、tools/fix_person_names.php **共用同一份**。
 require_once __DIR__ . '/lib_person.php';
+require_once __DIR__ . '/lib_pubdate.php';   // parse_date()：出版日期（民國年、假日期）
 
 /**
  * 來源 → 幣別對映(2026-09-01 決議 A,海外五站前置)。
@@ -188,17 +189,7 @@ function isbn_pair(?string $raw): array
     return strlen($n) === 13 ? [$n, null] : [isbn10_to_13($n), $n];
 }
 
-/** YYYYMMDD/YYYY-MM-DD/YYYY → [書用 YYYY-MM 或 YYYY, 版本用完整] */
-function parse_date(?string $s): array
-{
-    if (!$s) return [null, null];
-    $d = preg_replace('/[^0-9]/', '', $s);
-    if (strlen($d) >= 8) return [substr($d, 0, 4) . '-' . substr($d, 4, 2),
-                                 substr($d, 0, 4) . '-' . substr($d, 4, 2) . '-' . substr($d, 6, 2)];
-    if (strlen($d) >= 6) return [substr($d, 0, 4) . '-' . substr($d, 4, 2), substr($d, 0, 4) . '-' . substr($d, 4, 2)];
-    if (strlen($d) >= 4) return [substr($d, 0, 4), substr($d, 0, 4)];
-    return [null, null];
-}
+// parse_date() 搬到 tools/lib_pubdate.php（2026-11-27：民國年、假日期防呆；Asana 1220948673053089）
 
 /**
  * 封面網址要指到檔案:以琳、衛理沒有封面時 og:image 會給站台根網址或目錄
