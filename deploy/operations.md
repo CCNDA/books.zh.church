@@ -31,8 +31,8 @@
 ## 三、發布流程
 
 1. 在分支開發 → 測試站驗證 → 小布複測 → 熊哥確認
-2. 有 migration：熊哥先用 Navicat 在正式庫跑 `database/migrations/` 的 SQL（冪等、會寫 `schema_migrations`）
-3. 熊哥在主機 `cd /home/ubuntu/books && ./deploy/deploy.sh`（拉 main、逐項自我檢查，`/api/version` 要等於 `VERSION`）
+2. 有 migration：2026-11-02 起由小芯用 `sudo ccnda-db-run <檔案> ` 在正式庫跑（SQL 先放 /home/ubuntu/sql-run；先試跑、數字對才加 `--commit`；DDL 只能 --commit）。工具會整支包成一個交易、每次執行前整庫備份，所以檔裡**不要**自己寫 START TRANSACTION／COMMIT。不要再用 Navicat（自動提交，守門擋不住）。會改舊資料又靠新程式防止壞值回來的，要**先部署再跑**
+3. 小芯（或熊哥）在主機 `cd /home/ubuntu/books && ./deploy/deploy.sh`（拉 main、逐項自我檢查，`/api/version` 要等於 `VERSION`）
 4. `php tools/notify_discord.php --dry-run` 看公告內容 → 去掉 `--dry-run` 送出（內容在 `release-notes/vX.Y.Z.md`）
 5. 收尾：NAS pull、`history/` 補記、Asana 結票附證據、GitHub 里程碑關閉
 
