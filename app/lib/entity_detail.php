@@ -11,6 +11,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 const ENTITY_PAGE_BOOKS = 24;   // 頁面上直接列出的書數；看全部走首頁篩選 /?person=／/?publisher=
+// 書單新到舊；打錯的未來年份（超過明年）當作沒有日期排最後（小布 11/27 審查一）
+const ENTITY_SORT = "(b.publish_date IS NULL OR b.publish_date NOT REGEXP '^[12][0-9]{3}' OR LEFT(b.publish_date, 4) + 0 > YEAR(CURDATE()) + 1), b.publish_date DESC";
 
 function person_detail(int $id): ?array
 {
@@ -78,6 +80,7 @@ function publisher_group_ids(int $canonicalId): array
  * 跟 /api/books?publisher={id} 的展開方式一致。
  * publish_date 是 VARCHAR（YYYY／YYYY-MM／YYYY-MM-DD），年份取前 4 碼；
  * 資料裡有打錯的未來年份（開發庫見過 2108、2110），超過明年的不算。
+ * ★ 年份範圍算的是「本社各版本」的出版年；首頁年份篩選用的是每本書的出版年，兩者定義不同，數字可能對不上（小布 11/27 小意見 2）。
  */
 function publisher_detail(int $id): ?array
 {
@@ -136,17 +139,20 @@ function entity_books(string $type, int $id): array
                FROM books b
               WHERE b.is_published = 1
                 AND EXISTS (SELECT 1 FROM book_persons bp WHERE bp.book_id = b.book_id AND bp.person_id = :id)
-              ORDER BY b.publish_date IS NULL, b.publish_date DESC, b.book_id DESC
+              ORDER BY ' . ENTITY_SORT . ', b.book_id DESC
               LIMIT ' . ENTITY_PAGE_BOOKS);
         $st->execute([':id' => $id]);
         return $st->fetchAll();
     }
-    $in = implode(',', publisher_group_ids($id));
+    // 傳進來的若是變體 id，先換成正規社（小布 11/27 小意見 1）
+    $st = db()->prepare('SELECT COALESCE(canonical_id, publisher_id) FROM publishers WHERE publisher_id = :id');
+    $st->execute([':id' => $id]);
+    $in = implode(',', publisher_group_ids((int) ($st->fetchColumn() ?: $id)));
     return db()->query(
         "SELECT b.book_id, b.title, b.author, b.publish_date, b.cover_url
            FROM books b
           WHERE b.is_published = 1
             AND EXISTS (SELECT 1 FROM editions e WHERE e.book_id = b.book_id AND e.publisher_id IN ($in))
-          ORDER BY b.publish_date IS NULL, b.publish_date DESC, b.book_id DESC
+          ORDER BY " . ENTITY_SORT . ", b.book_id DESC
           LIMIT " . ENTITY_PAGE_BOOKS)->fetchAll();
 }
