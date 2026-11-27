@@ -9,6 +9,8 @@ declare(strict_types=1);
  * GET /api/books/{id}        單書完整資訊(含 contributors/editions/series/subjects/links)
  * GET /api/books/latest      新進書(limit,預設 6)
  * GET /api/books/popular     本月熱門(當月點擊數排序;limit,預設 6)
+ * GET /api/persons/{id}      作者頁:姓名、各角色書數、合作過的人(前 10)
+ * GET /api/publishers/{id}   出版社頁:名稱(正規名)、書數、常出分類(前 5)、出版年份範圍
  * POST /api/books/{id}/click 點擊回報(公開遙測:僅記 book_id/來源/關鍵字,無個資,
  *                            故為「寫入需 X-Api-Key」規範之例外)
  */
@@ -17,6 +19,7 @@ require dirname(__DIR__, 2) . '/app/lib/db.php';
 require dirname(__DIR__, 2) . '/app/lib/response.php';
 require dirname(__DIR__, 2) . '/app/lib/release.php';
 require dirname(__DIR__, 2) . '/app/lib/book_detail.php';
+require dirname(__DIR__, 2) . '/app/lib/entity_detail.php'; // 作者頁／出版社頁資料
 require dirname(__DIR__, 2) . '/app/lib/lang_group.php';   // LANG_GROUPS（語言篩選）
 
 /**
@@ -81,6 +84,12 @@ try {
     }
     if ($method === 'GET' && $path === '/publishers') {
         get_publishers();
+    }
+    if ($method === 'GET' && preg_match('#^/persons/(\d+)$#', $path, $m)) {
+        get_person((int) $m[1]);
+    }
+    if ($method === 'GET' && preg_match('#^/publishers/(\d+)$#', $path, $m)) {
+        get_publisher((int) $m[1]);
     }
     if ($method === 'POST' && preg_match('#^/books/(\d+)/click$#', $path, $m)) {
         post_book_click((int) $m[1]);
@@ -215,6 +224,20 @@ function get_publishers(): never
         $r['book_count']   = (int) $r['book_count'];
     }
     json_data($rows);
+}
+
+/** GET /api/persons/{id} —— 作者頁資料（app/lib/entity_detail.php，頁面 person.php 共用） */
+function get_person(int $id): never
+{
+    $d = person_detail($id);
+    $d ? json_data($d) : json_error('找不到這位作者', 404);
+}
+
+/** GET /api/publishers/{id} —— 出版社頁資料（變體 id 回正規社；app/lib/entity_detail.php，頁面 publisher.php 共用） */
+function get_publisher(int $id): never
+{
+    $d = publisher_detail($id);
+    $d ? json_data($d) : json_error('找不到這家出版社', 404);
 }
 
 function get_books(): never

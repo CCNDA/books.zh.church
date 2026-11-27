@@ -472,6 +472,7 @@ async function load(){
   }
   $("statusText").innerHTML = (fLabel ? fLabel + "・" : "") + `共 ${total} 本`
     + (state.q ? `・關鍵字「${esc(state.q)}」` : "") + extra
+    + (filter ? ` <a href="/${filter.type === "person" ? "person" : "publisher"}.php?id=${encodeURIComponent(filter.id)}" style="color:var(--gold)">看${filter.type === "person" ? "作者" : "出版社"}頁</a>` : "")  // 2026-11-27 作者頁／出版社頁（Asana 1220588345978224）
     + (filter ? ` <a href="/" style="color:var(--gold)">✕ 清除篩選</a>` : "");
   $("pageText").textContent = pages > 1 ? `第 ${page} / ${pages} 頁` : "";
   $("grid").innerHTML = items.map(card).join(""); fillBookLinks($("grid"));

@@ -138,6 +138,8 @@ th{background:#eef4f8;font-weight:600}
       <tr><td><span class="ep">GET /api/categories</span></td><td>全部分類:<code>category_id</code>、<code>name</code>、<code>book_count</code></td></tr>
       <tr><td><span class="ep">GET /api/persons?q=</span></td><td>找作者/貢獻者:<code>person_id</code>、<code>name</code>、<code>book_count</code>;不帶 <code>q</code> 時依著作數列出。<code>limit</code> 1–50,預設 15</td></tr>
       <tr><td><span class="ep">GET /api/publishers?q=</span></td><td>找出版社:<code>publisher_id</code>、<code>name_zh</code>、<code>book_count</code>;用法同上</td></tr>
+      <tr><td><span class="ep">GET /api/persons/{id}</span></td><td>單一作者:<code>name</code>、<code>name_en</code>、<code>book_count</code>(上架書數)、<code>roles</code>(各角色書數)、<code>collaborators</code>(合作過的人前 10,含 <code>shared_books</code>)。網頁版:<code>/person.php?id={id}</code></td></tr>
+      <tr><td><span class="ep">GET /api/publishers/{id}</span></td><td>單一出版社:<code>name</code>、<code>book_count</code>、<code>year_from</code>/<code>year_to</code>(各版本出版年範圍)、<code>top_categories</code>(常出分類前 5)。同一家的不同寫法用哪個編號都會回正規的那一家。網頁版:<code>/publisher.php?id={id}</code></td></tr>
       <tr><td><span class="ep">GET /api/sources</span></td><td>收錄的網路書房與出版社:<code>code</code>、<code>name</code>、<code>region</code>、<code>url</code>、<code>book_count</code>,以及全站上架總數 <code>total</code></td></tr>
       <tr><td><span class="ep">GET /api/version</span></td><td>目前網站版本</td></tr>
     </tbody>
